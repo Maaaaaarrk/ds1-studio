@@ -631,3 +631,20 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .recent-maps { margin-top: 18px; text-align: left; max-width: 420px; width: 100%; }
 .recent-maps .mo-row { width: 100%; }
 .mix-clear { margin-left: 8px; text-transform: none; }
+
+/* Cell editing (laid out like the DT1 editor's tile settings) */
+.cell-cards { display: flex; flex-direction: column; gap: 6px; }
+.cell-card { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.cell-card.focus { border-color: var(--accent); }
+.cell-card.empty { flex-direction: row; align-items: center; gap: 8px; padding: 4px 8px; }
+.cell-card.empty > .btn { margin-left: auto; }
+.cell-card-head { display: flex; gap: 8px; align-items: flex-start; }
+.cell-thumb { flex: 0 0 64px; height: 56px; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 4px; --thumb-h: 52px; }
+.cell-thumb > * { width: 100%; }
+.cell-card-title { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; font-size: 12px; }
+.cell-card-title .tile-src { align-self: flex-start; }
+.cell-card-head .icon-btn { margin-left: auto; }
+.cell-field { grid-template-columns: 118px 1fr; }
+.cell-field-input { display: flex; align-items: center; }
+.cell-field-input > select { width: 100%; }
+.cell-card.empty .btn { padding: 1px 10px; min-height: 0; }

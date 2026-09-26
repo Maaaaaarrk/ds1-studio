@@ -1,8 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { DEFAULT_PROP1, isEmptyCell, withFields, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
+import { decodeCell, isEmptyCell, withFields, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
-import { ColHelp } from './HelpTip';
+import { ColHelp, HelpTip } from './HelpTip';
+import { Thumb } from './TilePalette';
 import type { Bindings } from './keybindings';
 import { GameData } from '../game/GameData';
 import { rectSize, type CellRect } from '../game/clipboard';
@@ -83,11 +84,11 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
 }
 
 function hex(n: number): string {
-  return n.toString(16).padStart(2, '0');
+  return n.toString(16).toUpperCase().padStart(2, '0');
 }
 
 /** Number input that commits on Enter/blur (one undo step per commit, not per keystroke). */
-function NumField({ value, min, max, onCommit, hexMode = false, width = 44 }: { value: number; min: number; max: number; onCommit: (v: number) => void; hexMode?: boolean; width?: number }) {
+function NumField({ value, min, max, onCommit, hexMode = false, width = 44, disabled = false }: { value: number; min: number; max: number; onCommit: (v: number) => void; hexMode?: boolean; width?: number | '100%'; disabled?: boolean }) {
   const shown = hexMode ? hex(value) : String(value);
   const [text, setText] = useState(shown);
   const [editing, setEditing] = useState(false);
@@ -101,6 +102,7 @@ function NumField({ value, min, max, onCommit, hexMode = false, width = 44 }: { 
     <input
       className="num-field mono"
       style={{ width }}
+      disabled={disabled}
       value={editing ? text : shown}
       onFocus={(e) => {
         setText(shown);
@@ -138,6 +140,69 @@ interface CellPanelProps {
   onFocusTile: (tile: Dt1Tile, layer: LayerRef) => void;
   /** The one layer chosen out of a stack with Shift+wheel (copy/cut/delete only touch it). */
   onlyLayer?: LayerRef | null;
+  /** The paint brush, offered for filling an empty layer. */
+  brush?: Brush | null;
+}
+
+/** Plain-language explanations of every field of a DS1 cell (shown on the "?" next to each). */
+export const CELL_HELP = {
+  kind: 'What kind of wall-layer tile this cell asks for: a left/right wall, corner, door, pillar/tree, roof, lower wall or a special marker. Together with main and sub index it picks the tile from the level’s DT1s.',
+  main: 'First part of the tile’s number (0-63). The cell asks for “kind + main + sub” and the game draws the DT1 tile with those numbers.',
+  sub: 'Second part of the tile’s number (0-255).',
+  prop1:
+    'The cell’s first property byte. 00 means the layer is empty here; any other value means a tile is present. The game’s own presets use C2 for floors, 81 for walls and 80 for shadows, and DS1 Studio uses the same for new tiles.',
+  hidden: 'Hidden tiles stay in the map but the game doesn’t draw them (bit 0x80 of the fourth byte).',
+  raw: 'All four property bytes exactly as stored in the DS1 (prop1 prop2 prop3 prop4, in hex). Main index, sub index and “hidden” are packed into them; the remaining bits have no known use and are kept as they are. Edit here to set every bit by hand.',
+  tag: 'The cell’s value in the tag layer (only maps with a tag layer have one): substitution groups use it to mark areas the game may swap for variations.',
+} as const;
+
+const byteHex = (c: TileCell) => [c.prop1, c.prop2, c.prop3, c.prop4].map(hex).join(' ');
+
+/** A field with a label and an explanation, laid out like the DT1 editor's tile settings. */
+function CellField({ label, help, children }: { label: string; help: string; children: ReactNode }) {
+  return (
+    <label className="ts-field cell-field">
+      <span>
+        {label} <HelpTip text={help} />
+      </span>
+      <span className="cell-field-input">{children}</span>
+    </label>
+  );
+}
+
+/** The four property bytes as editable hex ("C2 00 00 00"). */
+function RawBytes({ cell, onCommit }: { cell: TileCell; onCommit: (c: TileCell) => void }) {
+  const shown = byteHex(cell);
+  const [text, setText] = useState<string | null>(null);
+  const commit = () => {
+    if (text === null) return;
+    const bytes = text.trim().split(/[\s,]+/).map((b) => parseInt(b, 16));
+    setText(null);
+    if (bytes.length !== 4 || bytes.some((b) => !Number.isInteger(b) || b < 0 || b > 255)) return;
+    const next = decodeCell((bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)) >>> 0);
+    if (byteHex(next) !== shown) onCommit(next);
+  };
+  return (
+    <input
+      className="num-field mono"
+      style={{ width: '100%' }}
+      value={text ?? shown}
+      onFocus={(e) => {
+        setText(shown);
+        e.target.select();
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') {
+          setText(null);
+          (e.target as HTMLInputElement).blur();
+        }
+        e.stopPropagation();
+      }}
+    />
+  );
 }
 
 /** The tile actually drawn for a layer of a cell (the chosen variant), if any. */
@@ -147,7 +212,7 @@ function drawnTile(scene: Scene, layer: LayerRef, x: number, y: number): Dt1Tile
 }
 
 /** Shows every layer of one cell; editable when that cell is selected. */
-export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer }: CellPanelProps) {
+export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer, brush }: CellPanelProps) {
   const { ds1, lib } = map;
   if (!cell) {
     return (
@@ -192,46 +257,73 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
         </tr>
       );
     }
+    const focused = !!onlyLayer && layerKey(onlyLayer) === layerKey(layer);
+    if (empty) {
+      // Empty layers stay one line; "Add" puts the brush here (or tile 0/0 to start from).
+      const fits = brush && (layer.kind === 'floor' ? brush.orientation === Orientation.Floor : layer.kind === 'shadow' ? brush.orientation === Orientation.Shadow : brush.orientation !== Orientation.Floor && brush.orientation !== Orientation.Shadow);
+      const add = () => set(MapDocument.painted(layer, c, fits ? brush! : { orientation: layer.kind === 'wall' ? 1 : orientation, main: 0, sub: 0 }));
+      return (
+        <div key={layerKey(layer)} className={`cell-card empty${focused ? ' focus' : ''}`}>
+          <span className="muted">{label}</span>
+          <span className="muted small">empty</span>
+          <button className="btn small" onClick={add} title={fits ? `Put the brush tile (${brush!.main}/${brush!.sub}) here` : 'Put a tile here (0/0), then set its numbers'}>
+            {fits ? `Add ${brush!.main}/${brush!.sub}` : 'Add'}
+          </button>
+        </div>
+      );
+    }
+    const special = orientation === Orientation.SpecialTile1 || orientation === Orientation.SpecialTile2;
     return (
-      <tr key={layerKey(layer)} className={`${empty ? 'row-empty' : ''}${onlyLayer && layerKey(onlyLayer) === layerKey(layer) ? ' row-focus' : ''}`}>
-        <td className="muted">{label}</td>
-        <td>
-          <div className="cell-edit">
-            <NumField value={c.mainIndex} min={0} max={63} onCommit={(v) => set(withFields(c, { main: v, prop1: c.prop1 || DEFAULT_PROP1[layer.kind] }))} />
-            <span className="muted">/</span>
-            <NumField value={c.subIndex} min={0} max={255} onCommit={(v) => set(withFields(c, { sub: v, prop1: c.prop1 || DEFAULT_PROP1[layer.kind] }))} />
-            <span className="muted small">flags</span>
-            <NumField value={c.prop1} min={0} max={255} hexMode width={34} onCommit={(v) => set(withFields(c, { prop1: v }))} />
-            <label className="mini-check" title="Hidden (prop4 bit 0x80): the game does not draw this tile">
-              <input type="checkbox" checked={c.hidden} disabled={empty} onChange={(e) => set(withFields(c, { hidden: e.target.checked }))} />
-              hid
-            </label>
-            {!empty && (
-              <button className="icon-btn" title="Clear this layer" onClick={() => set(MapDocument.painted(layer, c, null))}>
-                ×
-              </button>
-            )}
+      <div key={layerKey(layer)} className={`cell-card${focused ? ' focus' : ''}`}>
+        <div className="cell-card-head">
+          <div className="cell-thumb">{drawn ? <Thumb tile={drawn} palette={map.palette} /> : <span className="muted small">{special ? 'marker' : 'no image'}</span>}</div>
+          <div className="cell-card-title">
+            <b>{label}</b>
+            <span className="muted small">
+              {c.mainIndex}/{c.subIndex} · {ORIENTATION_NAMES[orientation] ?? `kind ${orientation}`}
+            </span>
+            <span>
+              {c.hidden && <span className="badge">hidden</span>}
+              {!found(orientation, c) && <span className="badge error">missing</span>}
+            </span>
+            {source}
           </div>
+          <button className="icon-btn" title="Clear this layer here" onClick={() => set(MapDocument.painted(layer, c, null))}>
+            ×
+          </button>
+        </div>
+        <div className="ts-fields">
           {layer.kind === 'wall' && (
-            <select
-              className="orient-select"
-              value={orientation}
-              onChange={(e) => set({ ...(c as WallCell), orientation: Number(e.target.value) })}
-            >
-              <option value={0}>0 · (none)</option>
-              {Object.entries(ORIENTATION_NAMES)
-                .filter(([o]) => Number(o) !== Orientation.Floor && Number(o) !== Orientation.Shadow)
-                .map(([o, name]) => (
-                  <option key={o} value={o}>
-                    {o} · {name}
-                  </option>
-                ))}
-            </select>
+            <CellField label="Kind (orientation)" help={CELL_HELP.kind}>
+              <select value={orientation} onChange={(e) => set({ ...(c as WallCell), orientation: Number(e.target.value) })}>
+                <option value={0}>0 · (none)</option>
+                {Object.entries(ORIENTATION_NAMES)
+                  .filter(([o]) => Number(o) !== Orientation.Floor && Number(o) !== Orientation.Shadow)
+                  .map(([o, name]) => (
+                    <option key={o} value={o}>
+                      {o} · {name}
+                    </option>
+                  ))}
+              </select>
+            </CellField>
           )}
-          {!empty && !found(orientation, c) && <span className="badge error">missing</span>}
-          {source}
-        </td>
-      </tr>
+          <CellField label="Main index" help={CELL_HELP.main}>
+            <NumField width="100%" value={c.mainIndex} min={0} max={63} onCommit={(v) => set(withFields(c, { main: v }))} />
+          </CellField>
+          <CellField label="Sub index" help={CELL_HELP.sub}>
+            <NumField width="100%" value={c.subIndex} min={0} max={255} onCommit={(v) => set(withFields(c, { sub: v }))} />
+          </CellField>
+          <CellField label="Present (prop1)" help={CELL_HELP.prop1}>
+            <NumField width="100%" value={c.prop1} min={0} max={255} hexMode onCommit={(v) => set(withFields(c, { prop1: v }))} />
+          </CellField>
+          <CellField label="Hidden in game" help={CELL_HELP.hidden}>
+            <input type="checkbox" checked={c.hidden} onChange={(e) => set(withFields(c, { hidden: e.target.checked }))} />
+          </CellField>
+          <CellField label="Raw bytes" help={CELL_HELP.raw}>
+            <RawBytes cell={c} onCommit={(next) => set(layer.kind === 'wall' ? { ...(c as WallCell), ...next } : next)} />
+          </CellField>
+        </div>
+      </div>
     );
   });
 
@@ -246,28 +338,31 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
           selects all layers again.
         </p>
       )}
-      {visible.length ? (
+      {editable ? (
+        <div className="cell-cards">{visible}</div>
+      ) : visible.length ? (
         <table className="kv">
           <tbody>{visible}</tbody>
         </table>
       ) : (
         <p className="muted small">Empty cell.</p>
       )}
-      {editable && <p className="muted small">main 0-63 · sub 0-255 · flags = prop1 (hex; 00 = empty). Enter to apply.</p>}
+      {editable && <p className="muted tiny-note">Hover the ? for what each field does. Enter applies a number; every change is one undo step.</p>}
       {tag !== undefined && editable ? (
-        <div className="cell-edit">
-          <span className="muted small">Tag</span>
-          <NumField
-            value={tag}
-            min={0}
-            max={0xffffffff}
-            width={80}
-            onCommit={(v) =>
-              onMutate((d) => {
-                d.tags[0][i] = v;
-              })
-            }
-          />
+        <div className="ts-fields">
+          <CellField label="Tag value" help={CELL_HELP.tag}>
+            <NumField
+              width="100%"
+              value={tag}
+              min={0}
+              max={0xffffffff}
+              onCommit={(v) =>
+                onMutate((d) => {
+                  d.tags[0][i] = v;
+                })
+              }
+            />
+          </CellField>
         </div>
       ) : (
         tag !== undefined &&

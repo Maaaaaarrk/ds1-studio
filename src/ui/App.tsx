@@ -2018,6 +2018,7 @@ export function App() {
               scene={scene}
               onFocusTile={focusTile}
               onlyLayer={onlyLayer}
+              brush={brush}
             />
             <HistoryPanel
               doc={doc}
