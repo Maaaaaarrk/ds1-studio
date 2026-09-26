@@ -569,3 +569,23 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .cr-advanced summary { cursor: pointer; }
 .cr-advanced input { width: 100%; margin-top: 6px; }
 .ok-text { color: #8fd18f; }
+.pp-swatch.bad { outline: 2px solid #ff4d6d; outline-offset: -2px; cursor: help; }
+
+/* DT1 tile settings (.ini) */
+.dte-tabs { margin-bottom: 4px; }
+.dte-ini-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.ts { display: flex; flex-direction: column; gap: 8px; }
+.ts-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ts-fields { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.ts-field { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 6px; font-size: 12px; }
+.ts-field input.text-input { width: 100%; }
+.ts-field input.mixed { opacity: 0.6; }
+.tiny-note { font-size: 11px; margin: 0; }
+.st { display: flex; flex-direction: column; gap: 6px; }
+.st-legend { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.st-bits { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.st-bit { display: flex; align-items: center; gap: 5px; font-size: 11px; background: var(--panel-2, #1b1f27); border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; color: inherit; cursor: pointer; text-align: left; }
+.st-bit.active { border-color: var(--accent, #d4a84f); background: rgba(212, 168, 79, 0.14); }
+.st-dot { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.st-canvas { align-self: center; max-width: 100%; border: 1px solid var(--border); border-radius: 4px; cursor: crosshair; image-rendering: pixelated; }
+.st-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

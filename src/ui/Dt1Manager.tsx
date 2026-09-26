@@ -4,6 +4,7 @@ import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
 import { Thumb } from './TilePalette';
+import { loadAct0Palette } from '../game/act0Palette';
 import type { Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 
@@ -35,7 +36,7 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
   // DT1s are previewed in Act 1's palette (the game's palette 0), like the DT1 editor.
   const [previewPal, setPreviewPal] = useState<{ act: number | null; palette: Palette } | null>(null);
   useEffect(() => {
-    void gd.palette(0).then((palette) => setPreviewPal({ act: 0, palette }));
+    void loadAct0Palette(gd.fs).then((a) => setPreviewPal({ act: -1, palette: a.palette }));
   }, [gd]);
   useEffect(() => {
     setPreviewDt1(null);
@@ -114,7 +115,7 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
         </div>
         <div className="dt1m-preview">
           {preview ? (
-            <Dt1Viewer path={preview} dt1={previewDt1} palette={previewPal?.palette ?? map.palette} paletteNote={previewPal ? `Act ${previewPal.act! + 1} palette` : null} inMap={inMap.has(normalizePath(preview))} onAdd={() => setPaths([...paths, preview])} />
+            <Dt1Viewer path={preview} dt1={previewDt1} palette={previewPal?.palette ?? map.palette} paletteNote={previewPal ? 'Act 0 palette (magenta = changes between acts)' : null} inMap={inMap.has(normalizePath(preview))} onAdd={() => setPaths([...paths, preview])} />
           ) : (
             <p className="muted small">Click a library to see all of its tiles. Double-click (or +) to add it.</p>
           )}
@@ -167,7 +168,7 @@ function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: st
         <span className="mono">{short(path)}</span>
         <span className="muted small">
           {dt1 ? `${dt1.tiles.length} tiles` : 'loading…'}
-          {paletteNote ? ` · shown in its ${paletteNote}` : ''}
+          {paletteNote ? ` · shown in the ${paletteNote}` : ''}
         </span>
         <div className="chips">
           {KINDS.map((k) => {

@@ -11,6 +11,8 @@ interface Props {
   /** The image to start from (a previous edit, or the decoded tile). */
   image: TileImage;
   palette: Palette;
+  /** Colours that may be used (Act 0: the ones that look the same in every act); all when absent. */
+  usable?: boolean[] | null;
   onDone: (image: TileImage | null /* null = cancelled */) => void;
 }
 
@@ -46,16 +48,17 @@ function imageUrl(image: TileImage, palette: Palette): string {
  * Pixel editor for one DT1 tile: pencil / eraser / fill / colour picker with the act palette, zoom, undo/redo. Only
  * pixels inside the tile's blocks can be painted (hatched areas are outside the tile and can't hold pixels).
  */
-export function PixelPainter({ tile, tileIndex, image, palette, onDone }: Props) {
+export function PixelPainter({ tile, tileIndex, image, palette, usable, onDone }: Props) {
+  const ok = (i: number) => i > 0 && (!usable || usable[i]);
   const [pixels, setPixels] = useState<Uint8Array>(() => image.pixels.slice());
   const [tool, setTool] = useState<PaintTool>('pencil');
   const [color, setColor] = useState(() => {
     // Start with the most used colour of the tile.
     const n = new Uint32Array(256);
     for (const p of image.pixels) if (p) n[p]++;
-    let best = 1;
-    for (let i = 1; i < 256; i++) if (n[i] > n[best]) best = i;
-    return best;
+    let best = -1;
+    for (let i = 1; i < 256; i++) if ((!usable || usable[i]) && (best < 0 || n[i] > n[best])) best = i;
+    return best < 0 ? 1 : best;
   });
   const [size, setSize] = useState(1);
   const [zoom, setZoom] = useState(() => Math.max(2, Math.min(8, Math.floor(520 / Math.max(image.width, image.height)))));
@@ -160,7 +163,7 @@ export function PixelPainter({ tile, tileIndex, image, palette, onDone }: Props)
     if (x < 0 || y < 0 || x >= w || y >= h) return;
     if (tool === 'picker' || e.altKey) {
       const p = pixels[y * w + x];
-      if (p) setColor(p);
+      if (ok(p)) setColor(p);
       return;
     }
     if (tool === 'fill') return fill(x, y, color);
@@ -273,13 +276,17 @@ export function PixelPainter({ tile, tileIndex, image, palette, onDone }: Props)
           </div>
           <div className="field-label">In this tile</div>
           <div className="pp-palette">
-            {usedColors.map((i) => (
-              <button key={i} className={`pp-swatch${i === color ? ' active' : ''}`} style={{ background: swatch(i) }} title={`#${i}`} onClick={() => setColor(i)} />
-            ))}
+            {usedColors.map((i) =>
+              ok(i) ? (
+                <button key={i} className={`pp-swatch${i === color ? ' active' : ''}`} style={{ background: swatch(i) }} title={`#${i}`} onClick={() => setColor(i)} />
+              ) : (
+                <span key={i} className="pp-swatch bad" style={{ background: swatch(i) }} title={`#${i}: this colour changes between acts (not in Act 0) — use “Make act-safe” in the DT1 editor to convert it`} />
+              ),
+            )}
           </div>
-          <div className="field-label">Act palette</div>
+          <div className="field-label">{usable ? `Act 0 colours (${usable.filter(Boolean).length}, same in every act)` : 'Palette'}</div>
           <div className="pp-palette all">
-            {Array.from({ length: 255 }, (_, k) => k + 1).map((i) => (
+            {Array.from({ length: 255 }, (_, k) => k + 1).filter(ok).map((i) => (
               <button key={i} className={`pp-swatch${i === color ? ' active' : ''}`} style={{ background: swatch(i) }} title={`#${i}`} onClick={() => setColor(i)} />
             ))}
           </div>

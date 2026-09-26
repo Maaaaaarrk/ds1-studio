@@ -6,6 +6,11 @@ import { ImageThumb, PixelPainter } from './PixelPainter';
 import { FloatingWindow } from './FloatingWindow';
 import { TileZoom } from './TileZoom';
 import { Dt1Tree } from './Dt1Tree';
+import { dt1ToIni, parseDt1Ini, readTileSettings, writeTileSettings, type TileSettings } from '../formats/dt1Header';
+import { TileSettingsPanel } from './TileSettings';
+import { exportBytes, importBytes } from '../vfs/save';
+import { act0Display, loadAct0Palette, type Act0Palette } from '../game/act0Palette';
+import { HelpTip } from './HelpTip';
 import { normalizePath } from '../vfs/vfs';
 import type { Palette } from '../formats/palette';
 import { hueRemap, recolorDt1, swapRemap } from '../formats/dt1Edit';
@@ -49,9 +54,12 @@ interface Adjust {
   swapTo: string;
   swapTolerance: number;
   swapOn: boolean;
+  /** Snap every colour to the Act 0 palette (makes tiles look the same in every act). */
+  toAct0: boolean;
 }
 
-const NO_ADJUST: Adjust = { hue: 0, saturation: 1, brightness: 1, tint: '#ff8040', tintAmount: 0, swapFrom: '#808080', swapTo: '#4060c0', swapTolerance: 40, swapOn: false };
+const NO_ADJUST: Adjust = { hue: 0, saturation: 1, brightness: 1, tint: '#ff8040', tintAmount: 0, swapFrom: '#808080', swapTo: '#4060c0', swapTolerance: 40, swapOn: false, toAct0: false };
+const isNeutral = (a: Adjust) => a.hue === 0 && a.saturation === 1 && a.brightness === 1 && a.tintAmount === 0 && !a.swapOn && !a.toAct0;
 
 const rgb = (hex: string): [number, number, number] => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
 
@@ -73,21 +81,39 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   /** Every DT1 in the game and mods, for the library tree. */
   const allDt1s = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
   const inMapLib = libs.some((l) => normalizePath(l) === normalizePath(path));
-  // DT1s are shown, recoloured and painted in one palette: Act 1's (the game's palette 0) unless another is chosen.
+  // DT1s are shown, recoloured and painted in one palette. Default: Act 0 — only the colours that look the same in
+  // every act (Gimli's act0), so edited tiles work in any act. -1 = Act 0, 0..4 = the game's Act 1..5 palettes.
   const [palAct, setPalAct] = useState(() => {
     try {
-      const v = Number(localStorage.getItem('ds1studio.dt1Palette'));
-      return v >= 0 && v <= 4 ? v : 0;
+      const raw = localStorage.getItem('ds1studio.dt1Palette2');
+      const v = raw === null ? -1 : Number(raw);
+      return v >= -1 && v <= 4 ? v : -1;
     } catch {
-      return 0;
+      return -1;
     }
   });
-  const [pal, setPal] = useState<{ palette: Palette; act: number }>({ palette: map.palette, act: -1 });
+  const [pal, setPal] = useState<{ palette: Palette; act: number; usable: boolean[] | null; source?: string; act0?: Act0Palette }>({ palette: map.palette, act: -2, usable: null });
+  /** Show colours that change between acts as magenta (else in the tile's own act colours). */
+  const [highlightUnsafe, setHighlightUnsafe] = useState(false);
+  // The act the DT1 was made for (from its folder): the real colours behind Act 0's magenta slots, for conversions.
+  const homeAct = useMemo(() => {
+    const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(path);
+    return m ? (m[1] ? Number(m[1]) - 1 : 4) : 0;
+  }, [path]);
+  const [homePalette, setHomePalette] = useState<Palette | null>(null);
   useEffect(() => {
     let live = true;
-    void gd.palette(palAct).then((palette) => live && setPal({ palette, act: palAct }));
+    void gd.palette(homeAct).then((p) => live && setHomePalette(p));
+    return () => {
+      live = false;
+    };
+  }, [homeAct, gd]);
+  useEffect(() => {
+    let live = true;
+    if (palAct === -1) void loadAct0Palette(gd.fs).then((a) => live && setPal({ palette: a.palette, act: -1, usable: a.usable, source: a.source, act0: a }));
+    else void gd.palette(palAct).then((palette) => live && setPal({ palette, act: palAct, usable: null }));
     try {
-      localStorage.setItem('ds1studio.dt1Palette', String(palAct));
+      localStorage.setItem('ds1studio.dt1Palette2', String(palAct));
     } catch {
       // per-viewer convenience only
     }
@@ -95,7 +121,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       live = false;
     };
   }, [palAct, gd]);
-  const palette = pal.palette;
+  const palette = useMemo(() => (pal.act0 ? act0Display(pal.act0, homePalette, highlightUnsafe) : pal.palette), [pal, homePalette, highlightUnsafe]);
   const [dt1, setDt1] = useState<Dt1 | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [adjust, setAdjust] = useState<Adjust>(NO_ADJUST);
@@ -109,6 +135,11 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   const [painting, setPainting] = useState<number | null>(null);
   /** The tile shown in the zoom window (the last one clicked). */
   const [zoomed, setZoomed] = useState<number | null>(null);
+  /** The DT1 file as stored, and pending tile-settings (.ini field) changes per tile. */
+  const [rawBytes, setRawBytes] = useState<Uint8Array | null>(null);
+  const [settingsEdits, setSettingsEdits] = useState<Map<number, Partial<TileSettings>>>(new Map());
+  const [sideTab, setSideTab] = useState<'colours' | 'settings'>('colours');
+  const [iniMessage, setIniMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDt1(null);
@@ -116,25 +147,35 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     setEdits(new Map());
     setPainting(null);
     setZoomed(null);
+    setSettingsEdits(new Map());
+    setRawBytes(null);
+    setIniMessage(null);
     if (!path) return;
     void gd.dt1(path).then(setDt1);
+    void gd.fs.read(path).then((b) => setRawBytes(b ?? null));
     setName(path.split('/').pop()!.replace(/\.dt1$/i, '') + '_edit');
   }, [path, gd]);
 
   const remap = useMemo(() => {
-    let r = hueRemap(palette, {
+    // No adjustment = no change (an Act 0 tile's act-specific colours are only converted when asked).
+    if (isNeutral(adjust)) return Uint8Array.from({ length: 256 }, (_, i) => i);
+    const allowed = pal.usable ?? undefined;
+    // With Act 0, colours are judged by their real look in the DT1's own act (Act 0 marks those slots magenta).
+    const source = allowed && homePalette ? homePalette : palette;
+    let r = hueRemap(source, {
       hue: adjust.hue,
       saturation: adjust.saturation,
       brightness: adjust.brightness,
       tint: rgb(adjust.tint),
       tintAmount: adjust.tintAmount,
+      allowed,
     });
     if (adjust.swapOn) {
-      const s = swapRemap(palette, rgb(adjust.swapFrom), rgb(adjust.swapTo), adjust.swapTolerance);
+      const s = swapRemap(source, rgb(adjust.swapFrom), rgb(adjust.swapTo), adjust.swapTolerance, allowed);
       r = r.map((v) => s[v]);
     }
     return r;
-  }, [palette, adjust]);
+  }, [palette, adjust, pal.usable, homePalette]);
   const previewPal = useMemo(() => remappedPalette(palette, remap), [palette, remap]);
   const changes = remap.some((v, i) => v !== i);
 
@@ -188,6 +229,54 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     });
   };
 
+  // Tile settings (.ini fields): the file's values with pending changes on top.
+  const settingsOf = (i: number): TileSettings => ({ ...readTileSettings(rawBytes!, i), ...(settingsEdits.get(i) ?? {}) });
+  const settingsTargets = [...(picked.size ? picked : zoomed !== null ? [zoomed] : [])].filter((i) => dt1?.tiles[i]).sort((a, b) => a - b);
+  const changeSettings = (patch: Partial<TileSettings>, flagsFor?: (current: Uint8Array) => Uint8Array) =>
+    setSettingsEdits((prev) => {
+      const next = new Map(prev);
+      for (const i of settingsTargets) {
+        const cur = { ...readTileSettings(rawBytes!, i), ...(prev.get(i) ?? {}) };
+        const merged: Partial<TileSettings> = { ...(prev.get(i) ?? {}), ...patch };
+        if (flagsFor) merged.flags = flagsFor(cur.flags);
+        // Drop fields that are back to the file's value.
+        const file = readTileSettings(rawBytes!, i);
+        for (const k of Object.keys(merged) as (keyof TileSettings)[]) if (JSON.stringify(merged[k]) === JSON.stringify(file[k])) delete merged[k];
+        if (Object.keys(merged).length) next.set(i, merged);
+        else next.delete(i);
+      }
+      return next;
+    });
+  const exportIni = async () => {
+    if (!rawBytes || !dt1) return;
+    const text = dt1ToIni(writeTileSettings(rawBytes, settingsEdits), dt1.tiles.map((t) => ({ width: t.width, height: t.height })));
+    const where = await exportBytes(`${path.split('/').pop()!.replace(/\.dt1$/i, '')}.ini`, new TextEncoder().encode(text));
+    if (where) setIniMessage(`Exported ${where}`);
+  };
+  const importIni = async () => {
+    if (!rawBytes || !dt1) return;
+    const bytes = await importBytes('ini');
+    if (!bytes) return;
+    const { blocks, count } = parseDt1Ini(new TextDecoder('latin1').decode(bytes));
+    const next = new Map(settingsEdits);
+    let applied = 0;
+    for (const b of blocks) {
+      if (b.block < 0 || b.block >= dt1.tiles.length) continue;
+      const file = readTileSettings(rawBytes, b.block);
+      const merged: Partial<TileSettings> = { ...(next.get(b.block) ?? {}), ...b.settings };
+      for (const k of Object.keys(merged) as (keyof TileSettings)[]) if (JSON.stringify(merged[k]) === JSON.stringify(file[k])) delete merged[k];
+      if (Object.keys(merged).length) {
+        next.set(b.block, merged);
+        applied++;
+      } else next.delete(b.block);
+    }
+    setSettingsEdits(next);
+    setSideTab('settings');
+    setIniMessage(
+      `Read ${blocks.length} blocks${count !== null && count !== dt1.tiles.length ? ` (the .ini has ${count}, this DT1 ${dt1.tiles.length}: matched by block number)` : ''}; ${applied} tile${applied === 1 ? '' : 's'} differ and are now pending. Pixels come from the DT1, not the .pcx.`,
+    );
+  };
+
   const dir = path.replace(/[^/]+$/, '');
   const newPath = `${dir}${name.replace(/\.dt1$/i, '')}.dt1`;
   const overwrite = normalizePath(newPath) === normalizePath(path);
@@ -201,7 +290,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       const bytes = await gd.fs.read(path);
       if (!bytes) throw new Error(`${path} not found`);
       const painted = edits.size ? setManyTilePixels(bytes, [...edits].map(([tileIndex, image]) => ({ tileIndex, image }))) : bytes;
-      const out = changes ? recolorDt1(painted, remap, picked.size ? [...picked] : undefined) : painted;
+      const recoloured = changes ? recolorDt1(painted, remap, picked.size ? [...picked] : undefined) : painted;
+      const out = settingsEdits.size ? writeTileSettings(recoloured, settingsEdits) : recoloured;
       await onSave({ path: newPath, bytes: out, switchMap: switchMap && !overwrite && inMapLib, original: path });
     } catch (e) {
       setError((e as Error).message);
@@ -220,13 +310,21 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           <label className="small" title="DT1s store palette indices: this palette is used to show, recolour and paint them">
             Palette{' '}
             <select value={palAct} onChange={(e) => setPalAct(Number(e.target.value))}>
+              <option value={-1}>Act 0 — every act (default)</option>
               {[0, 1, 2, 3, 4].map((a) => (
                 <option key={a} value={a}>
-                  Act {a + 1}
-                  {a === 0 ? ' (default)' : ''}
+                  Act {a + 1} only
                 </option>
               ))}
             </select>
+            {pal.usable && (
+              <label className="small" title="Pixels whose colour changes between acts turn magenta">
+                <input type="checkbox" checked={highlightUnsafe} onChange={(e) => setHighlightUnsafe(e.target.checked)} /> highlight colours that change between acts
+              </label>
+            )}
+            <HelpTip
+              text={`Act 0 holds only the ${pal.usable ? pal.usable.filter(Boolean).length : 225} colours that look the same in every act (Gimli's act0 palette${pal.source === 'derived' ? ', worked out from your game palettes because it couldn’t be downloaded' : ''}), so tiles edited with it can be used in any act. Tick “highlight” to see which pixels use colours that change between acts (magenta); “Make act-safe” converts them. The pixel painter only offers Act 0 colours.`}
+            />
           </label>
           <span className="muted small">{dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'none selected = whole DT1'}` : 'loading…'}</span>
           <button className="btn small" onClick={() => setPicked(new Set(dt1?.tiles.map((_, i) => i)))}>
@@ -273,6 +371,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             tileIndex={painting}
             image={edits.get(painting) ?? decodeTile(dt1.tiles[painting])!}
             palette={palette}
+            usable={pal.usable}
             onDone={(img) => {
               if (img) setEdits((m) => new Map(m).set(painting, img));
               setPainting(null);
@@ -310,6 +409,44 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             })}
           </div>
           <div className="dte-side">
+            <div className="chips dte-tabs">
+              <button className={`chip${sideTab === 'colours' ? ' active' : ''}`} onClick={() => setSideTab('colours')}>
+                Colours
+              </button>
+              <button className={`chip${sideTab === 'settings' ? ' active' : ''}`} onClick={() => setSideTab('settings')} title="Everything a DT1 Tools .ini holds for each tile, including the walkability sub-tiles">
+                Tile settings (ini){settingsEdits.size ? ` · ${settingsEdits.size}` : ''}
+              </button>
+            </div>
+            {sideTab === 'settings' && (
+              <>
+                <div className="dte-ini-bar">
+                  <button className="btn small" onClick={() => void exportIni()} disabled={!rawBytes} title="Save this DT1's settings as a DT1 Tools .ini">
+                    Export .ini
+                  </button>
+                  <button className="btn small" onClick={() => void importIni()} disabled={!rawBytes} title="Take the settings of a DT1 Tools .ini (block numbers match tiles here)">
+                    Import .ini…
+                  </button>
+                </div>
+                {iniMessage && <p className="small muted">{iniMessage}</p>}
+                {rawBytes && dt1 && (
+                  <TileSettingsPanel
+                    tiles={settingsTargets.map((i) => ({ index: i, tile: dt1.tiles[i], image: edits.get(i) ?? decodeTile(dt1.tiles[i]) }))}
+                    palette={palette}
+                    settingsOf={settingsOf}
+                    changed={(i) => settingsEdits.has(i)}
+                    onChange={changeSettings}
+                    onRevert={() =>
+                      setSettingsEdits((prev) => {
+                        const next = new Map(prev);
+                        for (const i of settingsTargets) next.delete(i);
+                        return next;
+                      })
+                    }
+                  />
+                )}
+              </>
+            )}
+            <div className="dte-colours" hidden={sideTab !== 'colours'}>
             <div className="field-label">Colour</div>
             <label className="dte-slider">
               Hue <input type="range" min={-180} max={180} value={adjust.hue} onChange={(e) => set('hue', Number(e.target.value))} /> <span>{adjust.hue}°</span>
@@ -337,13 +474,23 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
                 <input type="range" min={5} max={160} value={adjust.swapTolerance} onChange={(e) => set('swapTolerance', Number(e.target.value))} />
               </label>
             )}
-            <button className="btn small" onClick={() => setAdjust(NO_ADJUST)} disabled={!changes && !adjust.swapOn}>
+            {pal.usable && (
+              <button
+                className={`btn small${adjust.toAct0 ? ' active' : ''}`}
+                onClick={() => setAdjust((a) => ({ ...a, toAct0: !a.toAct0 }))}
+                title="Convert colours that change between acts (shown magenta) to the nearest Act 0 colour, for the selected tiles (or the whole DT1)"
+              >
+                {adjust.toAct0 ? '✓ Make act-safe' : 'Make act-safe'}
+              </button>
+            )}
+            <button className="btn small" onClick={() => setAdjust(NO_ADJUST)} disabled={isNeutral(adjust)}>
               Reset colours
             </button>
             <p className="muted small">
               DT1s store colours as palette indices, so every colour is snapped to the nearest one in the act palette; the preview shows exactly what will be
               written. Tile shapes, walkability flags and indices stay the same.
             </p>
+            </div>
             <div className="field-label">Save as</div>
             <div className="dte-name">
               <span className="muted small mono">{short(dir)}</span>
@@ -364,7 +511,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             {error && <p className="small error-text">{error}</p>}
           </div>
         </div>
-        {zoomed !== null && painting === null && dt1?.tiles[zoomed] && (
+        {zoomed !== null && painting === null && sideTab === 'colours' && dt1?.tiles[zoomed] && (
           <FloatingWindow
             title={
               <>
@@ -388,7 +535,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             Close
           </button>
           <button className="btn primary" disabled={!canSave || !dt1 || busy || !validName} onClick={() => void save()} title={canSave ? '' : 'No writable mod folder'}>
-            {busy ? 'Saving…' : overwrite ? 'Save (overwrite)' : changes || edits.size ? 'Save edited copy' : 'Save copy'}
+            {busy ? 'Saving…' : overwrite ? 'Save (overwrite)' : changes || edits.size || settingsEdits.size ? 'Save edited copy' : 'Save copy'}
           </button>
         </div>
       </div>

@@ -117,10 +117,17 @@ tree groups.
   `LvlPrest.txt` is recomputed.
 - **DT1 editor**: duplicate and rename a DT1, **recolour** it (hue, saturation, brightness, tint, replace a colour) —
   the whole file, tiles you pick, the tiles a preset is built from, or the tiles used in your map selection — and
-  **paint tiles pixel by pixel**. DT1s are shown, recoloured and painted in the **Act 1 palette** (the game's
-  palette 0), so the colours offered are exactly the ones a DT1 can hold; another act's palette can be picked if needed. Clicking a tile opens it in a zoom window you can move, resize
+  **paint tiles pixel by pixel**. Editing uses the **Act 0 palette**
+  ([Gimli's act0](https://github.com/D2R-Gimli/Diablo2_act0_color_palette), downloaded on first use): only the 225
+  colours that look the same in every act, so edited tiles can be used in any act. The painter only offers those
+  colours; tick *highlight* to see pixels whose colour changes between acts (magenta) and **Make act-safe** converts
+  them. A single act's palette can still be picked. Clicking a tile opens it in a zoom window you can move, resize
   from any edge and zoom right down to single pixels. The preview is exact, and the copy can replace the original in
   your map with the tables updated for you.
+- **Tile settings (ini)**: everything a DT1 Tools `.ini` holds for each tile — kind, main/sub index, rarity/frame,
+  animated, footstep sound, roof height, direction — edited in plain form fields with an explanation on hover, for
+  one tile or many at once. The **sub-tile flags** (walkability, line of sight, missiles, teleport…) are painted
+  straight onto the tile's 5×5 grid. **Export .ini** / **Import .ini** exchange settings with DT1 Tools.
 
 | | |
 | :-: | :-: |
@@ -153,7 +160,8 @@ again replaces the editor's earlier rows instead of piling them up.
   what the column does in plain language.
 - **Add to game:** creates the `LvlPrest`/`Levels`/`LvlTypes` rows that make the game load a new map.
 - **Cube recipe:** creates a map item and a Horadric Cube recipe for it (the item-to-level link needs a mod plugin,
-  e.g. PD2's map system).
+  e.g. PD2's map system). Pick the base item and the cube ingredients from lists with icons, or type a custom code
+  (checked against the game's items); every field has a plain-language explanation.
 - **Compatibility check:** missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry
   markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled
   `.bin` reminders — each with one-click fixes: add the DT1s that contain the missing tiles, update LvlTypes/Dt1Mask,
