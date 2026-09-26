@@ -96,6 +96,10 @@ file list; you can override the level type per map in the **Map** panel.
 - **Overlapping tiles**: Shift+mouse wheel over tiles that overlap (trees over trees, a wall over a floor) steps through them one
   at a time; the chosen tile is outlined and only its layer is selected, so copy/cut/Delete leave the others alone. Esc goes back
   to all layers.
+- **Automap preview** (View → Automap, **A**): draws the in-game automap over the map from AutoMap.txt + MaxiMap.dc6, outlines
+  walls with no AutoMap.txt entry (they won't show in game), and for the selected cell lists each tile's code (fl, wl, wtll…),
+  style, sequence, matching row and piece. *Change piece…* opens a gallery of MaxiMap pieces and writes the AutoMap.txt row for you
+  (this sequence only, or every sequence of the style). Mod level types keyed by LvlTypes id (PD2's "47") are matched too.
 - **Stacking**: hold **Alt** when you click to place a preset or paste, and tiles landing on occupied cells go into the next free
   wall/floor layer (adding Wall 2–4 / Floor 2 when needed) instead of replacing what is there.
 - What the app may write (mod folder only, originals kept as `.bak`): `.ds1/.dt1/.cof/.dcc/.dc6` under `data/global/`, `.txt` under

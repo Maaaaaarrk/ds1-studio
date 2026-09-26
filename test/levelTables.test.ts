@@ -130,3 +130,37 @@ describe('overlapEdits (Alt while placing)', () => {
     expect(o.replaced).toBe(1);
   });
 });
+
+import { parseTxtTable as ptt } from '../src/formats/txtTable';
+import { findRule, parseAutomap, setAutomapCel } from '../src/game/automap';
+
+describe('automap rules', () => {
+  const doc = ptt(enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tType1\tCel1\tType2\tCel2\tType2\tCel3\tType4\tCel4\r\n' +
+    '1 Town\tfl\t0\t-1\t-1\tA\t5\tB\t6\t\t-1\t\t-1\r\n1 Town\twl\t2\t0\t3\tW\t9\t\t-1\t\t-1\t\t-1\r\n'));
+  it('looks tiles up by code, style and sequence', () => {
+    const t = parseAutomap(doc);
+    expect(findRule(t, '1 Town', 0, 0, 17)!.cels.map((c) => c.cel)).toEqual([5, 6]);
+    expect(findRule(t, '1 Town', 1, 2, 3)!.cels[0].cel).toBe(9);
+    expect(findRule(t, '1 Town', 1, 2, 4)).toBeNull();
+  });
+  it('adds a specific row in front of broader ones, or updates an exact one', () => {
+    const a = setAutomapCel(doc, '1 Town', 0, 0, 4, 77, 'seq');
+    expect(a.doc.rows[0].slice(0, 7)).toEqual(['1 Town', 'fl', '0', '4', '4', 'DS1 Studio', '77']);
+    expect(findRule(parseAutomap(a.doc), '1 Town', 0, 0, 4)!.cels[0].cel).toBe(77);
+    expect(findRule(parseAutomap(a.doc), '1 Town', 0, 0, 5)!.cels[0].cel).toBe(5);
+    const b = setAutomapCel(doc, '1 Town', 0, 0, 4, 42, 'style');
+    expect(b.doc.rows.length).toBe(doc.rows.length);
+    expect(findRule(parseAutomap(b.doc), '1 Town', 0, 0, 9)!.cels.map((c) => c.cel)).toEqual([42]);
+  });
+});
+
+import { automapLevelFor } from '../src/game/automap';
+
+describe('automap level names', () => {
+  const t = parseAutomap(ptt(enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tType1\tCel1\r\n1 Town\tfl\t0\t-1\t-1\tA\t1\r\n5 Ice\tfl\t0\t-1\t-1\tA\t1\r\n47\tfl\t0\t-1\t-1\tA\t1\r\n')));
+  it('matches vanilla short names, prefixes and mod level type ids', () => {
+    expect(automapLevelFor(t, 'Act 1 - Town')).toBe('1 Town');
+    expect(automapLevelFor(t, 'Act 5 - Ice Caves')).toBe('5 Ice');
+    expect(automapLevelFor(t, 'Dark Temple', 5, 47)).toBe('47');
+  });
+});

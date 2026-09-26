@@ -23,6 +23,7 @@ export const ACTIONS = [
   { id: 'view.grid', label: 'Grid', group: 'View', key: 'G' },
   { id: 'view.rooms', label: 'Game rooms (8×8)', group: 'View', key: 'R' },
   { id: 'view.walkable', label: 'Walkability', group: 'View', key: 'W' },
+  { id: 'view.automap', label: 'Automap preview', group: 'View', key: 'A' },
   { id: 'view.markers', label: 'Object markers', group: 'View', key: 'M' },
   { id: 'view.sprites', label: 'Object sprites', group: 'View', key: 'N' },
   { id: 'view.paths', label: 'NPC paths', group: 'View', key: 'P' },

@@ -328,3 +328,53 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
   color: #8fe3ff;
   box-shadow: inset 2px 0 0 #8fe3ff;
 }
+
+.cel-thumb {
+  image-rendering: pixelated;
+  background: #000;
+  border-radius: 2px;
+  display: block;
+}
+.automap-rows td {
+  vertical-align: top;
+  padding-bottom: 6px;
+}
+.cel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+  max-height: 60vh;
+  overflow: auto;
+  margin: 8px 0;
+}
+.cel-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-2, #1b1f27);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+.cel-cell:hover {
+  border-color: #6b7a90;
+}
+.cel-cell.active {
+  border-color: #8fe3ff;
+}
+.tiny {
+  font-size: 10px;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}

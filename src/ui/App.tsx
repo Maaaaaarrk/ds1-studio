@@ -9,6 +9,7 @@ import {
   FolderCog,
   Footprints,
   Grid3x3,
+  Map as MapIcon,
   Keyboard,
   LayoutGrid,
   Layers,
@@ -59,6 +60,10 @@ import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
 import { syncLevelTables } from '../game/levelTables';
+import { AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, type AutomapPiece, type AutomapTable } from '../game/automap';
+import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
+import type { SpriteFrame } from '../formats/dc6';
+import { AutomapPanel } from './AutomapPanel';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
@@ -709,6 +714,53 @@ export function App() {
     [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
   );
 
+  // Automap preview: AutoMap.txt + MaxiMap.dc6, loaded the first time the view is turned on (and after table edits).
+  const [automapData, setAutomapData] = useState<{ gd: GameData; table: AutomapTable; cels: SpriteFrame[] } | null>(null);
+  const [automapLevelOverride, setAutomapLevelOverride] = useState<{ path: string; level: string } | null>(null);
+  useEffect(() => {
+    if (!visibility.automap || !gd || automapData?.gd === gd) return;
+    void (async () => {
+      try {
+        const [txt, dc6] = await Promise.all([gd.fs.read(AUTOMAP_TXT), gd.fs.read(AUTOMAP_DC6)]);
+        if (!txt || !dc6) throw new Error('AutoMap.txt or MaxiMap.dc6 not found');
+        setAutomapData({ gd, table: parseAutomap(parseTxtTable(txt)), cels: parseAutomapCels(dc6) });
+      } catch (e) {
+        notify(`Automap: ${(e as Error).message}`, true);
+        setVisibility((v) => ({ ...v, automap: false }));
+      }
+    })();
+  }, [visibility.automap, gd, automapData, notify]);
+  const automapLevel = useMemo(() => {
+    if (!automapData || !map) return null;
+    if (automapLevelOverride?.path === map.path) return automapLevelOverride.level;
+    return automapLevelFor(automapData.table, map.resolution.lvlType?.name, map.ds1.act + 1, map.resolution.lvlType?.id);
+  }, [automapData, map, automapLevelOverride]);
+  const automapPiecesNow = useMemo(
+    () => (visibility.automap && automapData && map && automapLevel ? automapPieces(map.ds1, automapData.table, automapLevel) : null),
+    [visibility.automap, automapData, map, automapLevel, revision], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const automapView = useMemo(
+    () => (automapPiecesNow && automapData && map ? { pieces: automapPiecesNow, cels: automapData.cels, palette: map.palette } : null),
+    [automapPiecesNow, automapData, map],
+  );
+  const setAutomapPiece = useCallback(
+    async (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => {
+      if (!gd || !automapLevel) return;
+      try {
+        const bytes = await gd.fs.read(AUTOMAP_TXT);
+        if (!bytes) throw new Error('AutoMap.txt not found');
+        const { doc: next, summary } = setAutomapCel(parseTxtTable(bytes), automapLevel, piece.orientation, piece.main, piece.sub, cel, scope);
+        const out = serializeTxtTable(next);
+        await writeFiles([{ path: AUTOMAP_TXT, bytes: out }]);
+        setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
+        notify(summary);
+      } catch (e) {
+        notify((e as Error).message, true);
+      }
+    },
+    [gd, automapLevel, writeFiles, notify],
+  );
+
   // Presets: saved ones come from the mod folder.
   useEffect(() => {
     if (gd) void loadPresets(gd).then(setPresets);
@@ -897,6 +949,7 @@ export function App() {
       'view.grid': vis((v) => ({ ...v, grid: !v.grid })),
       'view.rooms': vis((v) => ({ ...v, rooms: !v.rooms })),
       'view.walkable': vis((v) => ({ ...v, walkable: !v.walkable })),
+      'view.automap': vis((v) => ({ ...v, automap: !v.automap })),
       'view.markers': vis((v) => ({ ...v, objects: !v.objects })),
       'view.sprites': vis((v) => ({ ...v, sprites: !v.sprites })),
       'view.paths': vis((v) => ({ ...v, paths: !v.paths })),
@@ -1023,6 +1076,7 @@ export function App() {
             { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: kb['view.grid'] },
             { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
             { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: kb['view.walkable'] },
+            { label: 'Automap', icon: <MapIcon />, onClick: () => setVisibility((v) => ({ ...v, automap: !v.automap })), active: visibility.automap, size: 'sm', shortcut: kb['view.automap'], title: 'Preview the in-game automap and see/change the AutoMap.txt piece of each tile' },
             { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: kb['view.sprites'] },
           ],
         },
@@ -1163,6 +1217,7 @@ export function App() {
             fitSignal={fitSignal}
             focus={focus}
             onCycle={cycleStack}
+            automap={automapView}
           />
         ) : (
           <div className="empty-stage">
@@ -1273,6 +1328,23 @@ export function App() {
                 onDeselect={() => {
                   setSelection(null);
                   setStack(null);
+                }}
+              />
+            )}
+            {visibility.automap && automapData && (
+              <AutomapPanel
+                table={automapData.table}
+                cels={automapData.cels}
+                palette={map.palette}
+                level={automapLevel}
+                onLevel={(level) => setAutomapLevelOverride({ path: map.path, level })}
+                pieces={automapPiecesNow ?? []}
+                cell={selection && isSingleCell(selection) ? { x: selection.x0, y: selection.y0 } : null}
+                canSave={canWrite}
+                onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
+                levelLabel={(l) => {
+                  const t = /^\d+$/.test(l.trim()) ? data.gd.lvlType(Number(l)) : null;
+                  return t && t.name !== l.trim() ? `${l} · ${t.name}` : l;
                 }}
               />
             )}

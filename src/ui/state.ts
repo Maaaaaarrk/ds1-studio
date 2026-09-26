@@ -24,6 +24,8 @@ export interface Visibility {
   animate: boolean;
   sprites: boolean;
   rooms: boolean;
+  /** Show the in-game automap over the map. */
+  automap: boolean;
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
@@ -42,6 +44,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   animate: true,
   sprites: true,
   rooms: false,
+  automap: false,
 };
 
 export const ORIENTATION_NAMES: Record<number, string> = {

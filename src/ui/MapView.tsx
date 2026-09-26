@@ -7,6 +7,8 @@ import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
+import { AUTOMAP_SCALE, automapCellOrigin, type AutomapPiece } from '../game/automap';
+import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
 
@@ -57,6 +59,8 @@ interface Props {
   fitSignal: number;
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
   focus: { item: DrawItem; index: number; count: number; label: string } | null;
+  /** The in-game automap drawn over the map (dimmed underneath). */
+  automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array } | null;
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
 }
@@ -130,10 +134,12 @@ export function MapView(props: Props) {
   const camera = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const dirty = useRef(true);
   const [frame, setFrame] = useState(0);
-  const walk = useMemo(() => (visibility.walkable ? walkability(map.ds1, scene) : null), [visibility.walkable, map, scene]);
+  const automapImage = useMemo(() => (props.automap ? renderAutomap(map.ds1.width, map.ds1.height, props.automap) : null), [props.automap, map]);
+  // Built once per scene, not per frame: a 150×150 map has 562,500 sub-tiles.
+  const walk = useMemo(() => (visibility.walkable ? walkPaths(walkability(map.ds1, scene), map.ds1.width, map.ds1.height) : null), [visibility.walkable, map, scene]);
   const resizeDrag = useRef<{ side: Side; delta: ResizeDelta } | null>(null);
-  const latest = useRef({ ...props, walk, resizeDrag });
-  latest.current = { ...props, walk, resizeDrag };
+  const latest = useRef({ ...props, walk, resizeDrag, automapImage });
+  latest.current = { ...props, walk, resizeDrag, automapImage };
 
   // Animated floors run at 10 fps, like the game.
   useEffect(() => {
@@ -241,7 +247,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage]);
 
   // Input.
   useEffect(() => {
@@ -414,7 +420,96 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
   ctx.closePath();
 }
 
-type OverlayState = Props & { walk: Uint8Array | null; resizeDrag: { current: { side: Side; delta: ResizeDelta } | null } };
+interface WalkPaths {
+  noJump: Path2D;
+  noWalk: Path2D;
+}
+
+/**
+ * The walkability overlay as two paths, one parallelogram per run of same-class sub-tiles along each sub-tile row
+ * (a diamond's top-right edge runs the same way as the row, so a run of diamonds is one parallelogram).
+ */
+function walkPaths(walk: Uint8Array, width: number, height: number): WalkPaths {
+  const noJump = new Path2D();
+  const noWalk = new Path2D();
+  const classOf = (sx: number, sy: number) => {
+    const f = walk[(Math.floor(sy / 5) * width + Math.floor(sx / 5)) * 25 + (sy % 5) * 5 + (sx % 5)];
+    return f & SubTileFlag.BlockJump ? 2 : f & (SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk) ? 1 : 0;
+  };
+  const W = width * 5;
+  for (let sy = 0; sy < height * 5; sy++) {
+    for (let sx = 0; sx < W; ) {
+      const c = classOf(sx, sy);
+      let end = sx + 1;
+      while (end < W && classOf(end, sy) === c) end++;
+      if (c) {
+        const target = c === 2 ? noJump : noWalk;
+        const [x0, y0] = subTileToWorld(sx, sy);
+        const [xn, yn] = subTileToWorld(end - 1, sy);
+        target.moveTo(x0, y0 - 8);
+        target.lineTo(xn + 16, yn);
+        target.lineTo(xn, yn + 8);
+        target.lineTo(x0 - 16, y0);
+        target.closePath();
+      }
+      sx = end;
+    }
+  }
+  return { noJump, noWalk };
+}
+
+interface AutomapImage {
+  canvas: HTMLCanvasElement;
+  /** World position of the canvas's top-left corner. */
+  x: number;
+  y: number;
+  /** Cells whose wall has no automap entry. */
+  missing: [number, number][];
+}
+
+/** The automap at its own resolution (one cel pixel = 10 world pixels), drawn scaled up by the overlay. */
+function renderAutomap(width: number, height: number, a: NonNullable<Props['automap']>): AutomapImage {
+  const ox = height * 8 + 16;
+  const oy = 40;
+  const W = (width + height) * 8 + 32;
+  const H = (width + height) * 4 + 56;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.createImageData(W, H);
+  const missing: [number, number][] = [];
+  const pal = a.palette;
+  for (const p of a.pieces) {
+    if (p.cel === null) {
+      if (p.layer === 'wall' && !p.rule) missing.push([p.cellX, p.cellY]);
+      continue;
+    }
+    const f = a.cels[p.cel];
+    if (!f) continue;
+    const [ax, ay] = automapCellOrigin(p.cellX, p.cellY);
+    // A cel's origin is the cell's west corner, 8 px below its north corner.
+    const x0 = ox + ax - 8 + f.offsetX;
+    const y0 = oy + ay + 8 + f.offsetY;
+    for (let y = 0; y < f.height; y++)
+      for (let x = 0; x < f.width; x++) {
+        const c = f.pixels[y * f.width + x];
+        if (!c) continue;
+        const X = x0 + x;
+        const Y = y0 + y;
+        if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
+        const o = (Y * W + X) * 4;
+        img.data[o] = pal[c * 4];
+        img.data[o + 1] = pal[c * 4 + 1];
+        img.data[o + 2] = pal[c * 4 + 2];
+        img.data[o + 3] = 255;
+      }
+  }
+  ctx.putImageData(img, 0, 0);
+  return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing };
+}
+
+type OverlayState = Props & { automapImage: AutomapImage | null; walk: WalkPaths | null; resizeDrag: { current: { side: Side; delta: ResizeDelta } | null } };
 
 function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   const ctx = canvas.getContext('2d')!;
@@ -425,28 +520,30 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   ctx.setTransform(cam.zoom, 0, 0, cam.zoom, canvas.width / 2 - cam.x * cam.zoom, canvas.height / 2 - cam.y * cam.zoom);
   const px = 1 / cam.zoom; // one device pixel in world units
 
+  if (s.automapImage) {
+    // The automap as the game draws it, over a dimmed map; walls without an automap entry outlined.
+    const am = s.automapImage;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+    ctx.beginPath();
+    diamond(ctx, 0, 0, ds1.width, ds1.height);
+    ctx.fill();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(am.canvas, am.x, am.y, am.canvas.width * AUTOMAP_SCALE, am.canvas.height * AUTOMAP_SCALE);
+    if (am.missing.length) {
+      ctx.strokeStyle = 'rgba(255, 90, 200, 0.9)';
+      ctx.lineWidth = 1.5 * px;
+      ctx.beginPath();
+      for (const [cx, cy] of am.missing) diamond(ctx, cx, cy);
+      ctx.stroke();
+    }
+  }
+
   if (walk) {
     // Red = blocks jumping/teleport too; amber = blocks walking.
-    const noJump = new Path2D();
-    const noWalk = new Path2D();
-    for (let cy = 0; cy < ds1.height; cy++)
-      for (let cx = 0; cx < ds1.width; cx++)
-        for (let k = 0; k < 25; k++) {
-          const f = walk[(cy * ds1.width + cx) * 25 + k];
-          if (!f) continue;
-          const target = f & SubTileFlag.BlockJump ? noJump : f & (SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk) ? noWalk : null;
-          if (!target) continue;
-          const [x, y] = subTileToWorld(cx * 5 + (k % 5), cy * 5 + Math.floor(k / 5));
-          target.moveTo(x, y - 8);
-          target.lineTo(x + 16, y);
-          target.lineTo(x, y + 8);
-          target.lineTo(x - 16, y);
-          target.closePath();
-        }
     ctx.fillStyle = 'rgba(255, 60, 70, 0.38)';
-    ctx.fill(noJump);
+    ctx.fill(walk.noJump);
     ctx.fillStyle = 'rgba(255, 176, 40, 0.34)';
-    ctx.fill(noWalk);
+    ctx.fill(walk.noWalk);
   }
 
   if (v.grid) {

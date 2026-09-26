@@ -40,7 +40,7 @@ export function parseDc6(bytes: Uint8Array): Dc6 {
   r.skip(12); // flags, encoding, termination
   const directions = r.u32();
   const framesPerDir = r.u32();
-  if (directions > 64 || framesPerDir > 1024) throw new Error(`implausible DC6 counts ${directions}x${framesPerDir}`);
+  if (directions > 64 || framesPerDir > 4096) throw new Error(`implausible DC6 counts ${directions}x${framesPerDir}`);
   const pointers: number[] = [];
   for (let i = 0; i < directions * framesPerDir; i++) pointers.push(r.u32());
 
