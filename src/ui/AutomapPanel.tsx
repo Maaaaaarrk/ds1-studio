@@ -106,6 +106,9 @@ export function AutomapPanel(props: Props) {
             <div className="small">
               <b>Suggested automap</b> <span className="muted">(previewed on the map, outlined in cyan; nothing written yet)</span>
             </div>
+            <div className="muted small">
+              Each kind of tile gets the piece this level (or its act) normally uses. Kinds the act never shows on the automap (Act 1 trees, say) stay off.
+            </div>
             {byCode.length ? (
               <table className="kv automap-rows">
                 <tbody>

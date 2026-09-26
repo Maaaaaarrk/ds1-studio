@@ -8,10 +8,10 @@ import { parsePalette, type Palette } from '../src/formats/palette';
 import { loadObjectSprite, loadSpriteDetailed, parseObjTxt, type Sprite, type SpriteSpec } from '../src/game/sprites';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
-import { D2_DIR, hasD2 } from '../tools/testdata';
+import { D2_DIR, hasD2, WINDS1_OBJ_TXT } from '../tools/testdata';
 
 /** WinDS1's object table (read-only). Override with D2_OBJ_TXT. */
-const OBJ_TXT = process.env.D2_OBJ_TXT ?? '';
+const OBJ_TXT = WINDS1_OBJ_TXT;
 /** Where to drop PNGs for eyeballing; set SPRITE_PNG_DIR to enable. */
 const PNG_DIR = process.env.SPRITE_PNG_DIR;
 const hasObjTxt = existsSync(OBJ_TXT);

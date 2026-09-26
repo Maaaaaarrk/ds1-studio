@@ -4,9 +4,9 @@ import { animationFps, loadSpriteAnimation } from '../src/game/spriteAnim';
 import { parseObjTxt, type SpriteSpec } from '../src/game/sprites';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
-import { D2_DIR, hasD2 } from '../tools/testdata';
+import { D2_DIR, hasD2, WINDS1_OBJ_TXT } from '../tools/testdata';
 
-const OBJ_TXT = process.env.D2_OBJ_TXT ?? '';
+const OBJ_TXT = WINDS1_OBJ_TXT;
 const hasObjTxt = existsSync(OBJ_TXT);
 
 describe('animationFps', () => {

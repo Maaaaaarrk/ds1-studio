@@ -174,10 +174,10 @@ describe('automap suggestions', () => {
   const piece = (orientation: number, main: number, sub: number, layer: 'floor' | 'wall'): AutomapPiece => ({ cellX: 0, cellY: 0, orientation, main, sub, rule: null, cel: null, layer });
   it("suggests the level's usual piece per code, grouping sequences by style", () => {
     const s = suggestAutomap(t, '1 Town', [piece(1, 5, 2, 'wall'), piece(1, 5, 3, 'wall'), piece(1, 5, 7, 'wall'), piece(0, 9, 0, 'floor')], { floors: true });
-    expect(s).toEqual([
-      { code: 'fl', orientation: 0, style: 9, seqs: [0], count: 1, cel: 3 }, // not used by 1 Town: falls back to the whole table
-      { code: 'wl', orientation: 1, style: 5, seqs: [2, 3, 7], count: 3, cel: 21 },
-    ]);
+    // Act 1 never puts floors on the automap in this table, so none is borrowed from Act 2.
+    expect(s).toEqual([{ code: 'wl', orientation: 1, style: 5, seqs: [2, 3, 7], count: 3, cel: 21 }]);
+    // A mod's numbered level type has no act: it may use any level's pieces.
+    expect(suggestAutomap(t, '47', [piece(0, 9, 0, 'floor')], { floors: true })).toEqual([{ code: 'fl', orientation: 0, style: 9, seqs: [0], count: 1, cel: 3 }]);
     expect(suggestAutomap(t, '1 Town', [piece(0, 9, 0, 'floor')], { floors: false })).toEqual([]);
   });
   it('writes one row per run of sequences, in front of the level', () => {

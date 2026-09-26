@@ -255,10 +255,10 @@ export interface AutomapSuggestion {
 }
 
 /**
- * The most used cel per tile code: first among this level's rules, then across the whole table. Used to suggest
+ * The most used cel per tile code: first among this level's rules, then the same act's levels, then the whole table. Used to suggest
  * pieces for tiles that have none (a left wall gets the level's usual left-wall piece, and so on).
  */
-export function usualCels(t: AutomapTable, level: string): Map<string, number> {
+export function usualCels(t: AutomapTable, level: string, opts: { acrossActs?: boolean } = {}): Map<string, number> {
   const count = (filter: (r: AutomapRule) => boolean) => {
     const byCode = new Map<string, Map<number, number>>();
     for (const rules of t.byKey.values())
@@ -270,8 +270,12 @@ export function usualCels(t: AutomapTable, level: string): Map<string, number> {
     return new Map([...byCode].map(([code, m]) => [code, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
   };
   const own = count((r) => r.level === level);
-  const all = count(() => true);
-  for (const [code, cel] of all) if (!own.has(code)) own.set(code, cel);
+  // Then the same act's other levels ("1 Town" → "1 …"), so an Act 1 map doesn't get an Act 5 piece.
+  const act = /^(\d)\s/.exec(level)?.[1];
+  if (act) for (const [code, cel] of count((r) => r.level.startsWith(`${act} `))) if (!own.has(code)) own.set(code, cel);
+  // Across acts only for levels without an act (mods' numbered level types), or when asked: in vanilla, a kind of tile
+  // an act never puts on the automap (Act 1 trees) is left off on purpose.
+  if (!act || opts.acrossActs) for (const [code, cel] of count(() => true)) if (!own.has(code)) own.set(code, cel);
   return own;
 }
 
