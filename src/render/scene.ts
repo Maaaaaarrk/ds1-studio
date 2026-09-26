@@ -43,6 +43,28 @@ export interface Scene {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
+const flatFill = new WeakMap<Dt1Tile, boolean>();
+/** True for tiles of one flat colour: void filler (blank.dt1), drawn beneath everything. */
+function isFlatFill(tile: Dt1Tile): boolean {
+  let v = flatFill.get(tile);
+  if (v === undefined) {
+    const img = decodeTile(tile);
+    let colour = -1;
+    v = !!img;
+    for (const p of img?.pixels ?? []) {
+      if (p === 0) continue;
+      if (colour < 0) colour = p;
+      else if (p !== colour) {
+        v = false;
+        break;
+      }
+    }
+    if (colour < 0) v = false;
+    flatFill.set(tile, v);
+  }
+  return v;
+}
+
 /** Top vertex of cell (x, y)'s diamond in world space. */
 export function cellToWorld(x: number, y: number): [number, number] {
   return [(x - y) * (TILE_W / 2), (x + y) * (TILE_H / 2)];
@@ -81,7 +103,8 @@ type WallBucket = 'lowerWall' | 'wall' | 'roof' | 'special';
 
 /**
  * Resolves every cell to positioned tiles in draw order, matching WinDS1 and the game:
- * floors, lower walls, shadows, then upright walls back to front, roofs, and editor-only special tiles last.
+ * void filler floors, then floors and lower walls row by row back to front, shadows, upright walls back to front, roofs,
+ * and editor-only special tiles last.
  */
 export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
   const items: DrawItem[] = [];
@@ -150,10 +173,38 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
     });
   };
 
-  addGround('floor', ds1.floors, Orientation.Floor, (l) => l);
-  // Lower walls hang below the floor's edge into the void. Drawn after the floors: maps that fill the void with a
-  // (near-black) blank floor, like PD2's Arcane map, would otherwise hide them, which the game doesn't.
-  addWalls('lowerWall');
+  // Floors and lower walls, back to front. Lower walls hang from a floor's edge down into the void, so each diagonal
+  // row draws its floors, then its lower walls: floors further forward (another platform) cover them, like the game.
+  // Void filler floors (one flat colour, like blank.dt1's) go underneath everything first, so they never hide them.
+  const floorSeed = (cx: number, cy: number, layer: number) => seedOf(cx, cy, layer);
+  const isVoid = (cx: number, cy: number, layer: number, c: Ds1['floors'][number][number]) => {
+    const t = lib.pick(Orientation.Floor, c.mainIndex, c.subIndex, floorSeed(cx, cy, layer));
+    return !!t && isFlatFill(t);
+  };
+  ds1.floors.forEach((cells, layer) => {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      const cx = i % width;
+      const cy = Math.floor(i / width);
+      if (!isEmptyCell(c) && !c.hidden && isVoid(cx, cy, layer, c)) add('floor', layer, cx, cy, Orientation.Floor, c.mainIndex, c.subIndex, floorSeed(cx, cy, layer));
+    }
+  });
+  const lower = buckets.lowerWall;
+  let next = 0;
+  for (let d = 0; d < width + height - 1; d++) {
+    for (let cy = Math.max(0, d - width + 1); cy <= Math.min(d, height - 1); cy++) {
+      const cx = d - cy;
+      ds1.floors.forEach((cells, layer) => {
+        const c = cells[cy * width + cx];
+        if (!isEmptyCell(c) && !c.hidden && !isVoid(cx, cy, layer, c)) add('floor', layer, cx, cy, Orientation.Floor, c.mainIndex, c.subIndex, floorSeed(cx, cy, layer));
+      });
+    }
+    for (; next < lower.length && lower[next][1] + lower[next][2] === d; next++) {
+      const [layer, cx, cy] = lower[next];
+      const c = ds1.walls[layer][cy * width + cx];
+      add('lowerWall', layer, cx, cy, c.orientation, c.mainIndex, c.subIndex, seedOf(cx, cy, layer + 5));
+    }
+  }
   addGround('shadow', ds1.shadows, Orientation.Shadow, () => 4);
   addWalls('wall');
   addWalls('roof');
