@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { DEFAULT_PROP1, isEmptyCell, withFields, type Ds1, type TileCell, type WallCell } from '../formats/ds1';
+import { useMemo, useState, type ReactNode } from 'react';
+import { DEFAULT_PROP1, isEmptyCell, withFields, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { ColHelp } from './HelpTip';
@@ -297,13 +297,17 @@ interface SelectionPanelProps {
   onCopy: (cut: boolean) => void;
   onPaste: () => void;
   onDeselect: () => void;
+  onReroll: () => void;
+  onReplace: () => void;
+  /** Objects and NPCs standing in the selection (they move with Cut / Paste). */
+  objectCount: number;
   /** Set when one tile of a stack was chosen (Shift+wheel): copy/cut only take that layer. */
   onlyLayer?: LayerRef | null;
 }
 
-export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill, onClear, onCopy, onPaste, onDeselect, onlyLayer }: SelectionPanelProps) {
+export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill, onClear, onCopy, onPaste, onDeselect, onReroll, onReplace, objectCount, onlyLayer }: SelectionPanelProps) {
   const [w, h] = rectSize(selection);
-  const what = onlyLayer ? layerLabel(onlyLayer) : 'all tile layers';
+  const what = onlyLayer ? layerLabel(onlyLayer) : `all tile layers${objectCount ? ` and ${objectCount} object${objectCount === 1 ? '' : 's'}` : ''}`;
   return (
     <Panel title="Selection" extra={`${w} × ${h} · from ${selection.x0}, ${selection.y0}`}>
       {onlyLayer && <p className="small accent-text">Only {layerLabel(onlyLayer)} (Shift+wheel to step through the stacked tiles, Esc for all layers)</p>}
@@ -314,8 +318,8 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
         <button className="btn" onClick={() => onClear(false)} title="Clear the active layer in the selection (Delete)">
           Clear {layerLabel(activeLayer)}
         </button>
-        <button className="btn" onClick={() => onClear(true)} title="Clear every tile layer in the selection (Shift+Delete)">
-          Clear all layers
+        <button className="btn" onClick={() => onClear(true)} title="Clear every tile layer in the selection, and the objects and NPCs in it (Shift+Delete)">
+          Clear everything
         </button>
         <button className="btn" onClick={() => onCopy(false)} title={`Copy ${what} (Ctrl+C)`}>
           Copy
@@ -326,9 +330,15 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
         <button className="btn" disabled={!canPaste} onClick={onPaste} title="Paste; click on the map to place it (Ctrl+V)">
           Paste
         </button>
+        <button className="btn" onClick={onReroll} title={`Mix up ${layerLabel(activeLayer)} in the selection: each tile becomes a random one of the same group (main index) already used here, so repeats are less visible`}>
+          Re-roll {layerLabel(activeLayer)}
+        </button>
+        <button className="btn" onClick={onReplace} title="Swap one tile for another in the selection or the whole map">
+          Find &amp; replace…
+        </button>
       </div>
       <p className="muted small">
-        Empty cells paste as transparent. Move = Cut, then Paste. <button className="link" onClick={onDeselect}>Deselect (Esc)</button>
+        Empty cells paste as transparent. Move = Cut, then Paste{objectCount ? ` (the ${objectCount} object${objectCount === 1 ? '' : 's'} here move too)` : ''}. <button className="link" onClick={onDeselect}>Deselect (Esc)</button>
       </p>
     </Panel>
   );
@@ -492,6 +502,86 @@ export function GroupsPanel({ ds1, selection, onMutate, onShowGroups }: GroupsPa
           <p className="muted small">Tag values are edited per cell: select a single cell. Tag type {ds1.tagType}.</p>
         </>
       )}
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// History
+
+const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+/** Every undo step of the map; click one to go back (or forward) to just after it. */
+export function HistoryPanel({ doc, revision, onGoTo }: { doc: MapDocument; revision: number; onGoTo: (count: number) => void }) {
+  const { done, undone } = useMemo(() => doc.history(), [doc, revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Panel title="History" extra={`${done.length} step${done.length === 1 ? '' : 's'}${undone.length ? ` · ${undone.length} undone` : ''}`} defaultOpen={false}>
+      <div className="history-list">
+        {[...undone].reverse().map((s, i) => (
+          <button key={`u${i}`} className="history-row undone" onClick={() => onGoTo(done.length + undone.length - i)} title="Redo up to here">
+            <span>{s.label}</span>
+            <span className="muted small">{clock(s.time)}</span>
+          </button>
+        ))}
+        {[...done].reverse().map((s, i) => (
+          <button key={`d${i}`} className={`history-row${i === 0 ? ' current' : ''}`} onClick={() => onGoTo(done.length - i)} title={i === 0 ? 'The current state' : 'Go back to just after this step'}>
+            <span>{s.label}</span>
+            <span className="muted small">{clock(s.time)}</span>
+          </button>
+        ))}
+        <button className={`history-row${done.length === 0 ? ' current' : ''}`} onClick={() => onGoTo(0)} title="Undo everything">
+          <span>Map as opened</span>
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Objects in the map
+
+/** Every object and NPC of the map by name, with counts; click a name to jump to the next one. */
+export function MapObjectsPanel({ objects, nameOf, onJump }: { objects: Ds1Object[]; nameOf: (type: number, id: number) => string; onJump: (index: number) => void }) {
+  const [query, setQuery] = useState('');
+  const [cursor, setCursor] = useState<Record<string, number>>({});
+  const groups = useMemo(() => {
+    const byName = new Map<string, { name: string; type: number; id: number; indices: number[] }>();
+    objects.forEach((o, i) => {
+      const name = nameOf(o.type, o.id);
+      const k = `${o.type}:${o.id}`;
+      if (!byName.has(k)) byName.set(k, { name, type: o.type, id: o.id, indices: [] });
+      byName.get(k)!.indices.push(i);
+    });
+    return [...byName.values()].sort((a, b) => a.type - b.type || a.name.localeCompare(b.name));
+  }, [objects, nameOf]);
+  const q = query.trim().toLowerCase();
+  const shown = groups.filter((g) => !q || g.name.toLowerCase().includes(q) || `${g.type === 1 ? 'npc' : 'object'} ${g.id}`.includes(q) || String(g.id) === q);
+  const npcs = objects.filter((o) => o.type === 1).length;
+  return (
+    <Panel title="In this map" extra={`${objects.length - npcs} objects · ${npcs} NPCs`}>
+      <input className="search small-input" placeholder="Search by name or id…" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+      <div className="mo-list">
+        {shown.map((g) => {
+          const k = `${g.type}:${g.id}`;
+          const at = cursor[k] ?? 0;
+          return (
+            <button
+              key={k}
+              className="mo-row"
+              title={g.indices.length > 1 ? `Click to jump to each one in turn (${at + 1} of ${g.indices.length} next)` : 'Jump to it'}
+              onClick={() => {
+                onJump(g.indices[at % g.indices.length]);
+                setCursor((c) => ({ ...c, [k]: (at + 1) % g.indices.length }));
+              }}
+            >
+              <span className={`mo-kind ${g.type === 1 ? 'npc' : 'obj'}`}>{g.type === 1 ? 'NPC' : 'OBJ'}</span>
+              <span className="mo-name">{g.name}</span>
+              <span className="muted small">{g.indices.length > 1 ? `×${g.indices.length}` : ''}</span>
+            </button>
+          );
+        })}
+        {!shown.length && <p className="muted small">{objects.length ? 'No match.' : 'No objects or NPCs in this map.'}</p>}
+      </div>
     </Panel>
   );
 }

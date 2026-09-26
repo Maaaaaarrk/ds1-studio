@@ -13,6 +13,7 @@ import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
 import { specialTileInfo } from '../game/specialTiles';
+import { Minimap } from './Minimap';
 
 export interface HoverInfo {
   cellX: number;
@@ -72,6 +73,8 @@ interface Props {
   automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array } | null;
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
+  /** When `signal` changes, centre the view on this world point (zooming in if far out). */
+  centerOn?: { x: number; y: number; signal: number } | null;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -144,6 +147,7 @@ export function MapView(props: Props) {
   /** Arrow keys currently held ('Shift' too while one is). */
   const arrows = useRef(new Set<string>());
   const dirty = useRef(true);
+  const minimapDraw = useRef<(() => void) | null>(null);
   const [frame, setFrame] = useState(0);
   const automapImage = useMemo(() => (props.automap ? renderAutomap(map.ds1.width, map.ds1.height, props.automap) : null), [props.automap, map]);
   // Built once per scene, not per frame: a 150×150 map has 562,500 sub-tiles.
@@ -198,6 +202,7 @@ export function MapView(props: Props) {
       dirty.current = false;
       renderer.current!.draw(camera.current, BACKGROUND);
       drawOverlay(overlay.current!, camera.current, latest.current);
+      minimapDraw.current?.();
     };
     frame();
     return () => cancelAnimationFrame(raf);
@@ -228,6 +233,16 @@ export function MapView(props: Props) {
   useEffect(() => {
     if (fitSignal) fit();
   }, [fitSignal]);
+
+  useEffect(() => {
+    const c = props.centerOn;
+    if (!c?.signal) return;
+    const dpr = window.devicePixelRatio || 1;
+    const zoom = Math.max(camera.current.zoom, 0.6 * dpr);
+    camera.current = { x: c.x, y: c.y, zoom };
+    latest.current.onZoom(zoom / dpr);
+    dirty.current = true;
+  }, [props.centerOn?.signal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const g = props.gameView;
@@ -480,6 +495,23 @@ export function MapView(props: Props) {
     <div className="viewport">
       <canvas ref={glCanvas} className="viewport-canvas" />
       <canvas ref={overlay} className="viewport-canvas viewport-overlay" onContextMenu={(e) => e.preventDefault()} />
+      {visibility.minimap && (
+        <Minimap
+          scene={scene}
+          palette={map.palette}
+          width={map.ds1.width}
+          height={map.ds1.height}
+          drawRef={minimapDraw}
+          view={{
+            camera: () => camera.current,
+            viewport: () => [glCanvas.current?.width ?? 0, glCanvas.current?.height ?? 0],
+            moveTo: (x, y) => {
+              camera.current = { ...camera.current, x, y };
+              dirty.current = true;
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -37,14 +37,20 @@ import {
   Undo2,
   FlaskConical,
   FileOutput,
+  Replace,
+  ImageDown,
+  Clock,
+  SquareDashed,
+  PaintBucket,
+  MapPinned,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EMPTY_CELL, isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
+import { EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
-import { clampRect, clearEdits, clipboardSources, copyRect, fillEdits, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
+import { clampRect, clearEdits, clipboardSources, copyRect, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
@@ -56,7 +62,7 @@ import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, im
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
-import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
+import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, MapInfoPanel, MapObjectsPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
 import { ShortcutsDialog } from './ShortcutsDialog';
@@ -88,6 +94,11 @@ import { DesktopSetup } from './DesktopSetup';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
 import { isBuiltinPath } from '../game/specialTiles';
+import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
+import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
+import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
+import { renderMapImage } from '../render/exportImage';
+import { ExportImageDialog, ReplaceDialog } from './EditDialogs';
 
 type DataState =
   | { status: 'connecting' }
@@ -111,6 +122,9 @@ function isSingleCell(r: CellRect): boolean {
 }
 
 /** Orientation used when painting a brush on a layer kind. */
+/** A map's folder, shortened for lists ("act1/town"). */
+const folderOf = (path: string) => path.replace(/^data\/global\/tiles\//i, '').replace(/\/[^/]+$/, '');
+
 function brushOrientation(layer: LayerRef, brush: Brush): number {
   return layer.kind === 'floor' ? Orientation.Floor : layer.kind === 'shadow' ? Orientation.Shadow : brush.orientation;
 }
@@ -150,6 +164,22 @@ export function App() {
   const [tool, setTool] = useState<Tool>('select');
   const [activeLayer, setActiveLayer] = useState<LayerRef>({ kind: 'floor', index: 0 });
   const [brush, setBrush] = useState<Brush | null>(null);
+  /** Extra tiles painted at random together with the brush (Ctrl+click in the Tiles panel). */
+  const [mix, setMix] = useState<Brush[]>([]);
+  /** How Paint and Erase apply: freehand, a dragged rectangle, or a flood fill of the connected area. */
+  const [paintMode, setPaintMode] = useState<'brush' | 'rect' | 'fill'>('brush');
+  /** The rectangle being dragged in rectangle mode (previewed as an outline). */
+  const [paintRect, setPaintRect] = useState<CellRect | null>(null);
+  const paintAnchor = useRef<[number, number] | null>(null);
+  const [recentTileList, setRecentTileList] = useState<Brush[]>([]);
+  const [pinned, setPinned] = useState<Brush[]>([]);
+  const [recentMapList, setRecentMapList] = useState<RecentMap[]>(() => recentMaps());
+  const [reopenLastMap, setReopenLastMap] = useState(() => reopenLast());
+  const [recoveries, setRecoveries] = useState<Recovery[]>([]);
+  /** Autosaved changes found for the map just opened, offered for restoring. */
+  const [recoveryOffer, setRecoveryOffer] = useState<Recovery | null>(null);
+  const [centerOn, setCenterOn] = useState<{ x: number; y: number; signal: number } | null>(null);
+  const [exportingImage, setExportingImage] = useState(false);
   const [paletteFocus, setPaletteFocus] = useState<PaletteFocus | null>(null);
   /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
   const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
@@ -166,7 +196,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -279,7 +309,12 @@ export function App() {
 
   const gd = data.status === 'ready' ? data.gd : null;
 
-  const confirmDiscard = useCallback(() => !doc?.dirty || window.confirm(`Discard unsaved changes to ${doc.path.split('/').pop()}?`), [doc]);
+  const confirmDiscard = useCallback(() => {
+    if (!doc?.dirty) return true;
+    if (!window.confirm(`Discard unsaved changes to ${doc.path.split('/').pop()}?`)) return false;
+    void deleteRecovery(doc.path).then(() => listRecoveries().then(setRecoveries));
+    return true;
+  }, [doc]);
 
   const open = useCallback(
     async (path: string) => {
@@ -289,7 +324,12 @@ export function App() {
         const m = await openMap(gd, path);
         setMap(m);
         setDoc(new MapDocument(path, m.ds1));
+        setRecentMapList(addRecentMap(path));
+        // Autosaved changes from a session that ended without saving: offer them.
+        void getRecovery(path).then((r) => setRecoveryOffer(r));
         setHover(null);
+        setMix([]);
+        setPaintRect(null);
         setActiveLayer((l) => (l.kind === 'wall' && m.ds1.walls.length ? { kind: 'wall', index: 0 } : { kind: 'floor', index: 0 }));
         setBrush(null);
         setSelection(null);
@@ -321,6 +361,76 @@ export function App() {
     [gd, map, notify],
   );
 
+  // Recent and pinned tiles belong to a tile set (the level type): the same numbers are other tiles elsewhere.
+  const tileSet = map ? String(map.resolution.lvlType?.id ?? map.path.toLowerCase()) : '';
+  useEffect(() => {
+    setRecentTileList(tileSet ? recentTiles(tileSet) : []);
+    setPinned(tileSet ? pinnedTiles(tileSet) : []);
+  }, [tileSet]);
+  const pickBrush = useCallback(
+    (b: Brush, add = false) => {
+      if (add && brush) {
+        // Ctrl+click: add to / remove from the random mix painted together with the brush.
+        const same = (x: Brush) => x.orientation === b.orientation && x.main === b.main && x.sub === b.sub;
+        if (same(brush)) return;
+        setMix((m) => (m.some(same) ? m.filter((x) => !same(x)) : [...m, b]));
+      } else {
+        setBrush(b);
+        setMix([]);
+      }
+      setTool('paint');
+      if (tileSet) setRecentTileList(noteTileUse(tileSet, b));
+    },
+    [brush, tileSet],
+  );
+
+  // Autosave: every 20 s, keep a copy of a map with unsaved changes (in the app's own storage) for recovery.
+  const autosaved = useRef<{ doc: MapDocument | null; revision: number }>({ doc: null, revision: -1 });
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!doc) return;
+      if (!doc.dirty) {
+        // Back to the saved state (undone): an autosaved copy of this map is out of date.
+        if (autosaved.current.doc === doc && autosaved.current.revision !== -1) void deleteRecovery(doc.path);
+        autosaved.current = { doc, revision: -1 };
+        return;
+      }
+      if (autosaved.current.doc === doc && autosaved.current.revision === doc.revision) return;
+      autosaved.current = { doc, revision: doc.revision };
+      try {
+        void saveRecovery(doc.path, writeDs1(doc.ds1));
+      } catch {
+        // an unsavable state (mid-edit) is caught on the next tick
+      }
+    }, 20_000);
+    return () => clearInterval(t);
+  }, [doc]);
+
+  // On start: list autosaved work, and reopen the last map if asked to.
+  const started = useRef(false);
+  useEffect(() => {
+    if (data.status !== 'ready' || started.current) return;
+    started.current = true;
+    void listRecoveries().then(setRecoveries);
+    const last = recentMaps()[0];
+    if (reopenLast() && last && data.files.some((f) => f.toLowerCase() === last.path.toLowerCase())) void open(last.path);
+  }, [data, open]);
+  const restoreRecovery = useCallback(async () => {
+    const r = recoveryOffer;
+    if (!r || !gd || !map || map.path.toLowerCase() !== r.path.toLowerCase()) return setRecoveryOffer(null);
+    try {
+      const m = await openMap(gd, map.path, undefined, parseDs1(r.bytes));
+      const d = new MapDocument(map.path, m.ds1);
+      d.markUnsaved();
+      setMap(m);
+      setDoc(d);
+      notify(`Restored the changes autosaved ${new Date(r.time).toLocaleString()}. Save to keep them.`);
+    } catch (e) {
+      notify(`Couldn't restore: ${(e as Error).message}`, true);
+    }
+    setRecoveryOffer(null);
+  }, [recoveryOffer, gd, map, notify]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` invalidates the scene after in-place edits
   const scene = useMemo(() => (map ? buildScene(map.ds1, map.lib) : null), [map, revision]);
 
@@ -329,8 +439,8 @@ export function App() {
     (): CellRect | null =>
       pasting && clipboard && hover
         ? { x0: hover.cellX, y0: hover.cellY, x1: hover.cellX + clipboard.width - 1, y1: hover.cellY + clipboard.height - 1 }
-        : null,
-    [pasting, clipboard, hover],
+        : paintRect,
+    [pasting, clipboard, hover, paintRect],
   );
   const ghost = useMemo((): GhostTile[] => {
     if (!map || !hover) return [];
@@ -491,9 +601,9 @@ export function App() {
                 (layers[e.layer.index] as typeof e.cell[])[e.y * d.width + e.x] = e.cell;
               }
               d.objects = [...d.objects, ...objects];
-            });
+            }, `Paste ${clipboard.width}×${clipboard.height}${objects.length ? ` + ${objects.length} object${objects.length === 1 ? '' : 's'}` : ''}`);
             bump();
-          } else if (doc.apply(edits)) bump();
+          } else if (doc.apply(edits, `Paste ${clipboard.width}×${clipboard.height}`)) bump();
           setSelection(clampRect({ x0: x, y0: y, x1: x + clipboard.width - 1, y1: y + clipboard.height - 1 }, doc.ds1.width, doc.ds1.height));
           setPasting(false);
         }
@@ -534,16 +644,40 @@ export function App() {
         if (phase === 'start') notify('Choose a tile in the Tiles panel first (or use Pick, I).', true);
         return;
       }
-      if (phase === 'start') doc.beginStroke();
-      const b = tool === 'paint' && brush ? { ...brush, orientation: brushOrientation(activeLayer, brush) } : null;
-      const edits: CellEdit[] = cells
-        .filter(([x, y]) => doc.inBounds(x, y))
-        .map(([x, y]) => ({ layer: activeLayer, x, y, cell: MapDocument.painted(activeLayer, doc.cell(activeLayer, x, y), b) }));
-      const changed = doc.apply(edits);
+      // The tiles to paint with (the brush plus the random mix), oriented for the active layer; null = erase.
+      const tiles = tool === 'paint' && brush ? [brush, ...mix].map((b) => ({ ...b, orientation: brushOrientation(activeLayer, b) })) : null;
+      const verb = tool === 'paint' ? 'Paint' : 'Erase';
+      const where = ` on ${layerLabel(activeLayer)}`;
+      if (paintMode === 'rect') {
+        const cell = cells[cells.length - 1];
+        if (phase === 'start' && cell) paintAnchor.current = cell;
+        if (cell && paintAnchor.current) setPaintRect(clampRect(rectFrom(paintAnchor.current, cell), doc.ds1.width, doc.ds1.height));
+        if (phase === 'end') {
+          const r = paintAnchor.current && hover ? clampRect(rectFrom(paintAnchor.current, [hover.cellX, hover.cellY]), doc.ds1.width, doc.ds1.height) : paintRect;
+          paintAnchor.current = null;
+          setPaintRect(null);
+          if (r && doc.apply(paintEdits(doc, activeLayer, rectCells(r), tiles), `${verb} rectangle${where}`)) bump();
+        }
+        return;
+      }
+      if (paintMode === 'fill') {
+        const cell = cells[0];
+        if (phase !== 'start' || !cell) return;
+        // Inside the selection, the fill stays within it.
+        const within = selection && cell[0] >= selection.x0 && cell[0] <= selection.x1 && cell[1] >= selection.y0 && cell[1] <= selection.y1 ? selection : null;
+        const region = floodRegion(doc, activeLayer, cell[0], cell[1], within);
+        if (doc.apply(paintEdits(doc, activeLayer, region, tiles), `${tool === 'paint' ? 'Fill' : 'Erase'} area${where}`)) {
+          bump();
+          notify(`${tool === 'paint' ? 'Filled' : 'Erased'} ${region.length} connected cell${region.length === 1 ? '' : 's'}${within ? ' (inside the selection)' : ''}`);
+        }
+        return;
+      }
+      if (phase === 'start') doc.beginStroke(`${verb}${where}`);
+      const changed = doc.apply(paintEdits(doc, activeLayer, cells, tiles));
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, focusTile],
+    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, focusTile],
   );
 
   // Selection commands.
@@ -561,10 +695,11 @@ export function App() {
         return;
       }
       setClipboard(clip);
-      if (cut && doc.apply(clearEdits(doc, selection, doc.layers()))) bump();
-      notify(`${cut ? 'Cut' : 'Copied'} ${w}×${h} cells (all layers)`);
+      const objects = clip.objects?.length ?? 0;
+      if (cut) clearArea(selection, true, `Cut ${w}×${h}`);
+      notify(`${cut ? 'Cut' : 'Copied'} ${w}×${h} cells (all layers${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${cut ? ': paste to move them' : ''}`);
     },
-    [doc, selection, notify, onlyLayer],
+    [doc, selection, notify, onlyLayer], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
   const [pasteOffer, setPasteOffer] = useState<{ clip: Clipboard; tiles: number; different: number; dt1s: string[]; label: string } | null>(null);
@@ -587,18 +722,73 @@ export function App() {
     if (!clipboard) return notify('Nothing to paste: copy a selection first (Ctrl+C).');
     beginPaste(clipboard, 'Pasting');
   }, [clipboard, notify, beginPaste]);
+  /**
+   * Clears `r`: the active layer, or (everything) every tile layer plus the objects and NPCs standing in it, so a
+   * cut takes everything with it. One undo step.
+   */
+  function clearArea(r: CellRect, everything: boolean, label: string) {
+    if (!doc) return;
+    const edits = clearEdits(doc, r, everything ? doc.layers() : [activeLayer]);
+    const inside = everything ? doc.ds1.objects.filter((o) => objectInRect(o, r)).length : 0;
+    if (!inside) {
+      if (doc.apply(edits, label)) bump();
+      return;
+    }
+    doc.mutate((d) => {
+      for (const e of edits) {
+        const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
+        (layers[e.layer.index] as typeof e.cell[])[e.y * d.width + e.x] = e.cell;
+      }
+      d.objects = d.objects.filter((o) => !objectInRect(o, r));
+    }, `${label} + ${inside} object${inside === 1 ? '' : 's'}`);
+    setSelectedObject(null);
+    bump();
+  }
   const clearSelection = useCallback(
     (allLayers: boolean) => {
       if (!doc || !selection) return;
-      if (doc.apply(clearEdits(doc, selection, allLayers ? doc.layers() : [activeLayer]))) bump();
+      const [w, h] = rectSize(selection);
+      clearArea(selection, allLayers, allLayers ? `Clear ${w}×${h}` : `Clear ${layerLabel(activeLayer)} ${w}×${h}`);
     },
-    [doc, selection, activeLayer],
+    [doc, selection, activeLayer], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const fillSelection = useCallback(() => {
     if (!doc || !selection) return;
     if (!brush) return notify('Choose a tile in the Tiles panel first.', true);
-    if (doc.apply(fillEdits(doc, selection, activeLayer, { ...brush, orientation: brushOrientation(activeLayer, brush) }))) bump();
-  }, [doc, selection, brush, activeLayer, notify]);
+    const tiles = [brush, ...mix].map((b) => ({ ...b, orientation: brushOrientation(activeLayer, b) }));
+    if (doc.apply(paintEdits(doc, activeLayer, rectCells(selection), tiles), `Fill ${layerLabel(activeLayer)}`)) bump();
+  }, [doc, selection, brush, mix, activeLayer, notify]);
+  const rerollSelection = useCallback(() => {
+    if (!doc || !selection) return;
+    const edits = rerollEdits(doc, selection, [activeLayer]);
+    if (doc.apply(edits, `Re-roll ${layerLabel(activeLayer)}`)) {
+      bump();
+      notify(`Re-rolled ${edits.length} tiles on ${layerLabel(activeLayer)}`);
+    } else notify(`Nothing to re-roll: ${layerLabel(activeLayer)} here uses one tile per group. Re-roll mixes the tiles of a group (same main index) already in the selection.`);
+  }, [doc, selection, activeLayer, notify]);
+  /** The tile to find, for Find & replace: the selected cell's on the active layer, else the brush. */
+  const replaceFrom = useMemo((): TileKey | null => {
+    if (!doc || dialog !== 'replace') return null;
+    const c = selection && isSingleCell(selection) ? keyOf(activeLayer, doc.cell(activeLayer, selection.x0, selection.y0)) : null;
+    return c ?? (brush ? { ...brush, orientation: brushOrientation(activeLayer, brush) } : null);
+  }, [doc, dialog, selection, activeLayer, brush]);
+  const exportImage = useCallback(
+    async (o: { area: CellRect | null; scale: number; objects: boolean }) => {
+      if (!doc || !map || !scene) return;
+      setExportingImage(true);
+      try {
+        const blob = await renderMapImage(scene, doc.ds1.objects, sprites, map.palette, doc.ds1.width, doc.ds1.height, { ...o, visible: (it) => isVisible(it, visibility) });
+        const where = await exportBytes(`${doc.path.split('/').pop()!.replace(/\.ds1$/i, '')}.png`, new Uint8Array(await blob.arrayBuffer()));
+        if (where) notify(`Exported ${where}`);
+        setDialog(null);
+      } catch (e) {
+        notify(`Export failed: ${(e as Error).message}`, true);
+      } finally {
+        setExportingImage(false);
+      }
+    },
+    [doc, map, scene, sprites, visibility, notify],
+  );
   const setObjects = useCallback(
     (next: Ds1Object[]) => {
       if (!doc) return;
@@ -681,7 +871,7 @@ export function App() {
       try {
         const m = await openMap(gd, c.path, { source: 'manual', lvlType: c.lvlType, paths }, ds1);
         const d = new MapDocument(c.path, m.ds1);
-        d.revision = 1; // unsaved
+        d.markUnsaved();
         setMap(m);
         setDoc(d);
         setSelection(null);
@@ -1164,6 +1354,8 @@ export function App() {
       }
       doc.ds1.version = WRITE_VERSION;
       doc.markSaved();
+      // Saved: the autosaved copy isn't needed any more.
+      void deleteRecovery(doc.path).then(() => listRecoveries().then(setRecoveries));
       bump();
     } catch (e) {
       notify(`Save failed: ${(e as Error).message}`, true);
@@ -1197,7 +1389,20 @@ export function App() {
     const layerToggle = (key: 'floors' | 'walls', i: number) => vis((v) => ({ ...v, [key]: v[key].map((x, n) => (n === i ? !x : x)) }));
     return {
       'tool.select': () => setTool('select'),
-      'tool.paint': () => setTool('paint'),
+      'tool.paint': () => {
+        setTool('paint');
+        setPaintMode('brush');
+      },
+      'tool.rect': () => {
+        setPaintMode('rect');
+        setTool((t) => (t === 'erase' ? t : 'paint'));
+      },
+      'tool.fill': () => {
+        setPaintMode('fill');
+        setTool((t) => (t === 'erase' ? t : 'paint'));
+      },
+      'edit.replace': () => doc && setDialog('replace'),
+      'view.minimap': vis((v) => ({ ...v, minimap: !v.minimap })),
       'tool.erase': () => setTool('erase'),
       'tool.pick': () => setTool('pick'),
       'tool.object': () => setTool('object'),
@@ -1217,12 +1422,15 @@ export function App() {
       'edit.cancel': () => {
         setResizeMode(false);
         setMarks(undefined);
+        paintAnchor.current = null;
+        setPaintRect(null);
         // First Esc frees the cursor: a paste / preset, an object to place, or the tile being painted with.
         if (pasting || placing || (brush && tool === 'paint')) {
           setPasting(false);
           setPlacing(null);
           if (tool === 'paint') {
             setBrush(null);
+            setMix([]);
             setTool('select');
           }
           return;
@@ -1326,6 +1534,31 @@ export function App() {
             { label: 'Save', icon: <Save />, onClick: () => void save(), disabled: noMap, active: !!doc?.dirty, shortcut: kb['file.save'], title: data.saveTarget ? `Save into ${data.saveTarget.label}` : 'Save (downloads: no mod folder)' },
             { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
             { label: 'Export .ds1', icon: <FileOutput />, onClick: () => void exportFile(), disabled: noMap, size: 'sm' },
+            { label: 'Export image', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the map (or the selection) as a PNG picture' },
+            {
+              custom: (
+                <select
+                  className="recent-select"
+                  value=""
+                  title="Recently opened maps"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '__reopen') {
+                      setReopenLast(!reopenLastMap);
+                      setReopenLastMap(!reopenLastMap);
+                    } else if (v) void open(v);
+                  }}
+                >
+                  <option value="">Recent maps…</option>
+                  {recentMapList.map((m) => (
+                    <option key={m.path} value={m.path}>
+                      {m.path.split('/').pop()} — {folderOf(m.path)}
+                    </option>
+                  ))}
+                  <option value="__reopen">{reopenLastMap ? '☑' : '☐'} Reopen the last map on start</option>
+                </select>
+              ),
+            },
             ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const }] : []),
           ],
         },
@@ -1338,11 +1571,20 @@ export function App() {
             { label: 'Delete', icon: <Trash2 />, onClick: () => clearSelection(false), disabled: !selection, size: 'sm', shortcut: kb['edit.delete'] },
             { label: 'Undo', icon: <Undo2 />, onClick: undo, disabled: !doc?.canUndo, size: 'sm', shortcut: kb['edit.undo'] },
             { label: 'Redo', icon: <Redo2 />, onClick: redo, disabled: !doc?.canRedo, size: 'sm', shortcut: kb['edit.redo'] },
+            { label: 'Replace…', icon: <Replace />, onClick: () => setDialog('replace'), disabled: noMap, size: 'sm', shortcut: kb['edit.replace'], title: 'Find & replace a tile across the map or the selection' },
           ],
         },
         {
           label: 'Tools',
           items: TOOLS.map((t) => ({ label: t.label, icon: TOOL_ICONS[t.id], onClick: () => setTool(t.id), active: tool === t.id, disabled: noMap, title: t.hint, shortcut: kb[`tool.${t.id}` as ActionId] })),
+        },
+        {
+          label: 'Paint / erase',
+          items: [
+            { label: 'Freehand', icon: <Paintbrush />, onClick: () => setPaintMode('brush'), active: paintMode === 'brush', disabled: noMap, size: 'sm', title: 'Paint and Erase follow the mouse' },
+            { label: 'Rectangle', icon: <SquareDashed />, onClick: () => { setPaintMode('rect'); setTool((t) => (t === 'erase' ? t : 'paint')); }, active: paintMode === 'rect', disabled: noMap, size: 'sm', shortcut: kb['tool.rect'], title: 'Drag a rectangle to paint (or erase) it all at once' },
+            { label: 'Fill area', icon: <PaintBucket />, onClick: () => { setPaintMode('fill'); setTool((t) => (t === 'erase' ? t : 'paint')); }, active: paintMode === 'fill', disabled: noMap, size: 'sm', shortcut: kb['tool.fill'], title: 'Click to fill the connected area of the same tile (kept inside the selection when you click in it)' },
+          ],
         },
         {
           label: 'Layer',
@@ -1378,6 +1620,7 @@ export function App() {
             { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: kb['view.walkable'] },
             { label: 'Automap', icon: <MapIcon />, onClick: () => setVisibility((v) => ({ ...v, automap: !v.automap })), active: visibility.automap, size: 'sm', shortcut: kb['view.automap'], title: 'Preview the in-game automap and see/change the AutoMap.txt piece of each tile' },
             { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: kb['view.sprites'] },
+            { label: 'Minimap', icon: <MapPinned />, onClick: () => setVisibility((v) => ({ ...v, minimap: !v.minimap })), active: visibility.minimap, size: 'sm', shortcut: kb['view.minimap'], title: 'Overview of the whole map in the corner: click it to move there' },
           ],
         },
         { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' }] },
@@ -1548,6 +1791,7 @@ export function App() {
             focus={focus}
             onCycle={cycleStack}
             automap={automapView}
+            centerOn={centerOn}
           />
         ) : (
           <div className="empty-stage">
@@ -1555,6 +1799,40 @@ export function App() {
             <div className="muted">
               Pick a DS1 from the list. {data.files.length.toLocaleString()} presets found across {data.gd.fs.baseSources.length} sources.
             </div>
+            {recoveries.length > 0 && (
+              <div className="recent-maps">
+                <div className="field-label warn-text">Unsaved work kept from an earlier session</div>
+                {recoveries.map((r) => (
+                  <button key={r.path} className="mo-row" onClick={() => void open(r.path)} title="Open it: you'll be offered the autosaved changes">
+                    <Clock size={13} />
+                    <span className="mo-name">{r.path.split('/').pop()}</span>
+                    <span className="muted small">{new Date(r.time).toLocaleString()}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {recentMapList.length > 0 && (
+              <div className="recent-maps">
+                <div className="field-label">Recent maps</div>
+                {recentMapList.map((m) => (
+                  <button key={m.path} className="mo-row" onClick={() => void open(m.path)} title={m.path}>
+                    <span className="mo-name">{m.path.split('/').pop()}</span>
+                    <span className="muted small">{folderOf(m.path)}</span>
+                  </button>
+                ))}
+                <label className="small muted">
+                  <input
+                    type="checkbox"
+                    checked={reopenLastMap}
+                    onChange={(e) => {
+                      setReopenLast(e.target.checked);
+                      setReopenLastMap(e.target.checked);
+                    }}
+                  />{' '}
+                  Reopen the last map on start
+                </label>
+              </div>
+            )}
           </div>
         )}
         {toast && (
@@ -1583,6 +1861,19 @@ export function App() {
                   />
                 </div>
               </section>
+            )}
+            {tool === 'object' && (
+              <MapObjectsPanel
+                objects={map.ds1.objects}
+                nameOf={nameOf}
+                onJump={(i) => {
+                  const o = map.ds1.objects[i];
+                  if (!o) return;
+                  setSelectedObject(i);
+                  const [x, y] = subTileToWorld(o.x, o.y);
+                  setCenterOn((c) => ({ x, y, signal: (c?.signal ?? 0) + 1 }));
+                }}
+              />
             )}
             {tool === 'object' && (
               <ObjectPanel
@@ -1644,8 +1935,14 @@ export function App() {
               <div className="panel-header static">
                 <span>Tiles · {layerLabel(activeLayer)}</span>
                 {brush && (
-                  <span className="muted small">
+                  <span className="muted small" title={mix.length ? 'Each painted cell gets one of these at random (Ctrl+click tiles to add or remove)' : 'Ctrl+click more tiles to paint a random mix'}>
                     brush {brush.main}/{brush.sub}
+                    {mix.length ? ` + ${mix.length} mixed` : ''}
+                    {mix.length > 0 && (
+                      <button className="link mix-clear" onClick={() => setMix([])}>
+                        clear mix
+                      </button>
+                    )}
                   </span>
                 )}
               </div>
@@ -1654,11 +1951,12 @@ export function App() {
                 palette={map.palette}
                 layerKind={activeLayer.kind}
                 brush={brush}
+                mix={mix}
                 focus={paletteFocus}
-                onPick={(b) => {
-                  setBrush(b);
-                  setTool('paint');
-                }}
+                onPick={pickBrush}
+                recent={recentTileList}
+                favourites={pinned}
+                onToggleFavourite={(b) => tileSet && setPinned(togglePinned(tileSet, b))}
               />
             </section>
             {selection && !isSingleCell(selection) && (
@@ -1672,6 +1970,9 @@ export function App() {
                 onCopy={copy}
                 onPaste={startPaste}
                 onlyLayer={onlyLayer}
+                onReroll={rerollSelection}
+                onReplace={() => setDialog('replace')}
+                objectCount={doc.ds1.objects.filter((o) => objectInRect(o, selection)).length}
                 onDeselect={() => {
                   setSelection(null);
                   setStack(null);
@@ -1718,6 +2019,14 @@ export function App() {
               onFocusTile={focusTile}
               onlyLayer={onlyLayer}
             />
+            <HistoryPanel
+              doc={doc}
+              revision={revision}
+              onGoTo={(n) => {
+                doc.goTo(n);
+                bump();
+              }}
+            />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} keys={kb} />
             <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)} />
@@ -1730,6 +2039,53 @@ export function App() {
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
       {dialog === 'about' && <AboutDialog onClose={() => setDialog(null)} />}
+      {dialog === 'replace' && doc && map && (
+        <ReplaceDialog
+          doc={doc}
+          lib={map.lib}
+          palette={map.palette}
+          activeLayer={activeLayer}
+          selection={selection && !isSingleCell(selection) ? selection : null}
+          from={replaceFrom}
+          brush={brush ? { ...brush, orientation: brushOrientation(activeLayer, brush) } : null}
+          onApply={(edits, label) => {
+            if (doc.apply(edits, label)) {
+              bump();
+              notify(`${label}: ${edits.length} cell${edits.length === 1 ? '' : 's'} changed (Ctrl+Z to undo)`);
+            }
+          }}
+          onShow={(cells) => {
+            setMarks(cells);
+            notify(`${cells.length} cells marked · Esc to clear`);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'image' && doc && (
+        <ExportImageDialog width={doc.ds1.width} height={doc.ds1.height} selection={selection && !isSingleCell(selection) ? selection : null} busy={exportingImage} onExport={(o) => void exportImage(o)} onClose={() => setDialog(null)} />
+      )}
+      {recoveryOffer && map && recoveryOffer.path.toLowerCase() === map.path.toLowerCase() && (
+        <Modal title="Unsaved changes were kept" onClose={() => setRecoveryOffer(null)}>
+          <p>
+            <b>{map.path.split('/').pop()}</b> had changes that weren&apos;t saved, autosaved {new Date(recoveryOffer.time).toLocaleString()}. Restore them?
+          </p>
+          <p className="muted small">Restoring opens the autosaved version; nothing is written to your mod until you save. Discarding deletes the autosaved copy.</p>
+          <div className="modal-actions">
+            <button
+              className="btn"
+              onClick={() => {
+                void deleteRecovery(recoveryOffer.path).then(() => listRecoveries().then(setRecoveries));
+                setRecoveryOffer(null);
+              }}
+            >
+              Discard them
+            </button>
+            <button className="btn primary" onClick={() => void restoreRecovery()}>
+              Restore
+            </button>
+          </div>
+        </Modal>
+      )}
       {dialog === 'update' && <UpdateDialog initial={pendingUpdate} onClose={() => setDialog(null)} />}
       {pasteOffer && map && (
         <Modal title="These tiles need other tile libraries" onClose={() => setPasteOffer(null)}>

@@ -12,8 +12,44 @@ interface Props {
   palette: Palette;
   layerKind: LayerKind;
   brush: Brush | null;
+  /** Extra tiles painted at random together with the brush (Ctrl+click adds). */
+  mix?: Brush[];
   focus: PaletteFocus | null;
-  onPick: (b: Brush) => void;
+  /** `add`: Ctrl/Shift+click, add to (or remove from) the random mix instead of replacing the brush. */
+  onPick: (b: Brush, add?: boolean) => void;
+  /** Recently used and pinned tiles of this map's tile set, shown above the grid. */
+  recent?: Brush[];
+  favourites?: Brush[];
+  onToggleFavourite?: (b: Brush) => void;
+}
+
+const sameBrush = (a: Brush, b: Brush) => a.orientation === b.orientation && a.main === b.main && a.sub === b.sub;
+
+/** A strip of small tile buttons (recent / favourite tiles). */
+function TileStrip({ label, list, lib, palette, layerKind, brush, onPick, onToggleFavourite, favourites }: { label: string; list: Brush[]; lib: TileLibrary; palette: Palette; layerKind: LayerKind; brush: Brush | null; onPick: Props['onPick']; onToggleFavourite?: (b: Brush) => void; favourites: Brush[] }) {
+  const shown = list.filter((b) => fitsLayer(layerKind, b.orientation)).map((b) => ({ b, tile: lib.pick(b.orientation, b.main, b.sub, 0) })).filter((x) => x.tile);
+  if (!shown.length) return null;
+  return (
+    <div className="tile-strip">
+      <span className="tile-strip-label muted small">{label}</span>
+      <div className="tile-strip-row">
+        {shown.map(({ b, tile }) => (
+          <button
+            key={`${b.orientation}:${b.main}:${b.sub}`}
+            className={`thumb mini${brush && sameBrush(brush, b) ? ' active' : ''}`}
+            title={`${b.main}/${b.sub}${layerKind === 'wall' ? ` · o${b.orientation}` : ''} · click to paint, Ctrl+click to add to the mix, right-click to ${favourites.some((f) => sameBrush(f, b)) ? 'unpin' : 'pin'}`}
+            onClick={(e) => onPick(b, e.ctrlKey || e.metaKey || e.shiftKey)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onToggleFavourite?.(b);
+            }}
+          >
+            <Thumb tile={tile!} palette={palette} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 type WallFilter = 'all' | 'walls' | 'objects' | 'roofs' | 'lower' | 'special';
@@ -95,7 +131,7 @@ interface Entry {
 
 const shortPath = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
-export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: Props) {
+export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
   const [filter, setFilter] = useState<WallFilter>('all');
   const [query, setQuery] = useState('');
   const [dt1, setDt1] = useState<string>('all');
@@ -203,6 +239,8 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
         )}
         <input className="search small-input" placeholder="main/sub…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
+      <TileStrip label="★ Pinned" list={favourites} lib={lib} palette={palette} layerKind={layerKind} brush={brush} onPick={onPick} onToggleFavourite={onToggleFavourite} favourites={favourites} />
+      <TileStrip label="Recent" list={recent} lib={lib} palette={palette} layerKind={layerKind} brush={brush} onPick={onPick} onToggleFavourite={onToggleFavourite} favourites={favourites} />
       <div
         className="thumb-grid"
         ref={grid}
@@ -210,7 +248,10 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
         title="Ctrl + scroll to zoom the thumbnails"
       >
         {entries.map((e) => {
-          const active = brush && brush.orientation === e.orientation && brush.main === e.main && brush.sub === e.sub;
+          const me = { orientation: e.orientation, main: e.main, sub: e.sub };
+          const active = brush && sameBrush(brush, me);
+          const mixed = !active && mix.some((m) => sameBrush(m, me));
+          const pinned = favourites.some((f) => sameBrush(f, me));
           const src = e.index === undefined ? null : `${shortPath(dt1)} #${e.index}`;
           const variants = e.tiles.length > 1 ? ` · ${e.tiles.length} variants` : '';
           const rarity = e.index !== undefined ? ` · ${e.tiles[0].animated ? 'frame' : 'rarity'} ${e.tiles[0].rarity}` : '';
@@ -219,11 +260,17 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
           return (
             <button
               key={e.index !== undefined ? `i${e.index}` : `${e.orientation}:${e.main}:${e.sub}`}
-              className={`thumb${active ? ' active' : ''}${isFocused(e) ? ' focused' : ''}`}
+              className={`thumb${active ? ' active' : ''}${mixed ? ' mixed' : ''}${isFocused(e) ? ' focused' : ''}`}
               title={`${src ? `${src} · ` : ''}${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}${variants}${rarity}${special ? `
-${special.label}: ${special.help}` : ''}`}
-              onClick={() => onPick({ orientation: e.orientation, main: e.main, sub: e.sub })}
+${special.label}: ${special.help}` : ''}
+Click: paint with it · Ctrl+click: add to a random mix · right-click: ${pinned ? 'unpin' : 'pin to the top'}`}
+              onClick={(ev) => onPick(me, ev.ctrlKey || ev.metaKey || ev.shiftKey)}
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                onToggleFavourite?.(me);
+              }}
             >
+              {pinned && <span className="thumb-pin">★</span>}
               <Thumb tile={e.tiles[0]} palette={palette} />
               {special && <span className="thumb-special">{special.label}</span>}
               <span className="thumb-label">

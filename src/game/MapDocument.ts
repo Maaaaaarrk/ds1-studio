@@ -33,6 +33,10 @@ interface CellChange {
 
 /** One undoable step: cell changes and/or a before/after snapshot of the object list. */
 interface HistoryStep {
+  /** What the step did, for the History panel. */
+  label: string;
+  /** When it was made (ms since epoch). */
+  time: number;
   cells: CellChange[];
   objects?: { before: Ds1Object[]; after: Ds1Object[] };
   /** Whole-map snapshots, for structural edits (resize, tags, groups). */
@@ -56,8 +60,10 @@ export class MapDocument {
   private undoStack: HistoryStep[] = [];
   private redoStack: HistoryStep[] = [];
   private stroke: Map<string, CellChange> | null = null;
+  private strokeLabel = 'Paint';
   private objectsBefore: Ds1Object[] | null = null;
-  private savedRevision = 0;
+  /** The undo step the map was last saved at (null = as opened); `undefined` = never saved in this form (new/restored). */
+  private savedAt: HistoryStep | null | undefined = null;
   revision = 0;
 
   constructor(
@@ -65,8 +71,9 @@ export class MapDocument {
     readonly ds1: Ds1,
   ) {}
 
+  /** Unsaved changes: the map differs from the last save (undoing back to it counts as clean again). */
   get dirty(): boolean {
-    return this.revision !== this.savedRevision;
+    return !!this.stroke?.size || this.objectsBefore !== null || (this.undoStack[this.undoStack.length - 1] ?? null) !== this.savedAt;
   }
 
   get canUndo(): boolean {
@@ -78,7 +85,14 @@ export class MapDocument {
   }
 
   markSaved(): void {
-    this.savedRevision = this.revision;
+    this.endStroke();
+    this.endObjectEdit();
+    this.savedAt = this.undoStack[this.undoStack.length - 1] ?? null;
+  }
+
+  /** A map that exists only here so far (new, or restored from an autosave): unsaved until saved. */
+  markUnsaved(): void {
+    this.savedAt = undefined;
   }
 
   layers(): LayerRef[] {
@@ -113,18 +127,19 @@ export class MapDocument {
     return layer.kind === 'wall' ? { ...next, orientation: brush.orientation } : next;
   }
 
-  beginStroke(): void {
+  beginStroke(label = 'Paint'): void {
     this.endStroke();
     this.stroke = new Map();
+    this.strokeLabel = label;
   }
 
   endStroke(): void {
-    if (this.stroke?.size) this.pushHistory({ cells: [...this.stroke.values()] });
+    if (this.stroke?.size) this.pushHistory({ label: `${this.strokeLabel} (${this.stroke.size} cell${this.stroke.size === 1 ? '' : 's'})`, time: Date.now(), cells: [...this.stroke.values()] });
     this.stroke = null;
   }
 
-  /** Sets cells; returns true if anything changed. */
-  apply(edits: CellEdit[]): boolean {
+  /** Sets cells; returns true if anything changed. Outside a stroke, one undo step named `label`. */
+  apply(edits: CellEdit[], label = 'Edit tiles'): boolean {
     const applied: CellChange[] = [];
     for (const { layer, x, y, cell } of edits) {
       if (!this.inBounds(x, y)) continue;
@@ -143,7 +158,7 @@ export class MapDocument {
         this.stroke.set(k, prev ? { ...c, before: prev.before } : c);
       }
     } else {
-      this.pushHistory({ cells: applied });
+      this.pushHistory({ label: `${label} (${applied.length} cell${applied.length === 1 ? '' : 's'})`, time: Date.now(), cells: applied });
     }
     this.revision++;
     return true;
@@ -153,13 +168,13 @@ export class MapDocument {
    * A structural edit (resize, tag layer, substitution groups) as one undoable step. `fn` either mutates the map in
    * place or returns a replacement map.
    */
-  mutate(fn: (ds1: Ds1) => Ds1 | void): void {
+  mutate(fn: (ds1: Ds1) => Ds1 | void, label = 'Change map'): void {
     this.endStroke();
     this.endObjectEdit();
     const before = structuredClone(this.ds1);
     const result = fn(this.ds1);
     if (result) this.restore(result);
-    this.pushHistory({ cells: [], map: { before, after: structuredClone(this.ds1) } });
+    this.pushHistory({ label, time: Date.now(), cells: [], map: { before, after: structuredClone(this.ds1) } });
     this.revision++;
   }
 
@@ -168,9 +183,9 @@ export class MapDocument {
   }
 
   /** Replaces the object list as one undoable step. */
-  setObjects(next: Ds1Object[]): void {
+  setObjects(next: Ds1Object[], label = 'Edit objects'): void {
     this.endObjectEdit();
-    this.pushHistory({ cells: [], objects: { before: cloneObjects(this.ds1.objects), after: cloneObjects(next) } });
+    this.pushHistory({ label, time: Date.now(), cells: [], objects: { before: cloneObjects(this.ds1.objects), after: cloneObjects(next) } });
     this.ds1.objects = cloneObjects(next);
     this.revision++;
   }
@@ -190,7 +205,7 @@ export class MapDocument {
     const before = this.objectsBefore;
     this.objectsBefore = null;
     if (before && JSON.stringify(before) !== JSON.stringify(this.ds1.objects)) {
-      this.pushHistory({ cells: [], objects: { before, after: cloneObjects(this.ds1.objects) } });
+      this.pushHistory({ label: 'Move objects', time: Date.now(), cells: [], objects: { before, after: cloneObjects(this.ds1.objects) } });
     }
   }
 
@@ -198,6 +213,18 @@ export class MapDocument {
     this.undoStack.push(step);
     if (this.undoStack.length > 500) this.undoStack.shift();
     this.redoStack = [];
+  }
+
+  /** Undo steps (oldest first) and redo steps (next first), for the History panel. */
+  history(): { done: { label: string; time: number }[]; undone: { label: string; time: number }[] } {
+    const info = (s: HistoryStep) => ({ label: s.label, time: s.time });
+    return { done: this.undoStack.map(info), undone: [...this.redoStack].reverse().map(info) };
+  }
+
+  /** Undoes or redoes until `count` steps are done (0 = the map as opened, or as far back as history goes). */
+  goTo(count: number): void {
+    while (this.undoStack.length > count && this.undo());
+    while (this.undoStack.length < count && this.redo());
   }
 
   undo(): boolean {

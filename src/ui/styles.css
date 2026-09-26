@@ -590,3 +590,44 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .st-dot { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 .st-canvas { align-self: center; max-width: 100%; border: 1px solid var(--border); border-radius: 4px; cursor: crosshair; image-rendering: pixelated; }
 .st-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Recent / pinned tiles and the random mix */
+.tile-strip { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
+.tile-strip-label { flex: 0 0 52px; }
+.tile-strip-row { display: flex; gap: 3px; overflow-x: auto; flex: 1; padding-bottom: 2px; }
+.thumb.mini { flex: 0 0 40px; width: 40px; padding: 2px; --thumb-h: 30px; }
+.thumb.mixed { border-color: #7cc8ff; border-style: dashed; }
+.thumb-pin { position: absolute; top: 1px; right: 3px; color: var(--accent); font-size: 11px; pointer-events: none; }
+
+.minimap { position: absolute; left: 10px; bottom: 10px; background: rgba(8, 9, 12, 0.85); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5); }
+
+/* History and object list panels */
+.history-list, .mo-list { display: flex; flex-direction: column; gap: 1px; max-height: 260px; overflow-y: auto; }
+.history-row, .mo-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; text-align: left; background: transparent; border: 0; border-radius: 4px; padding: 4px 6px; color: var(--text); cursor: pointer; font-size: 12px; }
+.history-row:hover, .mo-row:hover { background: var(--hover, rgba(255, 255, 255, 0.06)); }
+.history-row.current { background: rgba(232, 184, 76, 0.15); color: var(--accent); }
+.history-row.undone { color: var(--muted); font-style: italic; }
+.mo-list { margin-top: 6px; }
+.mo-row { justify-content: flex-start; }
+.mo-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mo-kind { font-size: 9.5px; font-weight: 700; border-radius: 3px; padding: 1px 4px; }
+.mo-kind.npc { background: rgba(124, 200, 255, 0.18); color: #7cc8ff; }
+.mo-kind.obj { background: rgba(232, 184, 76, 0.15); color: var(--accent); }
+
+/* Find & replace / export image */
+.rp-pair { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+.rp-arrow { font-size: 22px; color: var(--muted); }
+.rp-tile { flex: 1; }
+.rp-tile-row { display: flex; gap: 8px; align-items: center; }
+.rp-thumb { width: 90px; height: 70px; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 4px; --thumb-h: 64px; }
+.rp-thumb > * { width: 100%; }
+.rp-nums { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.rp-nums input { width: 56px; margin-left: 4px; }
+.rp-options { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0; font-size: 12.5px; }
+.rp-sep { width: 1px; height: 16px; background: var(--border); }
+
+/* Paint modes */
+.paint-modes { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; padding: 0 12px 8px; }
+.recent-maps { margin-top: 18px; text-align: left; max-width: 420px; width: 100%; }
+.recent-maps .mo-row { width: 100%; }
+.mix-clear { margin-left: 8px; text-transform: none; }

@@ -3,7 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 /** Every command that can have a keyboard shortcut. */
 export const ACTIONS = [
   { id: 'tool.select', label: 'Select tool', group: 'Tools', key: 'V' },
-  { id: 'tool.paint', label: 'Paint tool', group: 'Tools', key: 'B' },
+  { id: 'tool.paint', label: 'Paint tool (freehand)', group: 'Tools', key: 'B' },
+  { id: 'tool.rect', label: 'Paint / erase a rectangle', group: 'Tools', key: 'U' },
+  { id: 'tool.fill', label: 'Flood fill / erase a connected area', group: 'Tools', key: 'L' },
   { id: 'tool.erase', label: 'Erase tool', group: 'Tools', key: 'E' },
   { id: 'tool.pick', label: 'Pick tool', group: 'Tools', key: 'I' },
   { id: 'tool.object', label: 'Objects tool', group: 'Tools', key: 'O' },
@@ -18,7 +20,8 @@ export const ACTIONS = [
   { id: 'edit.selectAll', label: 'Select all', group: 'Edit', key: 'Ctrl+A' },
   { id: 'edit.cancel', label: 'Cancel / drop the tile on the cursor / deselect', group: 'Edit', key: 'Escape' },
   { id: 'edit.delete', label: 'Delete (active layer / object)', group: 'Edit', key: 'Delete' },
-  { id: 'edit.deleteAll', label: 'Delete all layers', group: 'Edit', key: 'Shift+Delete' },
+  { id: 'edit.deleteAll', label: 'Delete everything (all layers + objects)', group: 'Edit', key: 'Shift+Delete' },
+  { id: 'edit.replace', label: 'Find & replace tiles', group: 'Edit', key: 'Ctrl+H' },
   { id: 'view.fit', label: 'Fit map', group: 'View', key: 'F' },
   { id: 'view.game', label: 'Game view (what the character sees)', group: 'View', key: 'Z' },
   { id: 'view.grid', label: 'Grid', group: 'View', key: 'G' },
@@ -28,6 +31,7 @@ export const ACTIONS = [
   { id: 'view.markers', label: 'Object markers', group: 'View', key: 'M' },
   { id: 'view.sprites', label: 'Object sprites', group: 'View', key: 'N' },
   { id: 'view.paths', label: 'NPC paths', group: 'View', key: 'P' },
+  { id: 'view.minimap', label: 'Minimap', group: 'View', key: 'K' },
   { id: 'layer.floor1', label: 'Floor 1', group: 'Layers', key: '1' },
   { id: 'layer.floor2', label: 'Floor 2', group: 'Layers', key: '2' },
   { id: 'layer.wall1', label: 'Wall 1', group: 'Layers', key: '3' },

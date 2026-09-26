@@ -83,8 +83,20 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
 
 ### Edit tiles
 
-- **Paint, erase, pick** tiles on any layer; **select** areas to fill, copy, cut, paste or move them — objects come
-  along. Unlimited undo/redo.
+- **Paint, erase, pick** tiles on any layer — freehand, as a **rectangle** (U) or as a **flood fill** of the connected
+  area (L; kept inside the selection when you click in it). **Ctrl+click** more tiles in the Tiles panel to paint a
+  **random mix** of them.
+- **Select** areas to fill, copy, cut, paste or move them. Objects and NPCs come along: select everything (Ctrl+A),
+  cut and paste to move the whole map, objects included. Unlimited undo/redo, with a **History** panel to jump back to
+  any step.
+- **Recent and pinned tiles** above the Tiles panel (right-click a tile to pin it), remembered per tile set.
+- **Find & replace** (Ctrl+H) swaps one tile for another across the map or the selection; **Re-roll** mixes up the
+  tiles of a group already used in the selection so repeats are less visible.
+- **Minimap** in the corner (K): click or drag it to move around.
+- **Autosave**: unsaved changes are kept (in the app's own storage) so a crash or a closed window doesn't lose them;
+  you're offered them when you open the map again. **Recent maps** on the Home tab and the start page, with an option
+  to reopen the last map on start.
+- **Export image**: the map or the selection as a PNG.
 - **Click a tile and it's shown in its DT1** in the Tiles panel, with its main/sub index, orientation and source file.
 - **Overlapping tiles** (trees over trees, a wall over a floor): hold **Shift** and turn the mouse wheel to step
   through them one at a time; only that tile's layer is selected, so copy/cut/Delete leave the others alone.
@@ -101,7 +113,8 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
 ### Objects & NPCs
 
 Every object and NPC for the act as a sprite gallery — click one, then click the map to place it. Animated previews,
-names, and **Tab** to switch between tile and object editing like WinDS1.
+names, and **Tab** to switch between tile and object editing like WinDS1. **In this map** lists every object and NPC
+placed, with counts and search: click a name to jump to it (again for the next one).
 
 ![Object gallery](docs/media/objects.png)
 
@@ -209,7 +222,9 @@ your computer.
 | Action | Default key |
 | --- | --- |
 | Select tool | <kbd>V</kbd> |
-| Paint tool | <kbd>B</kbd> |
+| Paint tool (freehand) | <kbd>B</kbd> |
+| Paint / erase a rectangle | <kbd>U</kbd> |
+| Flood fill / erase a connected area | <kbd>L</kbd> |
 | Erase tool | <kbd>E</kbd> |
 | Pick tool | <kbd>I</kbd> |
 | Objects tool | <kbd>O</kbd> |
@@ -234,7 +249,8 @@ your computer.
 | Select all | <kbd>Ctrl</kbd> + <kbd>A</kbd> |
 | Cancel / drop the tile on the cursor / deselect | <kbd>Escape</kbd> |
 | Delete (active layer / object) | <kbd>Delete</kbd> |
-| Delete all layers | <kbd>Shift</kbd> + <kbd>Delete</kbd> |
+| Delete everything (all layers + objects) | <kbd>Shift</kbd> + <kbd>Delete</kbd> |
+| Find & replace tiles | <kbd>Ctrl</kbd> + <kbd>H</kbd> |
 
 </td><td valign="top">
 
@@ -251,6 +267,7 @@ your computer.
 | Object markers | <kbd>M</kbd> |
 | Object sprites | <kbd>N</kbd> |
 | NPC paths | <kbd>P</kbd> |
+| Minimap | <kbd>K</kbd> |
 
 **Layers** (show / hide)
 
@@ -274,6 +291,9 @@ your computer.
 | Step through stacked tiles | <kbd>Shift</kbd> + wheel |
 | Stack a paste / preset onto existing tiles | <kbd>Alt</kbd> + click |
 | Zoom tile / object thumbnails | <kbd>Ctrl</kbd> + wheel over the panel |
+| Add a tile to the random paint mix | <kbd>Ctrl</kbd> + click it in the Tiles panel |
+| Pin / unpin a tile | Right-click it in the Tiles panel |
+| Move the view | Click or drag on the minimap |
 | Select a range of tiles (DT1 editor) | <kbd>Shift</kbd> + click |
 
 **Pixel painter** (DT1 editor): <kbd>B</kbd> pencil · <kbd>E</kbd> eraser · <kbd>G</kbd> fill · <kbd>I</kbd> colour
