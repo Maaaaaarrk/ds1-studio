@@ -195,3 +195,10 @@ details summary { cursor: pointer; margin-top: 8px; }
 .folder-value { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .folder-value > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-check { margin: -4px 0 6px 4px; }
+
+/* Tile source / focus */
+.dt1-select { font-size: 12px; padding: 5px 6px; }
+.thumb.focused { border-color: #7cc8ff; box-shadow: 0 0 0 2px rgba(124, 200, 255, 0.7); animation: focus-pulse 1.2s ease-out 2; }
+@keyframes focus-pulse { 0% { box-shadow: 0 0 0 6px rgba(124, 200, 255, 0.9); } 100% { box-shadow: 0 0 0 2px rgba(124, 200, 255, 0.7); } }
+.tile-src { display: block; margin-top: 2px; font-size: 11px; text-align: left; }
+.hotkey { font-family: var(--mono); font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; min-width: 16px; text-align: center; }

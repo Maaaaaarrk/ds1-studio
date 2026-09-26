@@ -230,14 +230,29 @@ export class TileLibrary {
     return (orientation << 16) | (main << 8) | sub;
   }
 
+  private sources = new Map<Dt1Tile, { path: string; index: number }>();
+  private byPath = new Map<string, Dt1Tile[]>();
+
   add(path: string, dt1: Dt1 | null): void {
     this.loaded.push({ path, found: !!dt1, tiles: dt1?.tiles.length ?? 0 });
+    if (dt1) this.byPath.set(path, dt1.tiles);
+    dt1?.tiles.forEach((t, index) => this.sources.set(t, { path, index }));
     for (const t of dt1?.tiles ?? []) {
       const k = TileLibrary.key(t.orientation, t.mainIndex, t.subIndex);
       let list = this.byKey.get(k);
       if (!list) this.byKey.set(k, (list = []));
       list.push(t);
     }
+  }
+
+  /** The DT1 a tile was loaded from, and its index in that file. */
+  sourceOf(tile: Dt1Tile): { path: string; index: number } | null {
+    return this.sources.get(tile) ?? null;
+  }
+
+  /** Tiles of one loaded DT1, in file order. */
+  tilesOf(path: string): Dt1Tile[] {
+    return this.byPath.get(path) ?? [];
   }
 
   /** Every distinct (orientation, main, sub) with its variants, in a stable order. */
@@ -251,6 +266,7 @@ export class TileLibrary {
   addFallback(path: string, dt1: Dt1): void {
     const fresh = dt1.tiles.filter((t) => !this.byKey.has(TileLibrary.key(t.orientation, t.mainIndex, t.subIndex)));
     this.add(path, { ...dt1, tiles: fresh });
+    for (const t of fresh) this.sources.set(t, { path, index: dt1.tiles.indexOf(t) });
     for (const t of dt1.tiles) this.labels.set(TileLibrary.key(t.orientation, t.mainIndex, t.subIndex), t);
   }
 

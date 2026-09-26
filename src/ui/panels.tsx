@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { DEFAULT_PROP1, isEmptyCell, withFields, type Ds1, type TileCell, type WallCell } from '../formats/ds1';
-import { Orientation } from '../formats/dt1';
+import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { GameData } from '../game/GameData';
 import { rectSize, type CellRect } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
@@ -24,12 +24,13 @@ function Panel({ title, extra, children, defaultOpen = true }: { title: string; 
   );
 }
 
-function Toggle({ label, checked, onChange, count, swatch }: { label: string; checked: boolean; onChange: (v: boolean) => void; count?: number; swatch?: string }) {
+function Toggle({ label, checked, onChange, count, swatch, hotkey }: { label: string; checked: boolean; onChange: (v: boolean) => void; count?: number; swatch?: string; hotkey?: string }) {
   return (
     <label className="toggle">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {swatch && <span className="swatch" style={{ background: swatch }} />}
       <span className="toggle-label">{label}</span>
+      {hotkey && <kbd className="hotkey">{hotkey}</kbd>}
       {count !== undefined && <span className="muted small">{count}</span>}
     </label>
   );
@@ -49,24 +50,24 @@ export function LayersPanel({ map, scene, visibility: v, onChange }: { map: Open
     <Panel title="Layers">
       <div className="toggle-group">
         {ds1.floors.map((_, i) => (
-          <Toggle key={`f${i}`} label={`Floor ${i + 1}`} checked={v.floors[i]} onChange={(x) => setIdx('floors', i, x)} count={count('floor', i)} />
+          <Toggle key={`f${i}`} label={`Floor ${i + 1}`} hotkey={String(i + 1)} checked={v.floors[i]} onChange={(x) => setIdx('floors', i, x)} count={count('floor', i)} />
         ))}
         {ds1.walls.map((_, i) => (
-          <Toggle key={`w${i}`} label={`Wall ${i + 1}`} checked={v.walls[i]} onChange={(x) => setIdx('walls', i, x)} count={count('wall', i) + count('roof', i) + count('lowerWall', i)} />
+          <Toggle key={`w${i}`} label={`Wall ${i + 1}`} hotkey={String(i + 3)} checked={v.walls[i]} onChange={(x) => setIdx('walls', i, x)} count={count('wall', i) + count('roof', i) + count('lowerWall', i)} />
         ))}
-        <Toggle label="Shadows" checked={v.shadows} onChange={(x) => set({ shadows: x })} count={count('shadow')} />
-        <Toggle label="Roofs" checked={v.roofs} onChange={(x) => set({ roofs: x })} count={count('roof')} />
-        <Toggle label="Lower walls" checked={v.lowerWalls} onChange={(x) => set({ lowerWalls: x })} count={count('lowerWall')} />
+        <Toggle label="Shadows" hotkey="7" checked={v.shadows} onChange={(x) => set({ shadows: x })} count={count('shadow')} />
+        <Toggle label="Roofs" hotkey="8" checked={v.roofs} onChange={(x) => set({ roofs: x })} count={count('roof')} />
+        <Toggle label="Lower walls" hotkey="9" checked={v.lowerWalls} onChange={(x) => set({ lowerWalls: x })} count={count('lowerWall')} />
       </div>
       <div className="toggle-group">
-        <Toggle label="Monsters / NPCs" swatch="rgb(240,80,80)" checked={v.objects} onChange={(x) => set({ objects: x })} count={npcs} />
-        <Toggle label="Object sprites" checked={v.sprites} onChange={(x) => set({ sprites: x })} />
-        <Toggle label="NPC paths" swatch="rgb(255,150,60)" checked={v.paths} onChange={(x) => set({ paths: x })} count={ds1.objects.filter((o) => o.path.length).length} />
-        <Toggle label="Special tiles" swatch="rgb(200,140,255)" checked={v.specials} onChange={(x) => set({ specials: x })} />
+        <Toggle label="Object markers" hotkey="M" swatch="rgb(240,80,80)" checked={v.objects} onChange={(x) => set({ objects: x })} count={npcs} />
+        <Toggle label="Object sprites" hotkey="N" checked={v.sprites} onChange={(x) => set({ sprites: x })} />
+        <Toggle label="NPC paths" hotkey="P" swatch="rgb(255,150,60)" checked={v.paths} onChange={(x) => set({ paths: x })} count={ds1.objects.filter((o) => o.path.length).length} />
+        <Toggle label="Special tiles" hotkey="0" swatch="rgb(200,140,255)" checked={v.specials} onChange={(x) => set({ specials: x })} />
         {ds1.groups.length > 0 && <Toggle label="Substitution groups" swatch="rgb(120,200,255)" checked={v.groups} onChange={(x) => set({ groups: x })} count={ds1.groups.length} />}
         <Toggle label="Missing tiles" swatch="rgb(255,70,90)" checked={v.missing} onChange={(x) => set({ missing: x })} count={scene.missing.length} />
-        <Toggle label="Grid (G)" checked={v.grid} onChange={(x) => set({ grid: x })} />
-        <Toggle label="Walkability (W)" swatch="linear-gradient(90deg, rgb(255,176,40) 50%, rgb(255,60,70) 50%)" checked={v.walkable} onChange={(x) => set({ walkable: x })} />
+        <Toggle label="Grid" hotkey="G" checked={v.grid} onChange={(x) => set({ grid: x })} />
+        <Toggle label="Walkability" hotkey="W" swatch="linear-gradient(90deg, rgb(255,176,40) 50%, rgb(255,60,70) 50%)" checked={v.walkable} onChange={(x) => set({ walkable: x })} />
         {scene.animated && <Toggle label="Animate floors" checked={v.animate} onChange={(x) => set({ animate: x })} />}
       </div>
       <p className="muted small">
@@ -128,10 +129,19 @@ interface CellPanelProps {
   onEdit: (edits: CellEdit[]) => void;
   /** Structural edit (tag values). */
   onMutate: (fn: (ds1: Ds1) => void) => void;
+  scene: Scene;
+  /** Reveal a tile in the Tiles panel. */
+  onFocusTile: (tile: Dt1Tile, layer: LayerRef) => void;
+}
+
+/** The tile actually drawn for a layer of a cell (the chosen variant), if any. */
+function drawnTile(scene: Scene, layer: LayerRef, x: number, y: number): Dt1Tile | null {
+  const kinds = layer.kind === 'floor' ? ['floor'] : layer.kind === 'shadow' ? ['shadow'] : ['wall', 'roof', 'lowerWall', 'special'];
+  return scene.items.find((it) => it.cellX === x && it.cellY === y && it.layer === layer.index && kinds.includes(it.kind))?.tile ?? null;
 }
 
 /** Shows every layer of one cell; editable when that cell is selected. */
-export function CellPanel({ map, doc, cell, editable, onEdit, onMutate }: CellPanelProps) {
+export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile }: CellPanelProps) {
   const { ds1, lib } = map;
   if (!cell) {
     return (
@@ -151,6 +161,13 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate }: CellPa
     const empty = isEmptyCell(c);
     const set = (next: TileCell | WallCell) => onEdit([{ layer, x, y, cell: next }]);
     const label = layerLabel(layer);
+    const drawn = empty ? null : drawnTile(scene, layer, x, y);
+    const src = drawn && lib.sourceOf(drawn);
+    const source = src && (
+      <button className="link mono tile-src" title="Show this tile in its DT1 (Tiles panel)" onClick={() => onFocusTile(drawn, layer)}>
+        {src.path.replace(/^data\/global\/tiles\//i, '')} #{src.index}
+      </button>
+    );
     if (!editable) {
       if (empty) return null;
       return (
@@ -163,6 +180,7 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate }: CellPa
             {layer.kind === 'wall' && <span className="muted"> · {ORIENTATION_NAMES[orientation] ?? `o${orientation}`}</span>}
             {c.hidden && <span className="badge">hidden</span>}
             {!found(orientation, c) && <span className="badge error">missing</span>}
+            {source}
           </td>
           <td className="muted mono small">{hex(c.prop1) + hex(c.prop2) + hex(c.prop3) + hex(c.prop4)}</td>
         </tr>
@@ -205,6 +223,7 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate }: CellPa
             </select>
           )}
           {!empty && !found(orientation, c) && <span className="badge error">missing</span>}
+          {source}
         </td>
       </tr>
     );

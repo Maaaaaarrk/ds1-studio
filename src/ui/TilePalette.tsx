@@ -10,6 +10,7 @@ interface Props {
   palette: Palette;
   layerKind: LayerKind;
   brush: Brush | null;
+  focus: PaletteFocus | null;
   onPick: (b: Brush) => void;
 }
 
@@ -75,22 +76,80 @@ const Thumb = memo(function Thumb({ tile, palette }: { tile: Dt1Tile; palette: P
   return <div ref={ref} className="thumb-img" style={url ? { backgroundImage: `url(${url})` } : undefined} />;
 });
 
-export function TilePalette({ lib, palette, layerKind, brush, onPick }: Props) {
+/** A tile to reveal in the palette (switches to its DT1 and scrolls to it); `seq` re-triggers for the same tile. */
+export interface PaletteFocus {
+  tile: Dt1Tile;
+  seq: number;
+}
+
+interface Entry {
+  orientation: number;
+  main: number;
+  sub: number;
+  tiles: Dt1Tile[];
+  /** Index in its DT1 (single-DT1 view only). */
+  index?: number;
+}
+
+const shortPath = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
+
+export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: Props) {
   const [filter, setFilter] = useState<WallFilter>('all');
   const [query, setQuery] = useState('');
+  const [dt1, setDt1] = useState<string>('all');
+  const grid = useRef<HTMLDivElement>(null);
 
-  const entries = useMemo(() => {
+  // A new map (tile library) starts in the combined view.
+  useEffect(() => setDt1('all'), [lib]);
+
+  // Reveal a focused tile: open its DT1, clear filters, then scroll it into view.
+  useEffect(() => {
+    if (!focus) return;
+    const src = lib.sourceOf(focus.tile);
+    if (src) setDt1(src.path);
+    setFilter('all');
+    setQuery('');
+    requestAnimationFrame(() => grid.current?.querySelector('.thumb.focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  }, [focus, lib]);
+
+  const dt1s = useMemo(
+    () =>
+      lib.loaded
+        .filter((l) => l.found)
+        .map((l) => ({ path: l.path, count: lib.tilesOf(l.path).filter((t) => fitsLayer(layerKind, t.orientation)).length }))
+        .filter((l) => l.count > 0),
+    [lib, layerKind],
+  );
+
+  const entries = useMemo((): Entry[] => {
     const test = layerKind === 'wall' ? WALL_FILTERS.find((f) => f.id === filter)!.test : () => true;
     const q = query.trim();
-    return lib
-      .entries()
+    const all: Entry[] =
+      dt1 === 'all'
+        ? lib.entries()
+        : lib.tilesOf(dt1).map((t, index) => ({ orientation: t.orientation, main: t.mainIndex, sub: t.subIndex, tiles: [t], index }));
+    return all
       .filter((e) => fitsLayer(layerKind, e.orientation) && test(e.orientation))
       .filter((e) => !q || `${e.main}/${e.sub}`.startsWith(q) || String(e.main) === q);
-  }, [lib, layerKind, filter, query]);
+  }, [lib, layerKind, filter, query, dt1]);
+
+  const isFocused = (e: Entry) =>
+    !!focus &&
+    (e.index !== undefined
+      ? e.tiles[0] === focus.tile
+      : e.orientation === focus.tile.orientation && e.main === focus.tile.mainIndex && e.sub === focus.tile.subIndex);
 
   return (
     <div className="tile-palette">
       <div className="palette-controls">
+        <select className="dt1-select" value={dt1} onChange={(e) => setDt1(e.target.value)} title="Browse one tile library (DT1) at a time">
+          <option value="all">All tile libraries (combined)</option>
+          {dt1s.map((d) => (
+            <option key={d.path} value={d.path}>
+              {shortPath(d.path)} ({d.count})
+            </option>
+          ))}
+        </select>
         {layerKind === 'wall' && (
           <div className="chips">
             {WALL_FILTERS.map((f) => (
@@ -102,25 +161,29 @@ export function TilePalette({ lib, palette, layerKind, brush, onPick }: Props) {
         )}
         <input className="search small-input" placeholder="main/sub…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-      <div className="thumb-grid">
+      <div className="thumb-grid" ref={grid}>
         {entries.map((e) => {
           const active = brush && brush.orientation === e.orientation && brush.main === e.main && brush.sub === e.sub;
+          const src = e.index === undefined ? null : `${shortPath(dt1)} #${e.index}`;
+          const variants = e.tiles.length > 1 ? ` · ${e.tiles.length} variants` : '';
+          const rarity = e.index !== undefined ? ` · ${e.tiles[0].animated ? 'frame' : 'rarity'} ${e.tiles[0].rarity}` : '';
           return (
             <button
-              key={`${e.orientation}:${e.main}:${e.sub}`}
-              className={`thumb${active ? ' active' : ''}`}
-              title={`${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}${e.tiles.length > 1 ? ` · ${e.tiles.length} variants` : ''}`}
+              key={e.index !== undefined ? `i${e.index}` : `${e.orientation}:${e.main}:${e.sub}`}
+              className={`thumb${active ? ' active' : ''}${isFocused(e) ? ' focused' : ''}`}
+              title={`${src ? `${src} · ` : ''}${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}${variants}${rarity}`}
               onClick={() => onPick({ orientation: e.orientation, main: e.main, sub: e.sub })}
             >
               <Thumb tile={e.tiles[0]} palette={palette} />
               <span className="thumb-label">
+                {e.index !== undefined && <span className="thumb-o">#{e.index}</span>}
                 {e.main}/{e.sub}
                 {layerKind === 'wall' && <span className="thumb-o">o{e.orientation}</span>}
               </span>
             </button>
           );
         })}
-        {entries.length === 0 && <div className="muted small pad">No tiles for this layer in the loaded DT1s.</div>}
+        {entries.length === 0 && <div className="muted small pad">No tiles for this layer in {dt1 === 'all' ? 'the loaded DT1s' : 'this DT1'}.</div>}
       </div>
     </div>
   );

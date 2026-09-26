@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
-import { Orientation } from '../formats/dt1';
+import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { GameData } from '../game/GameData';
 import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, hitTest, subTileToWorld, tilesAt, worldToSubTile } from '../render/scene';
+import { buildScene, hitTest, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, type SaveTarget } from '../vfs/save';
 import { LayeredFs, type FileSource } from '../vfs/vfs';
@@ -19,7 +19,7 @@ import type { Sprite } from '../game/sprites';
 import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
 import { DesktopSetup } from './DesktopSetup';
 import { ObjectPanel } from './ObjectPanel';
-import { TilePalette } from './TilePalette';
+import { TilePalette, type PaletteFocus } from './TilePalette';
 
 type DataState =
   | { status: 'connecting' }
@@ -31,6 +31,25 @@ interface Toast {
   text: string;
   error?: boolean;
 }
+
+/** The editable layer a drawn item belongs to. */
+function layerOfItem(it: DrawItem): LayerRef {
+  return it.kind === 'floor' ? { kind: 'floor', index: it.layer } : it.kind === 'shadow' ? { kind: 'shadow', index: it.layer } : { kind: 'wall', index: it.layer };
+}
+
+/** Layer visibility toggled by the number keys. */
+const LAYER_KEYS: Record<string, (v: Visibility) => Visibility> = {
+  '1': (v) => ({ ...v, floors: v.floors.map((x, i) => (i === 0 ? !x : x)) }),
+  '2': (v) => ({ ...v, floors: v.floors.map((x, i) => (i === 1 ? !x : x)) }),
+  '3': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 0 ? !x : x)) }),
+  '4': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 1 ? !x : x)) }),
+  '5': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 2 ? !x : x)) }),
+  '6': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 3 ? !x : x)) }),
+  '7': (v) => ({ ...v, shadows: !v.shadows }),
+  '8': (v) => ({ ...v, roofs: !v.roofs }),
+  '9': (v) => ({ ...v, lowerWalls: !v.lowerWalls }),
+  '0': (v) => ({ ...v, specials: !v.specials }),
+};
 
 function isSingleCell(r: CellRect): boolean {
   return r.x0 === r.x1 && r.y0 === r.y1;
@@ -55,6 +74,12 @@ export function App() {
   const [tool, setTool] = useState<Tool>('select');
   const [activeLayer, setActiveLayer] = useState<LayerRef>({ kind: 'floor', index: 0 });
   const [brush, setBrush] = useState<Brush | null>(null);
+  const [paletteFocus, setPaletteFocus] = useState<PaletteFocus | null>(null);
+  /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
+  const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
+    setActiveLayer(layer);
+    setPaletteFocus((f) => ({ tile, seq: (f?.seq ?? 0) + 1 }));
+  }, []);
   const [selection, setSelection] = useState<CellRect | null>(null);
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
@@ -234,7 +259,7 @@ export function App() {
       if (hit) {
         const layer: LayerRef = { kind: hit.kind === 'floor' ? 'floor' : 'wall', index: hit.layer };
         const orientation = hit.tile.orientation === Orientation.LeftPartOfNorthCornerWall ? Orientation.RightPartOfNorthCornerWall : hit.tile.orientation;
-        setActiveLayer(layer);
+        focusTile(hit.tile, layer);
         setBrush({ orientation, main: hit.tile.mainIndex, sub: hit.tile.subIndex });
         setTool('paint');
         notify(`Picked ${hit.tile.mainIndex}/${hit.tile.subIndex} from ${layerLabel(layer)}`);
@@ -256,7 +281,7 @@ export function App() {
       }
       notify('Nothing to pick in that cell.');
     },
-    [doc, scene, visibility, notify],
+    [doc, scene, visibility, notify, focusTile],
   );
 
   const onStroke = useCallback(
@@ -332,7 +357,18 @@ export function App() {
       }
       if (tool === 'select') {
         const cell = cells[cells.length - 1];
-        if (phase === 'start' && cell) selectAnchor.current = cell;
+        if (phase === 'start' && cell) {
+          selectAnchor.current = cell;
+          // Clicking a tile selects the cell it belongs to (tall walls and trees overlap the cells behind them)
+          // and reveals the tile in its DT1 in the Tiles panel.
+          const hit = scene && hitTest(scene, world[0], world[1], (it) => isVisible(it, visibility));
+          if (hit) {
+            selectAnchor.current = [hit.cellX, hit.cellY];
+            focusTile(hit.tile, layerOfItem(hit));
+          }
+          setSelection(clampRect(rectFrom(selectAnchor.current, selectAnchor.current), doc.ds1.width, doc.ds1.height));
+          return;
+        }
         if (cell && selectAnchor.current) setSelection(clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height));
         if (phase === 'end') selectAnchor.current = null;
         return;
@@ -355,7 +391,7 @@ export function App() {
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject],
+    [doc, tool, brush, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, focusTile],
   );
 
   // Selection commands.
@@ -559,6 +595,10 @@ export function App() {
         else if (k === 'f') setFitSignal((n) => n + 1);
         else if (k === 'g') setVisibility((v) => ({ ...v, grid: !v.grid }));
         else if (k === 'w') setVisibility((v) => ({ ...v, walkable: !v.walkable }));
+        else if (LAYER_KEYS[e.key]) setVisibility(LAYER_KEYS[e.key]);
+        else if (k === 'p') setVisibility((v) => ({ ...v, paths: !v.paths }));
+        else if (k === 'm') setVisibility((v) => ({ ...v, objects: !v.objects }));
+        else if (k === 'n') setVisibility((v) => ({ ...v, sprites: !v.sprites }));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -745,6 +785,7 @@ export function App() {
                 palette={map.palette}
                 layerKind={activeLayer.kind}
                 brush={brush}
+                focus={paletteFocus}
                 onPick={(b) => {
                   setBrush(b);
                   setTool('paint');
@@ -772,6 +813,8 @@ export function App() {
               revision={revision}
               onEdit={applyEdits}
               onMutate={mutate}
+              scene={scene}
+              onFocusTile={focusTile}
             />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} />
