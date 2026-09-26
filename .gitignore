@@ -2,3 +2,4 @@ node_modules
 dist
 ds1studio.local.json
 src-tauri/target
+.test-output

@@ -60,7 +60,9 @@ file list; you can override the level type per map in the **Map** panel.
 ## Roadmap
 
 - [x] Viewer: MPQ + loose files, all DS1 versions, walls/floors/shadows/roofs/lower walls, objects, NPC paths, inspector
+- [x] DS1 writer, byte-exact on every vanilla and ProjectD2 v18 preset
+- [x] Tile editing: tile palette, paint/erase/pick, brush preview, undo/redo, save with backup
+- [ ] Rectangle selection: fill, copy/paste, move; per-cell flag editing (hidden, prop bytes)
+- [ ] Objects & NPC paths editing, substitution groups, tag layer, special tiles (warps, spawn points)
+- [ ] Object/monster names, animated floors, walkability (sub-tile flags) overlay
 - [ ] Tauri desktop shell (needs the Rust toolchain)
-- [ ] Object/monster names (obj.txt-style lookup), animated floors, walkability (sub-tile flags) overlay
-- [ ] Editing: tile picker from loaded DT1s, paint/erase/select, undo/redo, DS1 writer (round-trip tested)
-- [ ] Objects & NPC paths editing, substitution groups, tag layer

@@ -11,6 +11,7 @@ export const enum InstanceFlag {
   Shadow = 1,
   Highlight = 2,
   Dim = 4,
+  Ghost = 8,
 }
 
 export interface Instance {
@@ -63,7 +64,7 @@ void main() {
   vec4 c = texelFetch(uPalette, ivec2(i, 0), 0);
   if ((vFlags & 2) != 0) c.rgb = mix(c.rgb, vec3(1.0, 0.78, 0.3), 0.35);
   if ((vFlags & 4) != 0) c.rgb *= 0.35;
-  outColor = vec4(c.rgb, 1.0);
+  outColor = vec4(c.rgb, (vFlags & 8) != 0 ? 0.6 : 1.0);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {

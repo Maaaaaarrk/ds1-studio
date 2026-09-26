@@ -1,5 +1,5 @@
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { Plugin } from 'vite';
 
 /**
@@ -8,6 +8,9 @@ import type { Plugin } from 'vite';
  * Configure in ds1studio.local.json:
  *   { "gameDir": "C:/Program Files/Diablo II", "modDirs": ["C:/Program Files/Diablo II/ProjectD2"], "modMpqs": false }
  * A mod dir may contain a loose `data/` tree and/or its own .mpq files.
+ *
+ * Saving (POST /__d2/save/<game path>) writes .ds1 files under `saveDir`, which defaults to the first mod dir.
+ * The first time an existing file is overwritten, the original is copied to `<name>.bak`.
  */
 
 interface Config {
@@ -15,6 +18,8 @@ interface Config {
   modDirs?: string[];
   /** Also mount .mpq files found in mod dirs (default false). */
   modMpqs?: boolean;
+  /** Where edited files are written (default: first mod dir). */
+  saveDir?: string;
 }
 
 export interface ManifestSource {
@@ -45,12 +50,14 @@ function walk(dir: string, out: string[]): void {
 export function gameDataPlugin(): Plugin {
   let sources: (ManifestSource & { path: string })[] = [];
   const looseLists = new Map<string, string[]>();
+  let saveRoot: string | null = null;
 
   return {
     name: 'ds1studio-gamedata',
     apply: 'serve',
     configResolved(cfg) {
       const conf = loadConfig(cfg.root);
+      saveRoot = conf.saveDir ?? conf.modDirs?.[0] ?? null;
       sources = [];
       for (const [i, mod] of (conf.modDirs ?? []).entries()) {
         if (existsSync(join(mod, 'data'))) sources.push({ id: `mod${i}`, kind: 'loose', label: `${mod}${sep}data`, path: mod });
@@ -76,6 +83,40 @@ export function gameDataPlugin(): Plugin {
         if (parts[0] === 'manifest') {
           res.setHeader('content-type', 'application/json');
           res.end(JSON.stringify(sources.map(({ id, kind, label }) => ({ id, kind, label }))));
+          return;
+        }
+
+        const json = (status: number, body: unknown) => {
+          res.statusCode = status;
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(body));
+        };
+
+        if (parts[0] === 'save-target') {
+          return saveRoot ? json(200, { root: saveRoot }) : json(404, { error: 'No saveDir or modDirs configured in ds1studio.local.json' });
+        }
+
+        if (parts[0] === 'save' && req.method === 'POST') {
+          if (!saveRoot) return json(409, { error: 'No saveDir or modDirs configured in ds1studio.local.json' });
+          const rel = parts.slice(1).join('/');
+          const file = resolve(saveRoot, rel);
+          if (!/\.ds1$/i.test(rel) || !file.startsWith(resolve(saveRoot) + sep)) return json(400, { error: `refusing to write ${rel}` });
+          const chunks: Buffer[] = [];
+          req.on('data', (c: Buffer) => chunks.push(c));
+          req.on('end', () => {
+            try {
+              mkdirSync(dirname(file), { recursive: true });
+              let backup: string | null = null;
+              if (existsSync(file) && !existsSync(`${file}.bak`)) {
+                copyFileSync(file, `${file}.bak`);
+                backup = `${file}.bak`;
+              }
+              writeFileSync(file, Buffer.concat(chunks));
+              json(200, { written: file, backup });
+            } catch (e) {
+              json(500, { error: String(e) });
+            }
+          });
           return;
         }
 

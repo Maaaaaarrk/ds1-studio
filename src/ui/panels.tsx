@@ -3,6 +3,7 @@ import { isEmptyCell, type TileCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { GameData } from '../game/GameData';
 import type { MapOverride, OpenMap } from '../game/openMap';
+import type { Scene } from '../render/scene';
 import type { HoverInfo } from './MapView';
 import { ORIENTATION_NAMES, type Visibility } from './state';
 
@@ -32,8 +33,8 @@ function Toggle({ label, checked, onChange, count, swatch }: { label: string; ch
   );
 }
 
-export function LayersPanel({ map, visibility: v, onChange }: { map: OpenMap; visibility: Visibility; onChange: (v: Visibility) => void }) {
-  const { ds1, scene } = map;
+export function LayersPanel({ map, scene, visibility: v, onChange }: { map: OpenMap; scene: Scene; visibility: Visibility; onChange: (v: Visibility) => void }) {
+  const { ds1 } = map;
   const count = (kind: string, layer?: number) => scene.items.filter((i) => i.kind === kind && (layer === undefined || i.layer === layer)).length;
   const set = (patch: Partial<Visibility>) => onChange({ ...v, ...patch });
   const setIdx = (key: 'floors' | 'walls', i: number, val: boolean) => {
@@ -150,7 +151,7 @@ export function MapInfoPanel({ map, gd, onReopen }: { map: OpenMap; gd: GameData
           <tr><td className="muted">Layers</td><td>{ds1.floors.length} floor · {ds1.walls.length} wall · {ds1.tags.length ? 'tag' : 'no tag'}</td></tr>
           <tr><td className="muted">Objects</td><td>{ds1.objects.length}</td></tr>
           {r.preset && <tr><td className="muted">Preset</td><td>{r.preset.name} <span className="muted">(Def {r.preset.def})</span></td></tr>}
-          <tr><td className="muted">Source</td><td className="small">{map.origin ?? '?'}</td></tr>
+          <tr><td className="muted">Source</td><td className="small">{gd.fs.locate(map.path) ?? '?'}</td></tr>
         </tbody>
       </table>
 

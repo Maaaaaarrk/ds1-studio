@@ -1,5 +1,5 @@
 import { isEmptyCell, type Ds1 } from '../formats/ds1';
-import { isLowerWall, Orientation, type Dt1Tile } from '../formats/dt1';
+import { decodeTile, isLowerWall, Orientation, type Dt1Tile } from '../formats/dt1';
 import type { TileLibrary } from '../game/GameData';
 
 /** Size of one DS1 cell on screen: a 160x80 isometric diamond. */
@@ -54,7 +54,8 @@ export function subTileToWorld(sx: number, sy: number): [number, number] {
   return [(sx - sy) * (TILE_W / 10), (sx + sy) * (TILE_H / 10)];
 }
 
-function place(tile: Dt1Tile, cx: number, cy: number): [number, number] {
+/** World position of a tile's block origin when placed in cell (cx, cy). */
+export function placeTile(tile: Dt1Tile, cx: number, cy: number): [number, number] {
   const [px, py] = cellToWorld(cx, cy);
   // Blocks are relative to the diamond's left corner; walls/shadows hang from its bottom vertex; roofs float above.
   const yAdjust = tile.orientation === Orientation.Floor ? 0 : tile.orientation === Orientation.Roof ? -tile.roofHeight : TILE_H;
@@ -74,7 +75,7 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
       missing.push({ kind, layer, cellX: cx, cellY: cy, orientation, main, sub });
       return;
     }
-    const [x, y] = place(tile, cx, cy);
+    const [x, y] = placeTile(tile, cx, cy);
     items.push({ tile, kind, layer, cellX: cx, cellY: cy, x, y });
   };
   const seedOf = (cx: number, cy: number, layer: number) => (cy * width + cx) * 8 + layer;
@@ -122,7 +123,7 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
     if (c.orientation === Orientation.RightPartOfNorthCornerWall) {
       const partner = lib.pick(Orientation.LeftPartOfNorthCornerWall, c.mainIndex, c.subIndex, seed);
       if (partner) {
-        const [x, y] = place(partner, cx, cy);
+        const [x, y] = placeTile(partner, cx, cy);
         items.push({ tile: partner, kind, layer, cellX: cx, cellY: cy, x, y });
       }
     }
@@ -135,4 +136,26 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
   const [rx] = cellToWorld(width, 0);
   const [, by] = cellToWorld(width, height);
   return { items, missing, bounds: { minX: lx, minY: 0, maxX: rx, maxY: by } };
+}
+
+/** Topmost drawn item whose opaque pixels cover world point (wx, wy). Shadows are skipped. */
+export function hitTest(scene: Scene, wx: number, wy: number, visible: (it: DrawItem) => boolean): DrawItem | null {
+  for (let i = scene.items.length - 1; i >= 0; i--) {
+    const it = scene.items[i];
+    if (it.kind === 'shadow' || !visible(it)) continue;
+    // Cheap reject on the block bounding box before decoding pixels.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const b of it.tile.blocks) {
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + 32);
+      maxY = Math.max(maxY, b.y + (b.format === 1 ? 15 : 32));
+    }
+    const lx = Math.floor(wx - it.x);
+    const ly = Math.floor(wy - it.y);
+    if (lx < minX || ly < minY || lx >= maxX || ly >= maxY) continue;
+    const img = decodeTile(it.tile);
+    if (img && img.pixels[(ly - img.offsetY) * img.width + (lx - img.offsetX)] !== 0) return it;
+  }
+  return null;
 }

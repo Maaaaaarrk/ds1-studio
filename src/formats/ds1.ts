@@ -105,9 +105,12 @@ export function encodeCell(c: TileCell): number {
   return (c.prop1 | (c.prop2 << 8) | (c.prop3 << 16) | (c.prop4 << 24)) >>> 0;
 }
 
-/** Returns a copy of `c` pointing at DT1 tile (main, sub). prop1 = 0 would mean "empty", so it is forced non-zero. */
-export function withTile<T extends TileCell>(c: T, main: number, sub: number): T {
-  const prop1 = c.prop1 || 1;
+/** prop1 values the game's own presets use for newly placed tiles (it is a flags byte; 0 = empty). */
+export const DEFAULT_PROP1 = { floor: 0xc2, wall: 0x81, shadow: 0x80 } as const;
+
+/** Returns a copy of `c` pointing at DT1 tile (main, sub). An empty cell gets `defaultProp1`; otherwise its flags are kept. */
+export function withTile<T extends TileCell>(c: T, main: number, sub: number, defaultProp1: number): T {
+  const prop1 = c.prop1 || defaultProp1;
   const prop2 = sub & 0xff;
   const prop3 = ((main & 0x0f) << 4) | (c.prop3 & 0x0f);
   const prop4 = (c.prop4 & 0x7c) | ((main >> 4) & 0x03); // clears the hidden bit

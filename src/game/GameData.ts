@@ -167,6 +167,13 @@ export class TileLibrary {
     }
   }
 
+  /** Every distinct (orientation, main, sub) with its variants, in a stable order. */
+  entries(): { orientation: number; main: number; sub: number; tiles: Dt1Tile[] }[] {
+    return [...this.byKey]
+      .sort(([a], [b]) => a - b)
+      .map(([k, tiles]) => ({ orientation: k >>> 16, main: (k >>> 8) & 0xff, sub: k & 0xff, tiles }));
+  }
+
   variants(orientation: number, main: number, sub: number): Dt1Tile[] {
     return this.byKey.get(TileLibrary.key(orientation, main, sub)) ?? [];
   }

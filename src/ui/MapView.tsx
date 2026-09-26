@@ -1,29 +1,43 @@
 import { useEffect, useRef } from 'react';
-import { Orientation } from '../formats/dt1';
+import { Orientation, type Dt1Tile } from '../formats/dt1';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
-import { cellToWorld, subTileToWorld, worldToCell, type DrawItem } from '../render/scene';
-import type { Visibility } from './state';
+import { cellToWorld, subTileToWorld, worldToCell, type DrawItem, type Scene } from '../render/scene';
+import type { Tool, Visibility } from './state';
 
 export interface HoverInfo {
   cellX: number;
   cellY: number;
 }
 
+/** A tile drawn translucently as a brush preview. */
+export interface GhostTile {
+  tile: Dt1Tile;
+  x: number;
+  y: number;
+}
+
+export type StrokePhase = 'start' | 'move' | 'end';
+
 interface Props {
   map: OpenMap;
+  scene: Scene;
   visibility: Visibility;
   hover: HoverInfo | null;
+  tool: Tool;
+  ghost: GhostTile[];
   onHover: (h: HoverInfo | null) => void;
   onZoom: (zoom: number) => void;
+  /** Tool strokes in cell coordinates; `cells` are all cells crossed since the last event, `world` is the cursor. */
+  onStroke: (phase: StrokePhase, cells: [number, number][], world: [number, number]) => void;
   /** Bumped by the parent to request "fit map to view". */
   fitSignal: number;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
 
-function isVisible(it: DrawItem, v: Visibility): boolean {
+export function isVisible(it: DrawItem, v: Visibility): boolean {
   switch (it.kind) {
     case 'floor':
       return v.floors[it.layer] ?? true;
@@ -38,17 +52,40 @@ function isVisible(it: DrawItem, v: Visibility): boolean {
   }
 }
 
-export function MapView({ map, visibility, hover, onHover, onZoom, fitSignal }: Props) {
+/** Cells on the grid line from a to b (inclusive), so fast drags don't skip cells. */
+function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [number, number][] {
+  const out: [number, number][] = [];
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    out.push([x0, y0]);
+    if (x0 === x1 && y0 === y1) return out;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x0 += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+}
+
+export function MapView({ map, scene, visibility, hover, tool, ghost, onHover, onZoom, onStroke, fitSignal }: Props) {
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
   const atlas = useRef(new TileAtlas());
   const camera = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const dirty = useRef(true);
-  const latest = useRef({ map, visibility, hover });
-  latest.current = { map, visibility, hover };
+  const latest = useRef({ map, scene, visibility, hover, tool, onHover, onZoom, onStroke });
+  latest.current = { map, scene, visibility, hover, tool, onHover, onZoom, onStroke };
 
-  // One renderer per canvas.
+  // One renderer per canvas; redraw on demand.
   useEffect(() => {
     renderer.current = new MapRenderer(glCanvas.current!);
     let raf = 0;
@@ -75,11 +112,11 @@ export function MapView({ map, visibility, hover, onHover, onZoom, fitSignal }: 
 
   const fit = () => {
     const c = glCanvas.current!;
-    const { minX, minY, maxX, maxY } = map.scene.bounds;
+    const { minX, minY, maxX, maxY } = latest.current.scene.bounds;
     const dpr = window.devicePixelRatio || 1;
     const zoom = Math.min((c.clientWidth * dpr) / (maxX - minX + 160), (c.clientHeight * dpr) / (maxY - minY + 240), 2 * dpr);
     camera.current = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, zoom };
-    onZoom(zoom / dpr);
+    latest.current.onZoom(zoom / dpr);
     dirty.current = true;
   };
 
@@ -88,111 +125,147 @@ export function MapView({ map, visibility, hover, onHover, onZoom, fitSignal }: 
     atlas.current = new TileAtlas();
     renderer.current!.setPalette(map.palette);
     fit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
   useEffect(() => {
     if (fitSignal) fit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitSignal]);
 
-  // Rebuild instances when the map, layer visibility or hover changes.
+  // Rebuild instances when the scene, layer visibility, hover or brush preview changes.
   useEffect(() => {
     const instances: Instance[] = [];
     const a = atlas.current;
-    for (const it of map.scene.items) {
+    const push = (tile: Dt1Tile, x: number, y: number, flags: number) => {
+      const e = a.get(tile);
+      if (!e) return;
+      instances.push({ x: x + e.image.offsetX, y: y + e.image.offsetY, w: e.image.width, h: e.image.height, u: e.u, v: e.v, layer: e.layer, flags });
+    };
+    for (const it of scene.items) {
       if (!isVisible(it, visibility)) continue;
-      const e = a.get(it.tile);
-      if (!e) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : 0;
-      if (hover && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow') flags |= InstanceFlag.Highlight;
-      instances.push({
-        x: it.x + e.image.offsetX,
-        y: it.y + e.image.offsetY,
-        w: e.image.width,
-        h: e.image.height,
-        u: e.u,
-        v: e.v,
-        layer: e.layer,
-        flags,
-      });
+      if (hover && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
+      push(it.tile, it.x, it.y, flags);
     }
+    for (const g of ghost) push(g.tile, g.x, g.y, InstanceFlag.Ghost);
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [map, visibility, hover]);
+  }, [scene, visibility, hover, ghost]);
 
-  // Input: drag to pan (left or middle button), wheel to zoom around the cursor.
+  // Input.
   useEffect(() => {
     const el = overlay.current!;
-    let drag: { x: number; y: number } | null = null;
+    let pan: { x: number; y: number } | null = null;
+    let stroke: [number, number] | null = null;
+    let space = false;
     const dpr = () => window.devicePixelRatio || 1;
     const toWorld = (ev: MouseEvent): [number, number] => {
       const r = el.getBoundingClientRect();
       const cam = camera.current;
-      return [
-        cam.x + ((ev.clientX - r.left) * dpr() - el.width / 2) / cam.zoom,
-        cam.y + ((ev.clientY - r.top) * dpr() - el.height / 2) / cam.zoom,
-      ];
+      return [cam.x + ((ev.clientX - r.left) * dpr() - el.width / 2) / cam.zoom, cam.y + ((ev.clientY - r.top) * dpr() - el.height / 2) / cam.zoom];
+    };
+    const toCell = (ev: MouseEvent): [number, number] => {
+      const [fx, fy] = worldToCell(...toWorld(ev));
+      return [Math.floor(fx), Math.floor(fy)];
+    };
+    const setCursor = () => {
+      const t = latest.current.tool;
+      el.style.cursor = pan ? 'grabbing' : space || t === 'select' ? 'grab' : t === 'pick' ? 'copy' : 'crosshair';
     };
     const down = (ev: PointerEvent) => {
-      if (ev.button !== 0 && ev.button !== 1) return;
-      drag = { x: ev.clientX, y: ev.clientY };
       el.setPointerCapture(ev.pointerId);
-      el.style.cursor = 'grabbing';
+      const toolDrag = ev.button === 0 && !space && latest.current.tool !== 'select';
+      if (toolDrag) {
+        stroke = toCell(ev);
+        latest.current.onStroke('start', [stroke], toWorld(ev));
+      } else if (ev.button <= 2) {
+        pan = { x: ev.clientX, y: ev.clientY };
+      }
+      setCursor();
     };
     const move = (ev: PointerEvent) => {
-      if (drag) {
+      if (pan) {
         const cam = camera.current;
-        cam.x -= ((ev.clientX - drag.x) * dpr()) / cam.zoom;
-        cam.y -= ((ev.clientY - drag.y) * dpr()) / cam.zoom;
-        drag = { x: ev.clientX, y: ev.clientY };
+        cam.x -= ((ev.clientX - pan.x) * dpr()) / cam.zoom;
+        cam.y -= ((ev.clientY - pan.y) * dpr()) / cam.zoom;
+        pan = { x: ev.clientX, y: ev.clientY };
         dirty.current = true;
       }
-      const [wx, wy] = toWorld(ev);
-      const [fx, fy] = worldToCell(wx, wy);
-      const cx = Math.floor(fx);
-      const cy = Math.floor(fy);
-      const { map: m, hover: h } = latest.current;
+      const [cx, cy] = toCell(ev);
+      if (stroke && (cx !== stroke[0] || cy !== stroke[1])) {
+        latest.current.onStroke('move', cellLine(stroke, [cx, cy]).slice(1), toWorld(ev));
+        stroke = [cx, cy];
+      }
+      const { map: m, hover: h, onHover: hov } = latest.current;
       const inside = cx >= 0 && cy >= 0 && cx < m.ds1.width && cy < m.ds1.height;
       if (!inside) {
-        if (h) onHover(null);
+        if (h) hov(null);
       } else if (!h || h.cellX !== cx || h.cellY !== cy) {
-        onHover({ cellX: cx, cellY: cy });
+        hov({ cellX: cx, cellY: cy });
       }
     };
     const up = (ev: PointerEvent) => {
-      drag = null;
-      el.releasePointerCapture(ev.pointerId);
-      el.style.cursor = '';
+      if (stroke) latest.current.onStroke('end', [], toWorld(ev));
+      stroke = null;
+      pan = null;
+      if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
+      setCursor();
     };
     const wheel = (ev: WheelEvent) => {
       ev.preventDefault();
       const cam = camera.current;
-      const [wx, wy] = toWorld(ev);
+      const r = el.getBoundingClientRect();
+      const wx = cam.x + ((ev.clientX - r.left) * dpr() - el.width / 2) / cam.zoom;
+      const wy = cam.y + ((ev.clientY - r.top) * dpr() - el.height / 2) / cam.zoom;
       const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015));
       const zoom = Math.min(Math.max(cam.zoom * factor, 0.05), 8 * dpr());
       // Keep the world point under the cursor fixed.
       cam.x = wx - (wx - cam.x) * (cam.zoom / zoom);
       cam.y = wy - (wy - cam.y) * (cam.zoom / zoom);
       cam.zoom = zoom;
-      onZoom(zoom / dpr());
+      latest.current.onZoom(zoom / dpr());
       dirty.current = true;
     };
-    const leave = () => latest.current.hover && onHover(null);
+    const leave = () => latest.current.hover && latest.current.onHover(null);
+    const keydown = (ev: KeyboardEvent) => {
+      if (ev.code === 'Space' && !(ev.target instanceof HTMLInputElement)) {
+        space = true;
+        setCursor();
+        ev.preventDefault();
+      }
+    };
+    const keyup = (ev: KeyboardEvent) => {
+      if (ev.code === 'Space') {
+        space = false;
+        setCursor();
+      }
+    };
+    setCursor();
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
     el.addEventListener('pointerleave', leave);
     el.addEventListener('wheel', wheel, { passive: false });
+    window.addEventListener('keydown', keydown);
+    window.addEventListener('keyup', keyup);
     return () => {
       el.removeEventListener('pointerdown', down);
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
       el.removeEventListener('pointerleave', leave);
       el.removeEventListener('wheel', wheel);
+      window.removeEventListener('keydown', keydown);
+      window.removeEventListener('keyup', keyup);
     };
-  }, [onHover, onZoom]);
+  }, []);
+
+  // Keep the cursor in sync with the tool.
+  useEffect(() => {
+    const el = overlay.current!;
+    el.style.cursor = tool === 'select' ? 'grab' : tool === 'pick' ? 'copy' : 'crosshair';
+  }, [tool]);
 
   return (
     <div className="viewport">
@@ -214,9 +287,13 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
   ctx.closePath();
 }
 
-function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: { map: OpenMap; visibility: Visibility; hover: HoverInfo | null }) {
+function drawOverlay(
+  canvas: HTMLCanvasElement,
+  cam: Camera,
+  s: { map: OpenMap; scene: Scene; visibility: Visibility; hover: HoverInfo | null; tool: Tool },
+) {
   const ctx = canvas.getContext('2d')!;
-  const { map, visibility: v, hover } = s;
+  const { map, scene, visibility: v, hover, tool } = s;
   const { ds1 } = map;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -245,37 +322,35 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: { map: OpenMap; 
   if (v.groups && ds1.groups.length) {
     ctx.lineWidth = 2 * px;
     ctx.setLineDash([6 * px, 4 * px]);
-    ds1.groups.forEach((g) => {
+    ctx.strokeStyle = 'rgba(120, 200, 255, 0.8)';
+    for (const g of ds1.groups) {
       ctx.beginPath();
       diamond(ctx, g.x, g.y, g.width, g.height);
-      ctx.strokeStyle = 'rgba(120, 200, 255, 0.8)';
       ctx.stroke();
-    });
+    }
     ctx.setLineDash([]);
   }
 
   if (v.specials) {
     ctx.lineWidth = 2 * px;
-    ds1.walls.forEach((cells) =>
+    ctx.fillStyle = 'rgba(180, 110, 255, 0.25)';
+    ctx.strokeStyle = 'rgba(200, 140, 255, 0.9)';
+    for (const cells of ds1.walls) {
       cells.forEach((c, i) => {
         if (c.prop1 === 0 || (c.orientation !== Orientation.SpecialTile1 && c.orientation !== Orientation.SpecialTile2)) return;
-        const cx = i % ds1.width;
-        const cy = Math.floor(i / ds1.width);
         ctx.beginPath();
-        diamond(ctx, cx + 0.15, cy + 0.15, 0.7, 0.7);
-        ctx.fillStyle = 'rgba(180, 110, 255, 0.25)';
-        ctx.strokeStyle = 'rgba(200, 140, 255, 0.9)';
+        diamond(ctx, (i % ds1.width) + 0.15, Math.floor(i / ds1.width) + 0.15, 0.7, 0.7);
         ctx.fill();
         ctx.stroke();
-      }),
-    );
+      });
+    }
   }
 
-  if (v.missing && map.scene.missing.length) {
+  if (v.missing && scene.missing.length) {
     ctx.lineWidth = 1.5 * px;
     ctx.strokeStyle = 'rgba(255, 70, 90, 0.85)';
     ctx.fillStyle = 'rgba(255, 70, 90, 0.12)';
-    for (const m of map.scene.missing) {
+    for (const m of scene.missing) {
       ctx.beginPath();
       diamond(ctx, m.cellX + 0.08, m.cellY + 0.08, 0.84, 0.84);
       ctx.fill();
@@ -287,22 +362,22 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: { map: OpenMap; 
     ctx.beginPath();
     diamond(ctx, hover.cellX, hover.cellY);
     ctx.lineWidth = 2 * px;
-    ctx.strokeStyle = 'rgba(255, 205, 110, 0.95)';
+    ctx.strokeStyle = tool === 'erase' ? 'rgba(255, 90, 110, 0.95)' : 'rgba(255, 205, 110, 0.95)';
     ctx.stroke();
   }
 
   if (v.paths) {
     ctx.lineWidth = 1.5 * px;
+    ctx.strokeStyle = 'rgba(255, 150, 60, 0.9)';
+    ctx.fillStyle = 'rgba(255, 150, 60, 0.9)';
     for (const o of ds1.objects) {
       if (!o.path.length) continue;
       ctx.beginPath();
       ctx.moveTo(...subTileToWorld(o.x, o.y));
       for (const p of o.path) ctx.lineTo(...subTileToWorld(p.x, p.y));
-      ctx.strokeStyle = 'rgba(255, 150, 60, 0.9)';
       ctx.stroke();
       for (const p of o.path) {
         const [x, y] = subTileToWorld(p.x, p.y);
-        ctx.fillStyle = 'rgba(255, 150, 60, 0.9)';
         ctx.fillRect(x - 2 * px, y - 2 * px, 4 * px, 4 * px);
       }
     }

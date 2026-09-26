@@ -113,3 +113,29 @@ details summary { cursor: pointer; margin-top: 8px; }
 .setup { height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at top, #1a1710 0%, var(--bg) 60%); }
 .setup-card { width: min(520px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 28px; }
 .setup-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+
+/* Editing */
+.toolbar { display: flex; align-items: center; gap: 8px; }
+.segmented { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.segmented button { background: var(--panel-2); border: 0; border-right: 1px solid var(--border); padding: 5px 11px; cursor: pointer; }
+.segmented button:last-child { border-right: 0; }
+.segmented button:hover:not(:disabled) { background: #1e222a; }
+.segmented button.active { background: var(--accent-dim); color: #f1d9a6; box-shadow: inset 0 -2px 0 var(--accent); }
+.segmented button:disabled { opacity: 0.4; cursor: default; }
+.layer-select { width: auto; padding: 5px 8px; }
+.dirty-dot { display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.panel-header.static { cursor: default; }
+
+.tile-palette { padding: 0 12px 12px; }
+.palette-controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; cursor: pointer; }
+.chip.active { border-color: var(--accent); color: #f1d9a6; background: var(--accent-dim); }
+.small-input { margin: 0; padding: 5px 8px; font-size: 12px; }
+.thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 4px; max-height: 300px; overflow-y: auto; padding-right: 2px; }
+.thumb { display: flex; flex-direction: column; align-items: stretch; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 3px; cursor: pointer; }
+.thumb:hover { border-color: #3a404c; }
+.thumb.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.thumb-img { height: 52px; background: center / contain no-repeat; image-rendering: pixelated; }
+.thumb-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.thumb-o { color: #6f7785; }

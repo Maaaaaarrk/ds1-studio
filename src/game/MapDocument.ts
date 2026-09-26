@@ -1,0 +1,175 @@
+import { DEFAULT_PROP1, EMPTY_CELL, withTile, type Ds1, type TileCell, type WallCell } from '../formats/ds1';
+
+export type LayerKind = 'floor' | 'wall' | 'shadow';
+
+export interface LayerRef {
+  kind: LayerKind;
+  index: number;
+}
+
+export function layerKey(l: LayerRef): string {
+  return `${l.kind}:${l.index}`;
+}
+
+export function layerLabel(l: LayerRef): string {
+  return l.kind === 'shadow' ? 'Shadow' : `${l.kind === 'floor' ? 'Floor' : 'Wall'} ${l.index + 1}`;
+}
+
+/** A DT1 tile identity to paint with. */
+export interface Brush {
+  orientation: number;
+  main: number;
+  sub: number;
+}
+
+type AnyCell = TileCell | WallCell;
+
+interface CellChange {
+  layer: LayerRef;
+  index: number;
+  before: AnyCell;
+  after: AnyCell;
+}
+
+export interface CellEdit {
+  layer: LayerRef;
+  x: number;
+  y: number;
+  cell: AnyCell;
+}
+
+/**
+ * An open, editable DS1. All mutations go through `apply`, which records undo history.
+ * Changes made between beginStroke/endStroke undo as a single step.
+ */
+export class MapDocument {
+  private undoStack: CellChange[][] = [];
+  private redoStack: CellChange[][] = [];
+  private stroke: Map<string, CellChange> | null = null;
+  private savedRevision = 0;
+  revision = 0;
+
+  constructor(
+    public path: string,
+    readonly ds1: Ds1,
+  ) {}
+
+  get dirty(): boolean {
+    return this.revision !== this.savedRevision;
+  }
+
+  get canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  get canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
+  markSaved(): void {
+    this.savedRevision = this.revision;
+  }
+
+  layers(): LayerRef[] {
+    return [
+      ...this.ds1.floors.map((_, index) => ({ kind: 'floor' as const, index })),
+      ...this.ds1.walls.map((_, index) => ({ kind: 'wall' as const, index })),
+      ...this.ds1.shadows.map((_, index) => ({ kind: 'shadow' as const, index })),
+    ];
+  }
+
+  private cells(layer: LayerRef): AnyCell[] {
+    const list = layer.kind === 'floor' ? this.ds1.floors : layer.kind === 'wall' ? this.ds1.walls : this.ds1.shadows;
+    const cells = list[layer.index];
+    if (!cells) throw new Error(`no ${layerKey(layer)} layer`);
+    return cells;
+  }
+
+  cell(layer: LayerRef, x: number, y: number): AnyCell {
+    return this.cells(layer)[y * this.ds1.width + x];
+  }
+
+  inBounds(x: number, y: number): boolean {
+    return x >= 0 && y >= 0 && x < this.ds1.width && y < this.ds1.height;
+  }
+
+  /** What `current` becomes when painted with `brush` on `layer` (null brush = erase). */
+  static painted(layer: LayerRef, current: AnyCell, brush: Brush | null): AnyCell {
+    if (!brush) {
+      return layer.kind === 'wall' ? { ...EMPTY_CELL, orientation: 0, orientationHigh: (current as WallCell).orientationHigh } : EMPTY_CELL;
+    }
+    const next = withTile(current, brush.main, brush.sub, DEFAULT_PROP1[layer.kind]);
+    return layer.kind === 'wall' ? { ...next, orientation: brush.orientation } : next;
+  }
+
+  beginStroke(): void {
+    this.endStroke();
+    this.stroke = new Map();
+  }
+
+  endStroke(): void {
+    if (this.stroke?.size) this.pushHistory([...this.stroke.values()]);
+    this.stroke = null;
+  }
+
+  /** Sets cells; returns true if anything changed. */
+  apply(edits: CellEdit[]): boolean {
+    const applied: CellChange[] = [];
+    for (const { layer, x, y, cell } of edits) {
+      if (!this.inBounds(x, y)) continue;
+      const cells = this.cells(layer);
+      const index = y * this.ds1.width + x;
+      const before = cells[index];
+      if (sameCell(before, cell)) continue;
+      cells[index] = cell;
+      applied.push({ layer, index, before, after: cell });
+    }
+    if (!applied.length) return false;
+    if (this.stroke) {
+      for (const c of applied) {
+        const k = `${layerKey(c.layer)}@${c.index}`;
+        const prev = this.stroke.get(k);
+        this.stroke.set(k, prev ? { ...c, before: prev.before } : c);
+      }
+    } else {
+      this.pushHistory(applied);
+    }
+    this.revision++;
+    return true;
+  }
+
+  private pushHistory(changes: CellChange[]): void {
+    this.undoStack.push(changes);
+    if (this.undoStack.length > 500) this.undoStack.shift();
+    this.redoStack = [];
+  }
+
+  undo(): boolean {
+    this.endStroke();
+    const step = this.undoStack.pop();
+    if (!step) return false;
+    for (const c of [...step].reverse()) this.cells(c.layer)[c.index] = c.before;
+    this.redoStack.push(step);
+    this.revision++;
+    return true;
+  }
+
+  redo(): boolean {
+    const step = this.redoStack.pop();
+    if (!step) return false;
+    for (const c of step) this.cells(c.layer)[c.index] = c.after;
+    this.undoStack.push(step);
+    this.revision++;
+    return true;
+  }
+}
+
+function sameCell(a: AnyCell, b: AnyCell): boolean {
+  return (
+    a.prop1 === b.prop1 &&
+    a.prop2 === b.prop2 &&
+    a.prop3 === b.prop3 &&
+    a.prop4 === b.prop4 &&
+    (a as WallCell).orientation === (b as WallCell).orientation
+  );
+}

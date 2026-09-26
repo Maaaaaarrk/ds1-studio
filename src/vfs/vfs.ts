@@ -68,11 +68,43 @@ export class LooseSource implements FileSource {
   list() {
     return [...this.files.keys()];
   }
+
+  private labels = new Map<string, string>();
+
+  /** Adds or replaces a file. `label` optionally overrides the source label for this file. */
+  set(path: string, open: () => Promise<Uint8Array>, label?: string): void {
+    const key = normalizePath(path);
+    for (const k of this.files.keys()) if (normalizePath(k) === key) this.files.delete(k);
+    this.files.set(path, open);
+    this.index.set(key, open);
+    if (label) this.labels.set(key, label);
+  }
+
+  labelOf(path: string): string {
+    return this.labels.get(normalizePath(path)) ?? this.label;
+  }
 }
 
 /** Sources in priority order: the first source that has a file wins (mods override patch_d2 > d2exp > d2data). */
 export class LayeredFs {
-  constructor(readonly sources: FileSource[]) {}
+  readonly sources: FileSource[];
+  /** Files saved this session; they shadow every other source so re-opening shows the edit. */
+  private readonly saved = new LooseSource('Saved this session', new Map());
+
+  constructor(sources: FileSource[]) {
+    this.sources = [this.saved, ...sources];
+  }
+
+  /** The real (non-overlay) sources, for display. */
+  get baseSources(): FileSource[] {
+    return this.sources.slice(1);
+  }
+
+  /** Records a file written by a save target. */
+  remember(path: string, bytes: Uint8Array, label: string): void {
+    const copy = bytes.slice();
+    this.saved.set(path, async () => copy.slice(), label);
+  }
 
   async read(path: string): Promise<Uint8Array | null> {
     for (const s of this.sources) {
@@ -90,6 +122,7 @@ export class LayeredFs {
 
   /** Which source provides a path (for the UI). */
   locate(path: string): string | null {
+    if (this.saved.has(path)) return this.saved.labelOf(path);
     return this.sources.find((s) => s.has(path))?.label ?? null;
   }
 

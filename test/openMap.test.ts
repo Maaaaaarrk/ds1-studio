@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GameData } from '../src/game/GameData';
 import { openMap } from '../src/game/openMap';
+import { buildScene } from '../src/render/scene';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
 import { D2_DIR, hasD2 } from '../tools/testdata';
@@ -19,10 +20,11 @@ describe.runIf(hasD2)('open vanilla maps', async () => {
     'data/global/tiles/Expansion/Town/townWest.ds1',
   ])('%s resolves via LvlPrest with every tile found', async (path) => {
     const map = await openMap(gd, path);
+    const scene = buildScene(map.ds1, map.lib);
     expect(map.resolution.source).toBe('lvlprest');
     expect(map.lib.loaded.every((l) => l.found)).toBe(true);
-    expect(map.scene.items.length).toBeGreaterThan(100);
-    expect(map.scene.missing).toEqual([]);
+    expect(scene.items.length).toBeGreaterThan(100);
+    expect(scene.missing).toEqual([]);
   });
 
   it('most vanilla presets render with no missing tiles', async () => {
@@ -31,7 +33,8 @@ describe.runIf(hasD2)('open vanilla maps', async () => {
     for (const p of all) {
       try {
         const m = await openMap(gd, p);
-        if (m.scene.missing.length) bad.push(`${p}: ${m.scene.missing.length} missing (${m.resolution.source})`);
+        const missing = buildScene(m.ds1, m.lib).missing.length;
+        if (missing) bad.push(`${p}: ${missing} missing (${m.resolution.source})`);
       } catch (e) {
         bad.push(`${p}: ${(e as Error).message}`);
       }
