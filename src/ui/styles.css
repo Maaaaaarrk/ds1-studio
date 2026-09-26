@@ -136,7 +136,7 @@ details summary { cursor: pointer; margin-top: 8px; }
 .thumb { display: flex; flex-direction: column; align-items: stretch; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 3px; cursor: pointer; }
 .thumb:hover { border-color: #3a404c; }
 .thumb.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.thumb-img { height: var(--thumb-h, 52px); background: center / contain no-repeat; image-rendering: pixelated; }
+.thumb-img { height: var(--thumb-h, 52px); background: center / contain no-repeat; image-rendering: auto; }
 .thumb-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 2px; }
 .thumb-o { color: #6f7785; }
 
@@ -256,7 +256,7 @@ details summary { cursor: pointer; margin-top: 8px; }
 .preset-main { display: flex; flex-direction: column; background: none; border: 0; padding: 4px; cursor: pointer; text-align: left; color: var(--text); }
 .preset-main:hover:not(:disabled) { background: var(--panel-2); }
 .preset-main:disabled { cursor: default; }
-.preset-img { height: 84px; background: center / contain no-repeat; image-rendering: pixelated; }
+.preset-img { height: 84px; background: center / contain no-repeat; image-rendering: auto; }
 .preset-name { font-size: 12px; font-weight: 550; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preset-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preset-card .link { padding: 2px 6px 4px; text-align: left; }
@@ -440,3 +440,29 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 
 /* The hidden attribute always wins over layout display rules. */
 [hidden] { display: none !important; }
+
+/* Floating windows (e.g. the DT1 editor's tile zoom) */
+.fw { position: fixed; z-index: 1000; display: flex; flex-direction: column; background: var(--panel, #16181d); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55); min-width: 0; }
+.fw-title { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; cursor: move; user-select: none; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+.fw-title-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fw-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fw-handle { position: absolute; z-index: 2; }
+.fw-n, .fw-s { left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+.fw-n { top: -4px; }
+.fw-s { bottom: -4px; }
+.fw-e, .fw-w { top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+.fw-e { right: -4px; }
+.fw-w { left: -4px; }
+.fw-ne, .fw-nw, .fw-se, .fw-sw { width: 14px; height: 14px; }
+.fw-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.fw-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.fw-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.fw-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+.fw-se::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 8px; height: 8px; border-right: 2px solid var(--muted, #888); border-bottom: 2px solid var(--muted, #888); opacity: 0.6; }
+.tz { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tz-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 8px; }
+.tz-bar .btn.active { border-color: var(--accent, #d4a84f); }
+.tz-view { flex: 1; min-height: 0; position: relative; overflow: hidden; cursor: grab; border-radius: 0 0 8px 8px; }
+.tz-view:active { cursor: grabbing; }
+.tz-view canvas { position: absolute; inset: 0; display: block; }
+.tz-bar select { width: auto; }

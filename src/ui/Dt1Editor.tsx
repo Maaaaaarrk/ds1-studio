@@ -3,6 +3,8 @@ import { isEmptyCell, type WallCell } from '../formats/ds1';
 import { decodeTile, Orientation, type Dt1, type TileImage } from '../formats/dt1';
 import { setManyTilePixels } from '../formats/dt1Paint';
 import { ImageThumb, PixelPainter } from './PixelPainter';
+import { FloatingWindow } from './FloatingWindow';
+import { TileZoom } from './TileZoom';
 import type { Palette } from '../formats/palette';
 import { hueRemap, recolorDt1, swapRemap } from '../formats/dt1Edit';
 import type { GameData } from '../game/GameData';
@@ -78,12 +80,15 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   /** Pixel edits per tile index, applied (before any recolour) when saving. */
   const [edits, setEdits] = useState<Map<number, TileImage>>(new Map());
   const [painting, setPainting] = useState<number | null>(null);
+  /** The tile shown in the zoom window (the last one clicked). */
+  const [zoomed, setZoomed] = useState<number | null>(null);
 
   useEffect(() => {
     setDt1(null);
     setPicked(new Set());
     setEdits(new Map());
     setPainting(null);
+    setZoomed(null);
     if (!path) return;
     void gd.dt1(path).then(setDt1);
     setName(path.split('/').pop()!.replace(/\.dt1$/i, '') + '_edit');
@@ -260,7 +265,10 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
                   key={i}
                   className={`thumb${picked.has(i) ? ' active' : ''}${edited ? ' edited' : ''}`}
                   title={`#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · ${t.mainIndex}/${t.subIndex}${edited ? ' · painted' : ''} · double-click to paint`}
-                  onClick={(e) => toggle(i, e.shiftKey)}
+                  onClick={(e) => {
+                    toggle(i, e.shiftKey);
+                    setZoomed(i);
+                  }}
                   onDoubleClick={() => t.blocks.length && setPainting(i)}
                 >
                   {edited ? <ImageThumb image={edited} palette={affected ? previewPal : map.palette} /> : <Thumb tile={t} palette={affected ? previewPal : map.palette} />}
@@ -326,6 +334,25 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             {error && <p className="small error-text">{error}</p>}
           </div>
         </div>
+        {zoomed !== null && painting === null && dt1?.tiles[zoomed] && (
+          <FloatingWindow
+            title={
+              <>
+                Tile #{zoomed} · {dt1.tiles[zoomed].mainIndex}/{dt1.tiles[zoomed].subIndex}
+                {edits.has(zoomed) ? ' · painted' : ''}
+                {changes && (picked.size === 0 || picked.has(zoomed)) ? ' · recolour preview' : ''}
+              </>
+            }
+            storageKey="dt1-zoom"
+            initial={{ x: Math.max(16, window.innerWidth - 520), y: 90, w: 480, h: 520 }}
+            onClose={() => setZoomed(null)}
+          >
+            <TileZoom
+              image={edits.get(zoomed) ?? decodeTile(dt1.tiles[zoomed]) ?? { width: 1, height: 1, offsetX: 0, offsetY: 0, pixels: new Uint8Array(1) }}
+              palette={changes && (picked.size === 0 || picked.has(zoomed)) ? previewPal : map.palette}
+            />
+          </FloatingWindow>
+        )}
         <div className="modal-actions" hidden={painting !== null}>
           <button className="btn" onClick={() => (!edits.size || window.confirm('Discard the painted tiles?')) && onClose()}>
             Close

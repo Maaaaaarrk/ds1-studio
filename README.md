@@ -55,14 +55,15 @@ downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` pac
 - Opens every DS1 in the game and your mod, straight from the MPQs and loose files — no extracting.
 - Picks the same tile libraries (DT1s) the game would, from `LvlPrest.txt` → `Levels.txt` → `LvlTypes.txt` and the
   preset's `Dt1Mask`, and the right act palette.
-- Floors, walls, roofs, shadows, lower walls, animated tiles, special tiles, objects and NPCs with their real sprites,
-  NPC paths, substitution groups.
-- Smooth zooming and panning on the GPU, even on 150×150 maps.
+- Floors, walls, roofs, shadows, lower walls, animated tiles, special tiles, objects and NPCs with their real sprites
+  — **animated in real time** at the game's own speeds — NPC paths, substitution groups.
+- Smooth zooming and panning on the GPU, even on 150×150 maps. At 100% you see exactly the game's pixels; zoomed out,
+  tiles are properly downscaled instead of turning grainy.
 
 | | |
 | :-: | :-: |
 | ![Walkability overlay](docs/media/walkability.png) **Walkability** — which sub-tiles block walking or jumping (**W**) | ![Rooms](docs/media/rooms.png) **Rooms & grid** — the 8×8-tile rooms the game builds levels from (**R**, **G**) |
-| ![Game view](docs/media/game-view.png) **Game view** — what the character actually sees on an 800×600 screen (**Z**) | ![Automap](docs/media/automap.png) **Automap preview** — the in-game automap, drawn from AutoMap.txt (**A**) |
+| ![Game view](docs/media/game-view.png) **Game view** — what the character sees at 640×480, 800×600, PD2's 1068×600 widescreen or any custom size (**Z**) | ![Automap](docs/media/automap.png) **Automap preview** — the in-game automap, drawn from AutoMap.txt (**A**) |
 
 Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/right mouse button:
 
@@ -107,7 +108,8 @@ tree groups.
   `LvlPrest.txt` is recomputed.
 - **DT1 editor**: duplicate and rename a DT1, **recolour** it (hue, saturation, brightness, tint, replace a colour) —
   the whole file, tiles you pick, the tiles a preset is built from, or the tiles used in your map selection — and
-  **paint tiles pixel by pixel** with the act palette. The preview is exact, and the copy can replace the original in
+  **paint tiles pixel by pixel** with the act palette. Clicking a tile opens it in a zoom window you can move, resize
+  from any edge and zoom right down to single pixels. The preview is exact, and the copy can replace the original in
   your map with the tables updated for you.
 
 | | |

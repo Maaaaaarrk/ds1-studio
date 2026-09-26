@@ -7,6 +7,7 @@ import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
+import type { SpriteAnimation } from '../game/spriteAnim';
 import { AUTOMAP_SCALE, automapCellOrigin, type AutomapPiece } from '../game/automap';
 import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sameItem, type DrawItem, type Scene } from '../render/scene';
@@ -43,6 +44,8 @@ interface Props {
   selectedObject: number | null;
   /** Object sprites by "type:id". */
   sprites: Map<string, Sprite>;
+  /** Object animations by "type:id" (drawn instead of the still sprite while animation is on). */
+  animations?: Map<string, SpriteAnimation>;
   /** Cells to call out (e.g. problems found by the compatibility check). */
   marks?: { x: number; y: number }[];
   /** Show edge handles that resize the map by dragging. */
@@ -61,7 +64,7 @@ interface Props {
    * Game view: when `signal` changes, zoom so the game's 800×600 screen fills the viewport (centred on `center`, a
    * world point, when given); while `on`, everything outside that screen is shaded.
    */
-  gameView?: { on: boolean; signal: number; center?: [number, number] | null };
+  gameView?: { on: boolean; signal: number; center?: [number, number] | null; width: number; height: number };
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
   focus: { item: DrawItem; index: number; count: number; label: string } | null;
   /** The in-game automap drawn over the map (dimmed underneath). */
@@ -71,9 +74,6 @@ interface Props {
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
-/** The classic game's screen (the character stands at its centre). */
-const GAME_W = 800;
-const GAME_H = 600;
 
 export function isVisible(it: DrawItem, v: Visibility): boolean {
   switch (it.kind) {
@@ -151,12 +151,17 @@ export function MapView(props: Props) {
   const latest = useRef({ ...props, walk, resizeDrag, automapImage });
   latest.current = { ...props, walk, resizeDrag, automapImage };
 
-  // Animated floors run at 10 fps, like the game.
+  // Animation clock in game ticks (25 per second, like the game). Animated floors advance every 2.5 ticks (10 fps);
+  // objects at their own rate. Without animated objects the clock only needs the floors' 10 fps.
+  const animations = props.animations;
+  const hasObjectAnims = !!animations?.size && visibility.sprites;
   useEffect(() => {
-    if (!scene.animated || !visibility.animate) return;
-    const t = setInterval(() => setFrame((f) => f + 1), 100);
+    if (!visibility.animate || (!scene.animated && !hasObjectAnims)) return;
+    const ms = hasObjectAnims ? 40 : 100;
+    const t = setInterval(() => setFrame((f) => f + ms / 40), ms);
     return () => clearInterval(t);
-  }, [scene.animated, visibility.animate]);
+  }, [scene.animated, visibility.animate, hasObjectAnims]);
+  const floorFrame = Math.floor(frame / 2.5);
 
   // One renderer per canvas; redraw on demand.
   useEffect(() => {
@@ -228,7 +233,8 @@ export function MapView(props: Props) {
     if (!g?.signal) return;
     const c = glCanvas.current!;
     const dpr = window.devicePixelRatio || 1;
-    const zoom = Math.min((c.clientWidth * dpr) / (GAME_W + 40), (c.clientHeight * dpr) / (GAME_H + 40));
+    // Exactly 100% (one game pixel per screen pixel, as in game) when the screen fits; smaller only when it doesn't.
+    const zoom = Math.min(dpr, (c.clientWidth * dpr) / (g.width + 40), (c.clientHeight * dpr) / (g.height + 40));
     const cam = camera.current;
     camera.current = { x: g.center?.[0] ?? cam.x, y: g.center?.[1] ?? cam.y, zoom };
     latest.current.onZoom(zoom / dpr);
@@ -237,7 +243,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [props.gameView?.on]);
+  }, [props.gameView?.on, props.gameView?.width, props.gameView?.height]);
 
   // Rebuild instances when the scene, layer visibility, hover or brush preview changes.
   useEffect(() => {
@@ -260,11 +266,16 @@ export function MapView(props: Props) {
     const flushObjects = (maxDepth: number) => {
       for (; next < objs.length && objs[next].depth <= maxDepth; next++) {
         const { o, i, sprite } = objs[next];
-        const e = a.getImage(sprite, sprite);
+        // Animated: this object's current frame (each object starts at its own phase, so they don't move in step).
+        const anim = visibility.animate ? animations?.get(`${o.type}:${o.id}`) : undefined;
+        const img = anim?.frames.length ? anim.frames[Math.floor((frame / 25) * anim.fps + i * 7) % anim.frames.length] : sprite;
+        const e = a.getImage(img, img);
         if (!e) continue;
         const [wx, wy] = subTileToWorld(o.x, o.y);
         const flags = i === selectedObject ? InstanceFlag.Highlight : 0;
-        instances.push({ x: wx + sprite.offsetX, y: wy + 4 + sprite.offsetY, w: sprite.width, h: sprite.height, u: e.u, v: e.v, layer: e.layer, flags });
+        const ox = anim?.frames.length ? anim.offsetX : sprite.offsetX;
+        const oy = anim?.frames.length ? anim.offsetY : sprite.offsetY;
+        instances.push({ x: wx + ox, y: wy + 4 + oy, w: img.width, h: img.height, u: e.u, v: e.v, layer: e.layer, flags });
       }
     };
     for (const it of scene.items) {
@@ -275,7 +286,7 @@ export function MapView(props: Props) {
       if (focus) {
         if (sameItem(it, focus.item)) flags |= InstanceFlag.Highlight;
       } else if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
-      const tile = it.frames && visibility.animate ? it.frames[frame % it.frames.length] : it.tile;
+      const tile = it.frames && visibility.animate ? it.frames[floorFrame % it.frames.length] : it.tile;
       push(tile, it.x, it.y, flags);
     }
     flushObjects(Infinity);
@@ -283,7 +294,7 @@ export function MapView(props: Props) {
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost, frame, tool, sprites, selectedObject, focus]);
+  }, [scene, visibility, hover, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus]);
 
   useEffect(() => {
     dirty.current = true;
@@ -824,7 +835,8 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   }
 
   if (s.gameView?.on) {
-    // What the character sees: an 800×600 screen centred on the view; shade the rest.
+    // What the character sees: the game's screen centred on the view; shade the rest.
+    const { width: GAME_W, height: GAME_H } = s.gameView;
     const x0 = cam.x - GAME_W / 2;
     const y0 = cam.y - GAME_H / 2;
     const big = 1e6;
@@ -838,7 +850,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.strokeRect(x0, y0, GAME_W, GAME_H);
     ctx.font = `${12 * px}px system-ui, sans-serif`;
     ctx.fillStyle = 'rgba(255, 215, 130, 0.95)';
-    ctx.fillText('In-game screen (800×600) · the character stands at the centre', x0 + 6 * px, y0 - 6 * px);
+    ctx.fillText(`In-game screen (${GAME_W}×${GAME_H}) · the character stands at the centre`, x0 + 6 * px, y0 - 6 * px);
     ctx.beginPath();
     ctx.moveTo(cam.x - 8 * px, cam.y);
     ctx.lineTo(cam.x + 8 * px, cam.y);

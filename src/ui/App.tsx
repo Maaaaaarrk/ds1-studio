@@ -71,6 +71,8 @@ import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
 import { ObjectGallery } from './ObjectGallery';
+import type { SpriteAnimation } from '../game/spriteAnim';
+import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
@@ -122,6 +124,26 @@ export function App() {
   const [zoom, setZoom] = useState(1);
   const [fitSignal, setFitSignal] = useState(0);
   const [gameView, setGameView] = useState<{ on: boolean; signal: number; center?: [number, number] | null }>({ on: false, signal: 0 });
+  /** The game screen size Game view shows (remembered on this computer). */
+  const [gameSize, setGameSizeState] = useState<[number, number]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('ds1studio.gameSize') ?? 'null');
+      if (Array.isArray(v) && v.length === 2 && v.every((n) => Number.isFinite(n) && n >= 320 && n <= 7680)) return v as [number, number];
+    } catch {
+      // per-viewer convenience only
+    }
+    return [800, 600];
+  });
+  const setGameSize = useCallback((size: [number, number]) => {
+    setGameSizeState(size);
+    try {
+      localStorage.setItem('ds1studio.gameSize', JSON.stringify(size));
+    } catch {
+      // ignore
+    }
+    // Re-frame the view at the new size when Game view is on.
+    setGameView((g) => (g.on ? { ...g, signal: g.signal + 1, center: null } : g));
+  }, []);
   const [tool, setTool] = useState<Tool>('select');
   const [activeLayer, setActiveLayer] = useState<LayerRef>({ kind: 'floor', index: 0 });
   const [brush, setBrush] = useState<Brush | null>(null);
@@ -604,6 +626,24 @@ export function App() {
       cancelled = true;
     };
   }, [gd, map, objectKeys]);
+  // Animations for the same objects, loaded only while animation and sprites are shown.
+  const [animations, setAnimations] = useState<Map<string, SpriteAnimation>>(() => new Map());
+  useEffect(() => {
+    if (!gd || !map || !objectKeys || !visibility.animate || !visibility.sprites) return setAnimations(new Map());
+    let cancelled = false;
+    const act = map.ds1.act;
+    Promise.all(
+      objectKeys.split(',').map(async (k) => {
+        const [type, id] = k.split(':').map(Number);
+        return [k, await gd.objectAnimation(act, type, id)] as const;
+      }),
+    ).then((entries) => {
+      if (!cancelled) setAnimations(new Map(entries.filter((e): e is [string, SpriteAnimation] => !!e[1] && e[1].frames.length > 1)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gd, map, objectKeys, visibility.animate, visibility.sprites]);
 
   const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
   const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
@@ -1181,7 +1221,12 @@ export function App() {
           label: 'View',
           items: [
             { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: kb['view.fit'] },
-            { label: 'Game view', icon: <ScanEye />, onClick: toggleGameView, active: gameView.on, disabled: noMap, shortcut: kb['view.game'], title: 'Zoom to what the character sees in game (800×600, centred on the selection)' },
+            { label: 'Game view', icon: <ScanEye />, onClick: toggleGameView, active: gameView.on, disabled: noMap, shortcut: kb['view.game'], title: `Zoom to what the character sees in game (${gameSize[0]}×${gameSize[1]}, centred on the selection)` },
+            {
+              custom: (
+                <GameSizePicker size={gameSize} onChange={setGameSize} />
+              ),
+            },
             { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: kb['view.grid'] },
             { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
             { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: kb['view.walkable'] },
@@ -1341,6 +1386,7 @@ export function App() {
             objectLabel={objectLabel}
             selectedObject={selectedObject}
             sprites={sprites}
+            animations={animations}
             marks={marks}
             resizeMode={resizeMode}
             onResize={(d) => {
@@ -1351,7 +1397,7 @@ export function App() {
             onZoom={setZoom}
             onStroke={onStroke}
             fitSignal={fitSignal}
-            gameView={gameView}
+            gameView={{ ...gameView, width: gameSize[0], height: gameSize[1] }}
             focus={focus}
             onCycle={cycleStack}
             automap={automapView}

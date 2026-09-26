@@ -1,3 +1,4 @@
+import { loadSpriteAnimation, type SpriteAnimation } from './spriteAnim';
 import { ds1FileToDt1Path, type Ds1 } from '../formats/ds1';
 import { parseDt1, type Dt1, type Dt1Tile } from '../formats/dt1';
 import { OLD_ACT5_PALETTE, parsePalette, palettePath, type Palette } from '../formats/palette';
@@ -169,6 +170,12 @@ export class GameData {
   }
 
   /** Still frame of an object's sprite (cached), or null when obj.txt has no recipe or the files are missing. */
+  /** All frames of an object's/NPC's default animation (for animating them on the map), or null. */
+  objectAnimation(act0: number, type: number, id: number): Promise<SpriteAnimation | null> {
+    const spec = this.objRow(act0, type, id)?.spec;
+    return spec ? loadSpriteAnimation(this.fs, spec) : Promise.resolve(null);
+  }
+
   objectSprite(act0: number, type: number, id: number): Promise<Sprite | null> {
     const key = `${act0}:${type}:${id}`;
     let p = this.sprites.get(key);

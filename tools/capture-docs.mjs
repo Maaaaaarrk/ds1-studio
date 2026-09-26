@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { PNG } from 'pngjs';
 import gifenc from 'gifenc';
 
@@ -17,7 +18,7 @@ const CHROME = process.env.CHROME ?? 'C:/Program Files/Google/Chrome/Application
 const URL = process.env.DS1_URL ?? 'http://localhost:5188';
 const W = 1600;
 const H = 900;
-const OUT = 'docs/media';
+const OUT = process.env.OUT ?? 'docs/media';
 const PORT = 9333;
 mkdirSync(OUT, { recursive: true });
 
@@ -203,7 +204,8 @@ async function ribbonTab(label) {
 const helpers = { sleep, js, waitFor, press, keyDown, keyUp, click, drag, wheel, button, openMap, viewport, rect, shot, gif, closeDialogs, ribbonTab, W, H };
 
 // --- Scenes ------------------------------------------------------------------------------------------------------
-const { makeScenes } = await import('./docs-scenes.mjs');
+// SCENES=<file> runs another scene file (e.g. for QA) instead of the docs scenes.
+const { makeScenes } = await import(process.env.SCENES ? pathToFileURL(process.env.SCENES).href : './docs-scenes.mjs');
 const scenes = makeScenes(helpers);
 await waitFor('input[placeholder^="Filter"]');
 const wanted = process.argv.slice(2);

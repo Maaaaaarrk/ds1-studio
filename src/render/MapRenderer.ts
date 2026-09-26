@@ -35,6 +35,7 @@ layout(location=3) in vec2 aMeta;  // layer, flags
 uniform vec2 uViewport;            // device pixels
 uniform vec3 uCamera;              // x, y, zoom
 out vec2 vTex;
+flat out vec4 vRect;  // the instance's texels in the atlas: u0, v0, u1, v1 (exclusive)
 flat out float vLayer;
 flat out int vFlags;
 void main() {
@@ -43,28 +44,67 @@ void main() {
   gl_Position = vec4(screen / uViewport * 2.0 - 1.0, 0.0, 1.0);
   gl_Position.y = -gl_Position.y;
   vTex = aSrc + aCorner * aDst.zw;
+  vRect = vec4(aSrc, aSrc + aDst.zw);
   vLayer = aMeta.x;
   vFlags = int(aMeta.y);
 }`;
 
+// Palette-indexed pixels can't use the GPU's texture filtering, so the shader resolves the palette itself. At 100%
+// and closer each screen pixel shows one tile pixel (exactly what the game draws). Zoomed out, a screen pixel covers
+// several tile pixels: they are averaged in linear light (a proper downscale, no shimmer or dropped pixels), and the
+// pixel is drawn solid when at least half of it is covered, so neighbouring floor tiles still meet without seams.
 const FS = `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
 uniform sampler2DArray uAtlas;
 uniform sampler2D uPalette;
 in vec2 vTex;
+flat in vec4 vRect;
 flat in float vLayer;
 flat in int vFlags;
 out vec4 outColor;
+
+int indexAt(vec2 t) {
+  ivec2 p = ivec2(clamp(floor(t), vRect.xy, vRect.zw - 1.0));
+  return int(texelFetch(uAtlas, ivec3(p, int(vLayer)), 0).r * 255.0 + 0.5);
+}
+vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 toSrgb(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
+
 void main() {
-  float idx = texelFetch(uAtlas, ivec3(ivec2(floor(vTex)), int(vLayer)), 0).r * 255.0;
-  int i = int(idx + 0.5);
-  if (i == 0) discard;
+  vec2 fw = fwidth(vTex);
+  float texelsPerPixel = max(fw.x, fw.y);
+  vec3 rgb;
+  float coverage;
+  if (texelsPerPixel <= 1.01) {
+    int i = indexAt(vTex);
+    if (i == 0) discard;
+    rgb = texelFetch(uPalette, ivec2(i, 0), 0).rgb;
+    coverage = 1.0;
+  } else {
+    int n = int(clamp(ceil(texelsPerPixel), 2.0, 6.0));
+    vec2 stepv = fw / float(n);
+    vec2 origin = vTex - fw * 0.5 + stepv * 0.5;
+    vec3 sum = vec3(0.0);
+    float hits = 0.0;
+    for (int y = 0; y < 6; y++) {
+      if (y >= n) break;
+      for (int x = 0; x < 6; x++) {
+        if (x >= n) break;
+        int i = indexAt(origin + stepv * vec2(float(x), float(y)));
+        if (i == 0) continue;
+        sum += toLinear(texelFetch(uPalette, ivec2(i, 0), 0).rgb);
+        hits += 1.0;
+      }
+    }
+    coverage = hits / float(n * n);
+    if (coverage < 0.5) discard;
+    rgb = toSrgb(sum / hits);
+  }
   if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45); return; }
-  vec4 c = texelFetch(uPalette, ivec2(i, 0), 0);
-  if ((vFlags & 2) != 0) c.rgb = mix(c.rgb, vec3(1.0, 0.78, 0.3), 0.35);
-  if ((vFlags & 4) != 0) c.rgb *= 0.35;
-  outColor = vec4(c.rgb, (vFlags & 8) != 0 ? 0.6 : 1.0);
+  if ((vFlags & 2) != 0) rgb = mix(rgb, vec3(1.0, 0.78, 0.3), 0.35);
+  if ((vFlags & 4) != 0) rgb *= 0.35;
+  outColor = vec4(rgb, (vFlags & 8) != 0 ? 0.6 : 1.0);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
