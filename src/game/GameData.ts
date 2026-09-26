@@ -3,6 +3,7 @@ import { parseDt1, type Dt1, type Dt1Tile } from '../formats/dt1';
 import { parsePalette, palettePath, type Palette } from '../formats/palette';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { normalizePath, type LayeredFs } from '../vfs/vfs';
+import { loadObjectSprite, parseObjTxt, type Sprite, type SpriteSpec } from './sprites';
 
 export interface LvlTypeInfo {
   id: number;
@@ -34,8 +35,9 @@ export class GameData {
   private levelTypeById = new Map<number, number>();
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
-  /** "act:type:id" -> name, from WinDS1's obj.txt (acts 1-based). */
-  private objNames = new Map<string, string>();
+  /** "act:type:id" -> name and sprite recipe, from WinDS1's obj.txt (acts 1-based). */
+  private objRows = new Map<string, { name: string; spec: SpriteSpec | null }>();
+  private sprites = new Map<string, Promise<Sprite | null>>();
   /** MonPreset.txt "Place" per act (1-based), indexed by NPC id. */
   private monPresets = new Map<number, string[]>();
   /** WinDS1's special-tile graphics, when available. */
@@ -62,8 +64,8 @@ export class GameData {
       gd.monPresets.get(act)!.push(row['Place']);
     }
     const [objTxt, specials] = await Promise.all([fs.read('winds1/obj.txt'), fs.read('winds1/ds1edit.dt1')]);
-    for (const row of objTxt ? parseTxt(objTxt).rows : []) {
-      if (row['Description']) gd.objNames.set(`${row['Act']}:${row['Type']}:${row['Id']}`, row['Description'].replace(/^#\s*/, ''));
+    for (const row of objTxt ? parseObjTxt(new TextDecoder('latin1').decode(objTxt)) : []) {
+      gd.objRows.set(`${row.act}:${row.type}:${row.id}`, { name: row.description.replace(/^#\s*/, ''), spec: row.spec });
     }
     if (specials) {
       try {
@@ -129,8 +131,15 @@ export class GameData {
    * the way WinDS1 does: 60 NPC / 150 object ids per act), then MonPreset.txt for NPCs, else "type,id".
    */
   objectName(act0: number, type: number, id: number): string {
+    const name = this.objRow(act0, type, id)?.name;
+    if (name) return name;
+    const preset = type === 1 ? this.monPresets.get(act0 + 1)?.[id] : undefined;
+    return preset ?? `${type === 1 ? 'NPC' : 'Object'} ${id}`;
+  }
+
+  private objRow(act0: number, type: number, id: number) {
     let act = act0 + 1;
-    const exact = this.objNames.get(`${act}:${type}:${id}`);
+    const exact = this.objRows.get(`${act}:${type}:${id}`);
     if (exact) return exact;
     const per = type === 1 ? 60 : 150;
     let n = id;
@@ -142,14 +151,23 @@ export class GameData {
       act++;
       n -= per;
     }
-    const normalised = this.objNames.get(`${act}:${type}:${n}`);
-    if (normalised) return normalised;
-    const preset = type === 1 ? this.monPresets.get(act0 + 1)?.[id] : undefined;
-    return preset ?? `${type === 1 ? 'NPC' : 'Object'} ${id}`;
+    return this.objRows.get(`${act}:${type}:${n}`) ?? null;
+  }
+
+  /** Still frame of an object's sprite (cached), or null when obj.txt has no recipe or the files are missing. */
+  objectSprite(act0: number, type: number, id: number): Promise<Sprite | null> {
+    const key = `${act0}:${type}:${id}`;
+    let p = this.sprites.get(key);
+    if (!p) {
+      const spec = this.objRow(act0, type, id)?.spec;
+      p = spec ? loadObjectSprite(this.fs, spec) : Promise.resolve(null);
+      this.sprites.set(key, p);
+    }
+    return p;
   }
 
   get hasObjectNames(): boolean {
-    return this.objNames.size > 0;
+    return this.objRows.size > 0;
   }
 
   lvlType(id: number): LvlTypeInfo | null {

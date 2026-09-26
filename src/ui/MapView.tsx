@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Ds1Object } from '../formats/ds1';
 import type { Dt1Tile } from '../formats/dt1';
+import type { Sprite } from '../game/sprites';
 import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
@@ -32,6 +33,8 @@ interface Props {
   /** Display name for an object marker. */
   objectLabel: (o: Ds1Object) => string;
   selectedObject: number | null;
+  /** Object sprites by "type:id". */
+  sprites: Map<string, Sprite>;
   selection: CellRect | null;
   /** Footprint of a pending paste, drawn as an outline. */
   pasteRect: CellRect | null;
@@ -86,7 +89,7 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
 }
 
 export function MapView(props: Props) {
-  const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, fitSignal } = props;
+  const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, sprites, fitSignal } = props;
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
@@ -160,18 +163,40 @@ export function MapView(props: Props) {
       if (!e) return;
       instances.push({ x: x + e.image.offsetX, y: y + e.image.offsetY, w: e.image.width, h: e.image.height, u: e.u, v: e.v, layer: e.layer, flags });
     };
+    // Object sprites are interleaved with the walls in depth order: an object draws after the walls of its own
+    // cell diagonal and before those further forward (WinDS1 draws objects right after each row's walls).
+    const objs = visibility.sprites
+      ? map.ds1.objects
+          .map((o, i) => ({ o, i, sprite: sprites.get(`${o.type}:${o.id}`), depth: Math.floor(o.x / 5) + Math.floor(o.y / 5) }))
+          .filter((x): x is typeof x & { sprite: Sprite } => !!x.sprite)
+          .sort((a, b) => a.depth - b.depth || a.o.x + a.o.y - (b.o.x + b.o.y))
+      : [];
+    let next = 0;
+    const flushObjects = (maxDepth: number) => {
+      for (; next < objs.length && objs[next].depth <= maxDepth; next++) {
+        const { o, i, sprite } = objs[next];
+        const e = a.getImage(sprite, sprite);
+        if (!e) continue;
+        const [wx, wy] = subTileToWorld(o.x, o.y);
+        const flags = i === selectedObject ? InstanceFlag.Highlight : 0;
+        instances.push({ x: wx + sprite.offsetX, y: wy + 4 + sprite.offsetY, w: sprite.width, h: sprite.height, u: e.u, v: e.v, layer: e.layer, flags });
+      }
+    };
     for (const it of scene.items) {
+      if (it.kind === 'wall') flushObjects(it.cellX + it.cellY - 1);
+      else if (it.kind === 'roof' || it.kind === 'special') flushObjects(Infinity);
       if (!isVisible(it, visibility)) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : 0;
       if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
       const tile = it.frames && visibility.animate ? it.frames[frame % it.frames.length] : it.tile;
       push(tile, it.x, it.y, flags);
     }
+    flushObjects(Infinity);
     for (const g of ghost) push(g.tile, g.x, g.y, InstanceFlag.Ghost);
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost, frame, tool]);
+  }, [scene, visibility, hover, ghost, frame, tool, sprites, selectedObject]);
 
   useEffect(() => {
     dirty.current = true;

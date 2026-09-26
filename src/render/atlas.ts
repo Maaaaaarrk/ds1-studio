@@ -14,17 +14,21 @@ export interface AtlasEntry {
  * Pages become layers of a single WebGL texture array, so the whole map renders in one draw call.
  */
 export class TileAtlas {
-  readonly entries = new Map<Dt1Tile, AtlasEntry | null>();
+  readonly entries = new Map<object, AtlasEntry | null>();
   readonly pages: Uint8Array[] = [];
   private shelfX = 0;
   private shelfY = 0;
   private shelfH = 0;
 
   get(tile: Dt1Tile): AtlasEntry | null {
-    if (this.entries.has(tile)) return this.entries.get(tile)!;
-    const image = decodeTile(tile);
+    return this.entries.has(tile) ? this.entries.get(tile)! : this.getImage(tile, decodeTile(tile));
+  }
+
+  /** Adds an already-decoded image (e.g. an object sprite), keyed by any object. */
+  getImage(key: object, image: TileImage | null): AtlasEntry | null {
+    if (this.entries.has(key)) return this.entries.get(key)!;
     const entry = image && image.width > 0 && image.height > 0 ? this.insert(image) : null;
-    this.entries.set(tile, entry);
+    this.entries.set(key, entry);
     return entry;
   }
 

@@ -69,6 +69,6 @@ file list; you can override the level type per map in the **Map** panel.
 - [x] Tile editing: tile palette, paint/erase/pick, brush preview, undo/redo, save with backup
 - [x] Rectangle selection: fill, copy/paste, move; per-cell flag editing (hidden, prop bytes)
 - [x] Objects & NPC paths editing, object/monster names, special tiles (WinDS1 graphics), animated floors, walkability overlay
-- [ ] Substitution groups and tag layer editing; resize map; new map
-- [ ] Object sprites (COF/DCC) instead of markers
+- [x] Substitution groups and tag layer editing; resize map; new map; save as
+- [x] Object sprites (COF/DCC/DC6), depth-sorted with walls
 - [ ] Tauri desktop shell (needs the Rust toolchain)

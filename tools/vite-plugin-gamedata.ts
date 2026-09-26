@@ -35,7 +35,7 @@ export interface ManifestSource {
   label: string;
 }
 
-const BASE_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq'];
+const BASE_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'];
 const RELEVANT = /\.(ds1|dt1|dat|txt)$/i;
 
 function loadConfig(root: string): Config {

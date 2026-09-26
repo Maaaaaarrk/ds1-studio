@@ -15,6 +15,7 @@ import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } 
 import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
+import type { Sprite } from '../game/sprites';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette } from './TilePalette';
 
@@ -57,6 +58,7 @@ export function App() {
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
   const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | null>(null);
+  const [sprites, setSprites] = useState<Map<string, Sprite>>(() => new Map());
   const [menuOpen, setMenuOpen] = useState(false);
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
@@ -367,6 +369,25 @@ export function App() {
     setSelectedObject(null);
     return true;
   }, [doc, selectedObject, setObjects]);
+  // Load sprites for every distinct object on the map (cached per object id in GameData).
+  const objectKeys = map ? [...new Set(map.ds1.objects.map((o) => `${o.type}:${o.id}`))].sort().join(',') : '';
+  useEffect(() => {
+    if (!gd || !map || !objectKeys) return setSprites(new Map());
+    let cancelled = false;
+    const act = map.ds1.act;
+    Promise.all(
+      objectKeys.split(',').map(async (k) => {
+        const [type, id] = k.split(':').map(Number);
+        return [k, await gd.objectSprite(act, type, id)] as const;
+      }),
+    ).then((entries) => {
+      if (!cancelled) setSprites(new Map(entries.filter((e): e is [string, Sprite] => !!e[1])));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gd, map, objectKeys]);
+
   const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
   const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
 
@@ -629,6 +650,7 @@ export function App() {
             pasteRect={pasteRect}
             objectLabel={objectLabel}
             selectedObject={selectedObject}
+            sprites={sprites}
             onHover={setHover}
             onZoom={setZoom}
             onStroke={onStroke}

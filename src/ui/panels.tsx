@@ -60,6 +60,7 @@ export function LayersPanel({ map, scene, visibility: v, onChange }: { map: Open
       </div>
       <div className="toggle-group">
         <Toggle label="Monsters / NPCs" swatch="rgb(240,80,80)" checked={v.objects} onChange={(x) => set({ objects: x })} count={npcs} />
+        <Toggle label="Object sprites" checked={v.sprites} onChange={(x) => set({ sprites: x })} />
         <Toggle label="NPC paths" swatch="rgb(255,150,60)" checked={v.paths} onChange={(x) => set({ paths: x })} count={ds1.objects.filter((o) => o.path.length).length} />
         <Toggle label="Special tiles" swatch="rgb(200,140,255)" checked={v.specials} onChange={(x) => set({ specials: x })} />
         {ds1.groups.length > 0 && <Toggle label="Substitution groups" swatch="rgb(120,200,255)" checked={v.groups} onChange={(x) => set({ groups: x })} count={ds1.groups.length} />}
