@@ -88,6 +88,7 @@ export class MapRenderer {
   private instanceCount = 0;
   private atlasLayers = 0;
   private uploadedPages = 0;
+  private uploadedAtlas: TileAtlas | null = null;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
@@ -148,7 +149,10 @@ export class MapRenderer {
     if (n === 0) return;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    let from = this.uploadedPages;
+    // A new atlas (another map was opened) must be uploaded from scratch: its pages reuse the texture layers. Otherwise
+    // resume at the last page uploaded, which may have gained tiles since (only the newest page is ever appended to).
+    let from = this.uploadedAtlas === atlas ? Math.max(0, this.uploadedPages - 1) : 0;
+    this.uploadedAtlas = atlas;
     if (n > this.atlasLayers) {
       this.atlasLayers = Math.max(n, this.atlasLayers * 2, 2);
       gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.R8, ATLAS_SIZE, ATLAS_SIZE, this.atlasLayers, 0, gl.RED, gl.UNSIGNED_BYTE, null);
@@ -156,8 +160,7 @@ export class MapRenderer {
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       from = 0;
     }
-    // The last page may have gained tiles since it was uploaded.
-    for (let i = Math.max(0, Math.min(from, n - 1)); i < n; i++) {
+    for (let i = from; i < n; i++) {
       gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, i, ATLAS_SIZE, ATLAS_SIZE, 1, gl.RED, gl.UNSIGNED_BYTE, atlas.pages[i]);
     }
     this.uploadedPages = n;

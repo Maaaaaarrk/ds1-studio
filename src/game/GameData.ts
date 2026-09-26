@@ -180,6 +180,27 @@ export class GameData {
     return p;
   }
 
+  /**
+   * Every placeable object/NPC known for an act (0-based): WinDS1 obj.txt rows of that act, plus MonPreset.txt NPC
+   * ids obj.txt doesn't cover. Sorted by type, then id.
+   */
+  objectList(act0: number): { type: number; id: number; name: string; hasSprite: boolean }[] {
+    const act = act0 + 1;
+    const out: { type: number; id: number; name: string; hasSprite: boolean }[] = [];
+    const seen = new Set<string>();
+    for (const [key, row] of this.objRows) {
+      const [a, type, id] = key.split(':').map(Number);
+      if (a !== act) continue;
+      seen.add(`${type}:${id}`);
+      out.push({ type, id, name: row.name || `${type === 1 ? 'NPC' : 'Object'} ${id}`, hasSprite: !!row.spec });
+    }
+    (this.monPresets.get(act) ?? []).forEach((place, id) => {
+      if (!place || seen.has(`1:${id}`)) return;
+      out.push({ type: 1, id, name: place, hasSprite: false });
+    });
+    return out.sort((a, b) => a.type - b.type || a.id - b.id);
+  }
+
   get hasObjectNames(): boolean {
     return this.objRows.size > 0;
   }

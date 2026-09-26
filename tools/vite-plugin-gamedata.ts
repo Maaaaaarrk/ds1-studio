@@ -36,7 +36,7 @@ export interface ManifestSource {
 }
 
 const BASE_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'];
-const RELEVANT = /\.(ds1|dt1|dat|txt|json|bin)$/i;
+const RELEVANT = /\.(ds1|dt1|dat|txt|json|bin|cof|dcc|dc6)$/i;
 
 /** Same write rules as the desktop app: maps/tiles/sprites under data/global, tables under excel, presets under data/ds1studio. */
 function writable(rel: string): boolean {

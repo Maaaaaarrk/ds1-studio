@@ -57,6 +57,11 @@ interface Props {
   onStroke: (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => void;
   /** Bumped by the parent to request "fit map to view". */
   fitSignal: number;
+  /**
+   * Game view: when `signal` changes, zoom so the game's 800×600 screen fills the viewport (centred on `center`, a
+   * world point, when given); while `on`, everything outside that screen is shaded.
+   */
+  gameView?: { on: boolean; signal: number; center?: [number, number] | null };
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
   focus: { item: DrawItem; index: number; count: number; label: string } | null;
   /** The in-game automap drawn over the map (dimmed underneath). */
@@ -66,6 +71,9 @@ interface Props {
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
+/** The classic game's screen (the character stands at its centre). */
+const GAME_W = 800;
+const GAME_H = 600;
 
 export function isVisible(it: DrawItem, v: Visibility): boolean {
   switch (it.kind) {
@@ -198,6 +206,22 @@ export function MapView(props: Props) {
   useEffect(() => {
     if (fitSignal) fit();
   }, [fitSignal]);
+
+  useEffect(() => {
+    const g = props.gameView;
+    if (!g?.signal) return;
+    const c = glCanvas.current!;
+    const dpr = window.devicePixelRatio || 1;
+    const zoom = Math.min((c.clientWidth * dpr) / (GAME_W + 40), (c.clientHeight * dpr) / (GAME_H + 40));
+    const cam = camera.current;
+    camera.current = { x: g.center?.[0] ?? cam.x, y: g.center?.[1] ?? cam.y, zoom };
+    latest.current.onZoom(zoom / dpr);
+    dirty.current = true;
+  }, [props.gameView?.signal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    dirty.current = true;
+  }, [props.gameView?.on]);
 
   // Rebuild instances when the scene, layer visibility, hover or brush preview changes.
   useEffect(() => {
@@ -420,42 +444,117 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
   ctx.closePath();
 }
 
-interface WalkPaths {
+interface WalkChunk {
+  /** World-space bounds. */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
   noJump: Path2D;
   noWalk: Path2D;
 }
 
+interface WalkPaths {
+  chunks: WalkChunk[];
+  /** World bounds of the whole map. */
+  bounds: { x0: number; y0: number; x1: number; y1: number };
+  /** Low-resolution raster for zoomed-out views, built on first use; one canvas pixel = `scale` world pixels. */
+  raster: { canvas: HTMLCanvasElement; scale: number } | null;
+}
+
+const WALK_CHUNK = 16; // cells per chunk side
+
 /**
- * The walkability overlay as two paths, one parallelogram per run of same-class sub-tiles along each sub-tile row
- * (a diamond's top-right edge runs the same way as the row, so a run of diamonds is one parallelogram).
+ * The walkability overlay as paths in 16×16-cell chunks (only visible chunks are drawn), one parallelogram per run of
+ * same-class sub-tiles along each sub-tile row (a diamond's top-right edge runs the same way as the row, so a run of
+ * diamonds is one parallelogram).
  */
 function walkPaths(walk: Uint8Array, width: number, height: number): WalkPaths {
-  const noJump = new Path2D();
-  const noWalk = new Path2D();
   const classOf = (sx: number, sy: number) => {
     const f = walk[(Math.floor(sy / 5) * width + Math.floor(sx / 5)) * 25 + (sy % 5) * 5 + (sx % 5)];
     return f & SubTileFlag.BlockJump ? 2 : f & (SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk) ? 1 : 0;
   };
-  const W = width * 5;
-  for (let sy = 0; sy < height * 5; sy++) {
-    for (let sx = 0; sx < W; ) {
-      const c = classOf(sx, sy);
-      let end = sx + 1;
-      while (end < W && classOf(end, sy) === c) end++;
-      if (c) {
-        const target = c === 2 ? noJump : noWalk;
-        const [x0, y0] = subTileToWorld(sx, sy);
-        const [xn, yn] = subTileToWorld(end - 1, sy);
-        target.moveTo(x0, y0 - 8);
-        target.lineTo(xn + 16, yn);
-        target.lineTo(xn, yn + 8);
-        target.lineTo(x0 - 16, y0);
-        target.closePath();
+  const chunks: WalkChunk[] = [];
+  for (let cy0 = 0; cy0 < height; cy0 += WALK_CHUNK)
+    for (let cx0 = 0; cx0 < width; cx0 += WALK_CHUNK) {
+      const cx1 = Math.min(width, cx0 + WALK_CHUNK);
+      const cy1 = Math.min(height, cy0 + WALK_CHUNK);
+      const noJump = new Path2D();
+      const noWalk = new Path2D();
+      let any = false;
+      for (let sy = cy0 * 5; sy < cy1 * 5; sy++) {
+        for (let sx = cx0 * 5; sx < cx1 * 5; ) {
+          const c = classOf(sx, sy);
+          let end = sx + 1;
+          while (end < cx1 * 5 && classOf(end, sy) === c) end++;
+          if (c) {
+            any = true;
+            const target = c === 2 ? noJump : noWalk;
+            const [x0, y0] = subTileToWorld(sx, sy);
+            const [xn, yn] = subTileToWorld(end - 1, sy);
+            target.moveTo(x0, y0 - 8);
+            target.lineTo(xn + 16, yn);
+            target.lineTo(xn, yn + 8);
+            target.lineTo(x0 - 16, y0);
+            target.closePath();
+          }
+          sx = end;
+        }
       }
-      sx = end;
+      if (!any) continue;
+      // Chunk corners in world space: north (cx0,cy0), east (cx1,cy0), south (cx1,cy1), west (cx0,cy1).
+      const [, ny] = cellToWorld(cx0, cy0);
+      const [ex] = cellToWorld(cx1, cy0);
+      const [, sy2] = cellToWorld(cx1, cy1);
+      const [wx] = cellToWorld(cx0, cy1);
+      chunks.push({ x0: wx - 16, y0: ny - 8, x1: ex + 16, y1: sy2 + 8, noJump, noWalk });
     }
+  const [, top] = cellToWorld(0, 0);
+  const [right] = cellToWorld(width, 0);
+  const [, bottom] = cellToWorld(width, height);
+  const [left] = cellToWorld(0, height);
+  return { chunks, bounds: { x0: left - 16, y0: top - 8, x1: right + 16, y1: bottom + 8 }, raster: null };
+}
+
+const WALK_COLORS = { noJump: 'rgba(255, 60, 70, 0.38)', noWalk: 'rgba(255, 176, 40, 0.34)' };
+
+function drawWalk(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, cam: Camera, w: WalkPaths) {
+  const view = {
+    x0: cam.x - canvas.width / 2 / cam.zoom,
+    y0: cam.y - canvas.height / 2 / cam.zoom,
+    x1: cam.x + canvas.width / 2 / cam.zoom,
+    y1: cam.y + canvas.height / 2 / cam.zoom,
+  };
+  const visible = w.chunks.filter((c) => c.x1 >= view.x0 && c.x0 <= view.x1 && c.y1 >= view.y0 && c.y0 <= view.y1);
+  // Zoomed out, many chunks are visible and each diamond is a pixel or two: draw the pre-rendered raster instead.
+  const worldW = w.bounds.x1 - w.bounds.x0;
+  const worldH = w.bounds.y1 - w.bounds.y0;
+  const scale = Math.max(2, Math.ceil(Math.max(worldW / 4096, worldH / 4096)));
+  if (visible.length > 12 && cam.zoom * scale <= 2) {
+    if (!w.raster || w.raster.scale !== scale) {
+      const r = document.createElement('canvas');
+      r.width = Math.ceil(worldW / scale);
+      r.height = Math.ceil(worldH / scale);
+      const rc = r.getContext('2d')!;
+      rc.setTransform(1 / scale, 0, 0, 1 / scale, -w.bounds.x0 / scale, -w.bounds.y0 / scale);
+      for (const c of w.chunks) {
+        rc.fillStyle = WALK_COLORS.noJump;
+        rc.fill(c.noJump);
+        rc.fillStyle = WALK_COLORS.noWalk;
+        rc.fill(c.noWalk);
+      }
+      w.raster = { canvas: r, scale };
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(w.raster.canvas, w.bounds.x0, w.bounds.y0, w.raster.canvas.width * scale, w.raster.canvas.height * scale);
+    return;
   }
-  return { noJump, noWalk };
+  for (const c of visible) {
+    ctx.fillStyle = WALK_COLORS.noJump;
+    ctx.fill(c.noJump);
+    ctx.fillStyle = WALK_COLORS.noWalk;
+    ctx.fill(c.noWalk);
+  }
 }
 
 interface AutomapImage {
@@ -465,6 +564,8 @@ interface AutomapImage {
   y: number;
   /** Cells whose wall has no automap entry. */
   missing: [number, number][];
+  /** Cells showing a suggested (unsaved) piece. */
+  suggested: [number, number][];
 }
 
 /** The automap at its own resolution (one cel pixel = 10 world pixels), drawn scaled up by the overlay. */
@@ -479,8 +580,10 @@ function renderAutomap(width: number, height: number, a: NonNullable<Props['auto
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(W, H);
   const missing: [number, number][] = [];
+  const suggested: [number, number][] = [];
   const pal = a.palette;
   for (const p of a.pieces) {
+    if (p.suggested) suggested.push([p.cellX, p.cellY]);
     if (p.cel === null) {
       if (p.layer === 'wall' && !p.rule) missing.push([p.cellX, p.cellY]);
       continue;
@@ -506,7 +609,7 @@ function renderAutomap(width: number, height: number, a: NonNullable<Props['auto
       }
   }
   ctx.putImageData(img, 0, 0);
-  return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing };
+  return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing, suggested };
 }
 
 type OverlayState = Props & { automapImage: AutomapImage | null; walk: WalkPaths | null; resizeDrag: { current: { side: Side; delta: ResizeDelta } | null } };
@@ -536,15 +639,17 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
       for (const [cx, cy] of am.missing) diamond(ctx, cx, cy);
       ctx.stroke();
     }
+    if (am.suggested.length) {
+      ctx.strokeStyle = 'rgba(110, 230, 255, 0.85)';
+      ctx.lineWidth = 1.5 * px;
+      ctx.beginPath();
+      for (const [cx, cy] of am.suggested) diamond(ctx, cx, cy);
+      ctx.stroke();
+    }
   }
 
-  if (walk) {
-    // Red = blocks jumping/teleport too; amber = blocks walking.
-    ctx.fillStyle = 'rgba(255, 60, 70, 0.38)';
-    ctx.fill(walk.noJump);
-    ctx.fillStyle = 'rgba(255, 176, 40, 0.34)';
-    ctx.fill(walk.noWalk);
-  }
+  // Red = blocks jumping/teleport too; amber = blocks walking.
+  if (walk) drawWalk(ctx, canvas, cam, walk);
 
   if (v.grid) {
     ctx.beginPath();
@@ -686,6 +791,30 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
       ctx.fillStyle = 'rgb(160, 235, 255)';
       ctx.fillText(text, item.x + minX + 4 * px, item.y + minY - 6 * px);
     }
+  }
+
+  if (s.gameView?.on) {
+    // What the character sees: an 800×600 screen centred on the view; shade the rest.
+    const x0 = cam.x - GAME_W / 2;
+    const y0 = cam.y - GAME_H / 2;
+    const big = 1e6;
+    ctx.fillStyle = 'rgba(5, 6, 9, 0.62)';
+    ctx.beginPath();
+    ctx.rect(-big, -big, 2 * big, 2 * big);
+    ctx.rect(x0 + GAME_W, y0, -GAME_W, GAME_H); // counter-clockwise hole
+    ctx.fill('evenodd');
+    ctx.strokeStyle = 'rgba(255, 215, 130, 0.9)';
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeRect(x0, y0, GAME_W, GAME_H);
+    ctx.font = `${12 * px}px system-ui, sans-serif`;
+    ctx.fillStyle = 'rgba(255, 215, 130, 0.95)';
+    ctx.fillText('In-game screen (800×600) · the character stands at the centre', x0 + 6 * px, y0 - 6 * px);
+    ctx.beginPath();
+    ctx.moveTo(cam.x - 8 * px, cam.y);
+    ctx.lineTo(cam.x + 8 * px, cam.y);
+    ctx.moveTo(cam.x, cam.y - 8 * px);
+    ctx.lineTo(cam.x, cam.y + 8 * px);
+    ctx.stroke();
   }
 
   if (s.marks?.length) {

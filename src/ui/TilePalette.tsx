@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { decodeTile, Orientation, type Dt1Tile } from '../formats/dt1';
 import type { Palette } from '../formats/palette';
 import type { TileLibrary } from '../game/GameData';
@@ -99,6 +99,8 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
   const [query, setQuery] = useState('');
   const [dt1, setDt1] = useState<string>('all');
   const grid = useRef<HTMLDivElement>(null);
+  /** Set by a focus request until the focused thumbnail has been scrolled into view. */
+  const pendingScroll = useRef<{ seq: number; dt1: string | null } | null>(null);
   const [gridH, setGridH] = usePersistentSize('tiles', 340, 120, 1400);
   const [thumb, setThumb] = useState(() => {
     try {
@@ -138,7 +140,7 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
     if (src) setDt1(src.path);
     setFilter('all');
     setQuery('');
-    requestAnimationFrame(() => grid.current?.querySelector('.thumb.focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    pendingScroll.current = { seq: focus.seq, dt1: src?.path ?? null };
   }, [focus, lib]);
 
   const dt1s = useMemo(
@@ -161,6 +163,16 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
       .filter((e) => fitsLayer(layerKind, e.orientation) && test(e.orientation))
       .filter((e) => !q || `${e.main}/${e.sub}`.startsWith(q) || String(e.main) === q);
   }, [lib, layerKind, filter, query, dt1]);
+
+  // Scroll once the focused tile is actually rendered: opening its DT1 or switching layer re-renders the grid first.
+  useLayoutEffect(() => {
+    const want = pendingScroll.current;
+    if (!want || (want.dt1 !== null && want.dt1 !== dt1)) return;
+    const el = grid.current?.querySelector('.thumb.focused');
+    if (!el) return;
+    pendingScroll.current = null;
+    el.scrollIntoView({ block: 'center' });
+  });
 
   const isFocused = (e: Entry) =>
     !!focus &&

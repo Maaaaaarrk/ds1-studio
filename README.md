@@ -100,6 +100,15 @@ file list; you can override the level type per map in the **Map** panel.
   walls with no AutoMap.txt entry (they won't show in game), and for the selected cell lists each tile's code (fl, wl, wtll…),
   style, sequence, matching row and piece. *Change piece…* opens a gallery of MaxiMap pieces and writes the AutoMap.txt row for you
   (this sequence only, or every sequence of the style). Mod level types keyed by LvlTypes id (PD2's "47") are matched too.
+- **Automap suggestions**: *Suggest pieces for missing tiles* proposes a piece for every tile without an automap entry (the level's
+  usual piece for that kind of tile, else the most common one in the game), previews it on the map in cyan, lets you swap the piece
+  per kind or skip a kind, and writes the rows in one go. Modded MaxiMap.dc6 sheets are used when the mod has one.
+- **DT1 editor** (Map → DT1 editor): duplicate/rename a DT1 and recolour it (hue, saturation, brightness, tint, replace a colour) for
+  the whole file, hand-picked tiles, the tiles of a preset, or the tiles used in the map selection. The preview is exact (colours
+  snap to the act palette); the copy can replace the original in the map, updating LvlTypes/Dt1Mask.
+- **Tile libraries** window shows every tile of the clicked DT1 (filter by kind, Ctrl+wheel zoom, details), in its own act palette.
+- **Object gallery**: object mode shows every object/NPC as a sprite thumbnail; click one to place it.
+- **Game view** (**Z**): zooms to the 800×600 in-game screen centred on the selection, shading what the character can't see.
 - **Stacking**: hold **Alt** when you click to place a preset or paste, and tiles landing on occupied cells go into the next free
   wall/floor layer (adding Wall 2–4 / Floor 2 when needed) instead of replacing what is there.
 - What the app may write (mod folder only, originals kept as `.bak`): `.ds1/.dt1/.cof/.dcc/.dc6` under `data/global/`, `.txt` under

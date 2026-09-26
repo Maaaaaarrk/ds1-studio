@@ -144,4 +144,4 @@ export class LayeredFs {
 export const CLASSIC_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'];
 
 /** Only these extensions matter to the editor; skipping the rest keeps folder indexing fast. */
-export const RELEVANT_EXT = /\.(ds1|dt1|dat|txt|json|bin)$/i;
+export const RELEVANT_EXT = /\.(ds1|dt1|dat|txt|json|bin|cof|dcc|dc6)$/i;

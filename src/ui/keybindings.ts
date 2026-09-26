@@ -20,6 +20,7 @@ export const ACTIONS = [
   { id: 'edit.delete', label: 'Delete (active layer / object)', group: 'Edit', key: 'Delete' },
   { id: 'edit.deleteAll', label: 'Delete all layers', group: 'Edit', key: 'Shift+Delete' },
   { id: 'view.fit', label: 'Fit map', group: 'View', key: 'F' },
+  { id: 'view.game', label: 'Game view (what the character sees)', group: 'View', key: 'Z' },
   { id: 'view.grid', label: 'Grid', group: 'View', key: 'G' },
   { id: 'view.rooms', label: 'Game rooms (8×8)', group: 'View', key: 'R' },
   { id: 'view.walkable', label: 'Walkability', group: 'View', key: 'W' },

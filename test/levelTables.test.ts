@@ -164,3 +164,30 @@ describe('automap level names', () => {
     expect(automapLevelFor(t, 'Dark Temple', 5, 47)).toBe('47');
   });
 });
+
+import { applyAutomapSuggestions, suggestAutomap, type AutomapPiece } from '../src/game/automap';
+
+describe('automap suggestions', () => {
+  const doc = ptt(enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tType1\tCel1\tType2\tCel2\tType2\tCel3\tType4\tCel4\r\n' +
+    '1 Town\twl\t0\t0\t3\tW\t21\t\t-1\t\t-1\t\t-1\r\n1 Town\twl\t1\t0\t3\tW\t21\t\t-1\t\t-1\t\t-1\r\n1 Town\twr\t0\t-1\t-1\tR\t20\t\t-1\t\t-1\t\t-1\r\n2 Town\tfl\t0\t-1\t-1\tF\t3\t\t-1\t\t-1\t\t-1\r\n'));
+  const t = parseAutomap(doc);
+  const piece = (orientation: number, main: number, sub: number, layer: 'floor' | 'wall'): AutomapPiece => ({ cellX: 0, cellY: 0, orientation, main, sub, rule: null, cel: null, layer });
+  it("suggests the level's usual piece per code, grouping sequences by style", () => {
+    const s = suggestAutomap(t, '1 Town', [piece(1, 5, 2, 'wall'), piece(1, 5, 3, 'wall'), piece(1, 5, 7, 'wall'), piece(0, 9, 0, 'floor')], { floors: true });
+    expect(s).toEqual([
+      { code: 'fl', orientation: 0, style: 9, seqs: [0], count: 1, cel: 3 }, // not used by 1 Town: falls back to the whole table
+      { code: 'wl', orientation: 1, style: 5, seqs: [2, 3, 7], count: 3, cel: 21 },
+    ]);
+    expect(suggestAutomap(t, '1 Town', [piece(0, 9, 0, 'floor')], { floors: false })).toEqual([]);
+  });
+  it('writes one row per run of sequences, in front of the level', () => {
+    const s = suggestAutomap(t, '1 Town', [piece(1, 5, 2, 'wall'), piece(1, 5, 3, 'wall'), piece(1, 5, 7, 'wall')], { floors: false });
+    const { doc: out, rows } = applyAutomapSuggestions(doc, '1 Town', s);
+    expect(rows).toBe(2);
+    expect(out.rows.slice(0, 2).map((r) => r.slice(0, 7))).toEqual([
+      ['1 Town', 'wl', '5', '2', '3', 'DS1 Studio', '21'],
+      ['1 Town', 'wl', '5', '7', '7', 'DS1 Studio', '21'],
+    ]);
+    expect(findRule(parseAutomap(out), '1 Town', 1, 5, 7)!.cels[0].cel).toBe(21);
+  });
+});

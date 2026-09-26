@@ -4,6 +4,8 @@ import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
 import { Thumb } from './TilePalette';
+import type { Palette } from '../formats/palette';
+import { ORIENTATION_NAMES } from './state';
 
 interface Props {
   map: OpenMap;
@@ -30,10 +32,17 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
     return all.filter((p) => !inMap.has(normalizePath(p)) && (!q || p.toLowerCase().includes(q)));
   }, [all, inMap, query]);
 
+  // Preview in the DT1's own act palette (from its folder), falling back to the map's.
+  const [previewPal, setPreviewPal] = useState<{ act: number | null; palette: Palette } | null>(null);
   useEffect(() => {
     setPreviewDt1(null);
-    if (preview) void gd.dt1(preview).then(setPreviewDt1);
-  }, [preview, gd]);
+    if (!preview) return;
+    void gd.dt1(preview).then(setPreviewDt1);
+    const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(preview);
+    const act = m ? (m[1] ? Number(m[1]) - 1 : 4) : null;
+    if (act === null || act === map.ds1.act) setPreviewPal(null);
+    else void gd.palette(act).then((palette) => setPreviewPal({ act, palette }));
+  }, [preview, gd, map.ds1.act]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,22 +116,9 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
         </div>
         <div className="dt1m-preview">
           {preview ? (
-            <>
-              <div className="field-label">
-                <span className="mono">{short(preview)}</span>
-                <span className="muted small">{previewDt1 ? `${previewDt1.tiles.length} tiles` : 'loading…'}</span>
-              </div>
-              <div className="thumb-grid dt1m-thumbs">
-                {previewDt1?.tiles.slice(0, 60).map((t, i) => (
-                  <div key={i} className="thumb" title={`#${i} · o${t.orientation} · ${t.mainIndex}/${t.subIndex}`}>
-                    <Thumb tile={t} palette={map.palette} />
-                    <span className="thumb-label">#{i}</span>
-                  </div>
-                ))}
-              </div>
-            </>
+            <Dt1Viewer path={preview} dt1={previewDt1} palette={previewPal?.palette ?? map.palette} paletteNote={previewPal ? `Act ${previewPal.act! + 1} palette` : null} inMap={inMap.has(normalizePath(preview))} onAdd={() => setPaths([...paths, preview])} />
           ) : (
-            <p className="muted small">Click a library to preview its tiles. Double-click (or +) to add it.</p>
+            <p className="muted small">Click a library to see all of its tiles. Double-click (or +) to add it.</p>
           )}
         </div>
         {removeUsed.length > 0 && (
@@ -142,6 +138,94 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
           <button className="btn primary" disabled={!changed} onClick={() => onApply(paths)}>
             Apply
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const KINDS: { id: string; label: string; test: (o: number) => boolean }[] = [
+  { id: 'all', label: 'All', test: () => true },
+  { id: 'floor', label: 'Floors', test: (o) => o === 0 },
+  { id: 'wall', label: 'Walls', test: (o) => (o >= 1 && o <= 9) || o === 12 },
+  { id: 'tree', label: 'Trees/objects', test: (o) => o === 14 },
+  { id: 'roof', label: 'Roofs', test: (o) => o === 15 },
+  { id: 'lower', label: 'Lower walls', test: (o) => o >= 16 },
+  { id: 'shadow', label: 'Shadows', test: (o) => o === 13 },
+  { id: 'special', label: 'Specials', test: (o) => o === 10 || o === 11 },
+];
+
+/** Every tile of one DT1, filterable by kind, with a large view of the clicked tile. */
+function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: string; dt1: Dt1 | null; palette: Palette; paletteNote: string | null; inMap: boolean; onAdd: () => void }) {
+  const [kind, setKind] = useState('all');
+  const [picked, setPicked] = useState<number | null>(null);
+  const [size, setSize] = useState(64);
+  useEffect(() => setPicked(null), [path]);
+  const tiles = (dt1?.tiles ?? []).map((t, i) => ({ t, i })).filter(({ t }) => KINDS.find((k) => k.id === kind)!.test(t.orientation));
+  const sel = picked !== null ? dt1?.tiles[picked] : undefined;
+  return (
+    <div className="dt1v">
+      <div className="dt1v-head">
+        <span className="mono">{short(path)}</span>
+        <span className="muted small">
+          {dt1 ? `${dt1.tiles.length} tiles` : 'loading…'}
+          {paletteNote ? ` · shown in its ${paletteNote}` : ''}
+        </span>
+        <div className="chips">
+          {KINDS.map((k) => {
+            const n = dt1 ? dt1.tiles.filter((t) => k.test(t.orientation)).length : 0;
+            return k.id === 'all' || n ? (
+              <button key={k.id} className={`chip${kind === k.id ? ' active' : ''}`} onClick={() => setKind(k.id)}>
+                {k.label} {k.id !== 'all' && <span className="muted">{n}</span>}
+              </button>
+            ) : null;
+          })}
+        </div>
+        {!inMap && (
+          <button className="btn small" onClick={onAdd}>
+            Add to map
+          </button>
+        )}
+      </div>
+      <div className="dt1v-body">
+        <div
+          className="thumb-grid dt1v-grid"
+          style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size + 14}px, 1fr))`, ['--thumb-h' as string]: `${size}px` }}
+          onWheel={(e) => {
+            if (!e.ctrlKey) return;
+            setSize((v) => Math.round(Math.min(200, Math.max(36, v * Math.exp(-e.deltaY * 0.0015)))));
+          }}
+          title="Ctrl + scroll to zoom"
+        >
+          {tiles.map(({ t, i }) => (
+            <div key={i} className={`thumb${picked === i ? ' active' : ''}`} title={`#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · ${t.mainIndex}/${t.subIndex}`} onClick={() => setPicked(i)}>
+              <Thumb tile={t} palette={palette} />
+              <span className="thumb-label">
+                {t.mainIndex}/{t.subIndex}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="dt1v-detail">
+          {sel ? (
+            <>
+              <div className="dt1v-big">
+                <Thumb tile={sel} palette={palette} />
+              </div>
+              <table className="kv small">
+                <tbody>
+                  <tr><td className="muted">Tile</td><td>#{picked}</td></tr>
+                  <tr><td className="muted">Kind</td><td>{ORIENTATION_NAMES[sel.orientation] ?? '?'} (orientation {sel.orientation})</td></tr>
+                  <tr><td className="muted">Main / sub</td><td><code>{sel.mainIndex}/{sel.subIndex}</code></td></tr>
+                  <tr><td className="muted">Size</td><td>{sel.width}×{Math.abs(sel.height)}</td></tr>
+                  <tr><td className="muted">Rarity / frame</td><td>{sel.rarity}</td></tr>
+                  <tr><td className="muted">Animated</td><td>{sel.animated ? 'yes' : 'no'}</td></tr>
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <p className="muted small">Click a tile for a closer look.</p>
+          )}
         </div>
       </div>
     </div>

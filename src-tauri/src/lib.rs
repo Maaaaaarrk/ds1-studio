@@ -77,7 +77,7 @@ fn set_config(app: AppHandle, state: State<AppState>, config: Config) -> Result<
 
 fn is_relevant(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    [".ds1", ".dt1", ".dat", ".txt", ".json", ".bin"].iter().any(|ext| lower.ends_with(ext))
+    [".ds1", ".dt1", ".dat", ".txt", ".json", ".bin", ".cof", ".dcc", ".dc6"].iter().any(|ext| lower.ends_with(ext))
 }
 
 fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {

@@ -128,6 +128,18 @@ export interface AutomapPiece {
   rule: AutomapRule | null;
   cel: number | null;
   layer: 'floor' | 'wall';
+  /** Set when the cel comes from an unsaved suggestion. */
+  suggested?: boolean;
+}
+
+/** Pieces with suggestions filled in, for previewing them on the map. */
+export function withSuggestions(pieces: AutomapPiece[], suggestions: AutomapSuggestion[]): AutomapPiece[] {
+  const by = new Map(suggestions.map((s) => [`${s.orientation}|${s.style}`, s]));
+  return pieces.map((p) => {
+    if (p.rule) return p;
+    const s = by.get(`${p.orientation}|${p.main}`);
+    return s && s.seqs.includes(p.sub) ? { ...p, cel: s.cel, suggested: true } : p;
+  });
 }
 
 /** Every floor and wall tile of the map with its automap rule and chosen cel (random among Cel1..4, stable per cell). */
@@ -229,4 +241,82 @@ export function setAutomapCel(
   }
   rows.splice(at, 0, line);
   return { doc: { ...doc, rows }, summary: `AutoMap.txt: ${what} (new row)` };
+}
+
+export interface AutomapSuggestion {
+  code: string;
+  orientation: number;
+  style: number;
+  /** Sequences (sub indices) of this style that have no entry. */
+  seqs: number[];
+  /** Tiles on the map this covers. */
+  count: number;
+  cel: number;
+}
+
+/**
+ * The most used cel per tile code: first among this level's rules, then across the whole table. Used to suggest
+ * pieces for tiles that have none (a left wall gets the level's usual left-wall piece, and so on).
+ */
+export function usualCels(t: AutomapTable, level: string): Map<string, number> {
+  const count = (filter: (r: AutomapRule) => boolean) => {
+    const byCode = new Map<string, Map<number, number>>();
+    for (const rules of t.byKey.values())
+      for (const r of rules) {
+        if (!filter(r) || !r.cels.length) continue;
+        const m = byCode.get(r.code) ?? byCode.set(r.code, new Map()).get(r.code)!;
+        for (const c of r.cels) m.set(c.cel, (m.get(c.cel) ?? 0) + 1);
+      }
+    return new Map([...byCode].map(([code, m]) => [code, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
+  };
+  const own = count((r) => r.level === level);
+  const all = count(() => true);
+  for (const [code, cel] of all) if (!own.has(code)) own.set(code, cel);
+  return own;
+}
+
+/** Suggestions for every tile of the map without an automap entry (walls always, floors when asked). */
+export function suggestAutomap(t: AutomapTable, level: string, pieces: AutomapPiece[], opts: { floors: boolean }): AutomapSuggestion[] {
+  const usual = usualCels(t, level);
+  const groups = new Map<string, AutomapSuggestion>();
+  for (const p of pieces) {
+    if (p.rule || (p.layer === 'floor' && !opts.floors)) continue;
+    const code = AUTOMAP_CODES[p.orientation];
+    const cel = code ? usual.get(code) : undefined;
+    if (cel === undefined) continue;
+    const k = `${p.orientation}|${p.main}`;
+    const g = groups.get(k) ?? groups.set(k, { code, orientation: p.orientation, style: p.main, seqs: [], count: 0, cel }).get(k)!;
+    if (!g.seqs.includes(p.sub)) g.seqs.push(p.sub);
+    g.count++;
+  }
+  return [...groups.values()].map((g) => ({ ...g, seqs: g.seqs.sort((a, b) => a - b) })).sort((a, b) => a.orientation - b.orientation || a.style - b.style);
+}
+
+/** Applies suggestions to AutoMap.txt: one row per run of consecutive sequences, in front of the level's other rows. */
+export function applyAutomapSuggestions(doc: TxtTableDoc, level: string, suggestions: AutomapSuggestion[]): { doc: TxtTableDoc; rows: number } {
+  const cols = celColumns(doc);
+  const lines: string[][] = [];
+  for (const s of suggestions) {
+    for (let i = 0; i < s.seqs.length; ) {
+      let j = i;
+      while (j + 1 < s.seqs.length && s.seqs[j + 1] === s.seqs[j] + 1) j++;
+      const line = Array<string>(doc.columns.length).fill('');
+      line[0] = level;
+      line[1] = s.code;
+      line[2] = String(s.style);
+      line[3] = String(s.seqs[i]);
+      line[4] = String(s.seqs[j]);
+      line[cols[0].type] = 'DS1 Studio';
+      line[cols[0].cel] = String(s.cel);
+      for (const c of cols.slice(1)) line[c.cel] = '-1';
+      lines.push(line);
+      i = j + 1;
+    }
+  }
+  const rows = doc.rows.map((r) => r.slice());
+  const first = rows.findIndex((r) => (r[0] ?? '').trim().toLowerCase() === level.toLowerCase());
+  let at = first >= 0 ? first : rows.length;
+  while (first < 0 && at > 0 && rows[at - 1].length === 1 && rows[at - 1][0] === '') at--;
+  rows.splice(at, 0, ...lines);
+  return { doc: { ...doc, rows }, rows: lines.length };
 }

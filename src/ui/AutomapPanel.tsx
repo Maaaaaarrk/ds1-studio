@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SpriteFrame } from '../formats/dc6';
 import type { Palette } from '../formats/palette';
-import { AUTOMAP_CODE_NAMES, AUTOMAP_CODES, describeRule, type AutomapPiece, type AutomapTable } from '../game/automap';
+import { AUTOMAP_CODE_NAMES, AUTOMAP_CODES, describeRule, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { Modal } from './Dialogs';
 
 /** One MaxiMap cel drawn at `scale`. */
@@ -38,11 +38,33 @@ interface Props {
   onSet: (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => void;
   /** Friendlier label for numeric level names (their LvlTypes name). */
   levelLabel?: (level: string) => string;
+  /** Pending suggestions for tiles without an entry (previewed on the map), or null. */
+  suggestions: AutomapSuggestion[] | null;
+  onSuggest: (floors: boolean) => void;
+  /** Change the suggested piece for every suggestion of one tile code. */
+  onSuggestionCel: (code: string, cel: number) => void;
+  /** Leave every suggestion of one tile code out. */
+  onSkipCode: (code: string) => void;
+  onApplySuggestions: () => void;
+  onCancelSuggestions: () => void;
 }
 
 /** Shows which automap piece each tile uses (AutoMap.txt row + MaxiMap cel) and lets you pick a different one. */
-export function AutomapPanel({ table, cels, palette, level, onLevel, pieces, cell, canSave, onSet, levelLabel }: Props) {
+export function AutomapPanel(props: Props) {
+  const { table, cels, palette, level, onLevel, pieces, cell, canSave, onSet, levelLabel, suggestions } = props;
   const [picking, setPicking] = useState<AutomapPiece | null>(null);
+  const [pickingCode, setPickingCode] = useState<AutomapSuggestion | null>(null);
+  const [floors, setFloors] = useState(false);
+  const floorsMissing = pieces.filter((p) => p.layer === 'floor' && !p.rule).length;
+  const byCode = useMemo(() => {
+    const m = new Map<string, { code: string; orientation: number; cel: number; tiles: number; rows: number; sample: AutomapSuggestion }>();
+    for (const sg of suggestions ?? []) {
+      const e = m.get(sg.code) ?? m.set(sg.code, { code: sg.code, orientation: sg.orientation, cel: sg.cel, tiles: 0, rows: 0, sample: sg }).get(sg.code)!;
+      e.tiles += sg.count;
+      e.rows++;
+    }
+    return [...m.values()];
+  }, [suggestions]);
   const here = cell ? pieces.filter((p) => p.cellX === cell.x && p.cellY === cell.y) : [];
   const wallsMissing = pieces.filter((p) => p.layer === 'wall' && !p.rule).length;
   const shown = pieces.filter((p) => p.cel !== null).length;
@@ -70,6 +92,59 @@ export function AutomapPanel({ table, cels, palette, level, onLevel, pieces, cel
           What the map looks like on the in-game automap (Tab in game). Walls outlined in pink have no AutoMap.txt entry and won&apos;t show.
           Select a cell to see and change its pieces.
         </p>
+        {!suggestions ? (
+          <div className="am-suggest">
+            <button className="btn" disabled={!level || (!wallsMissing && !(floors && floorsMissing))} onClick={() => props.onSuggest(floors)}>
+              Suggest pieces for missing tiles
+            </button>
+            <label className="small">
+              <input type="checkbox" checked={floors} onChange={(e) => setFloors(e.target.checked)} /> include floors ({floorsMissing})
+            </label>
+          </div>
+        ) : (
+          <div className="am-suggest-box">
+            <div className="small">
+              <b>Suggested automap</b> <span className="muted">(previewed on the map, outlined in cyan; nothing written yet)</span>
+            </div>
+            {byCode.length ? (
+              <table className="kv automap-rows">
+                <tbody>
+                  {byCode.map((g) => (
+                    <tr key={g.code}>
+                      <td>
+                        <CelThumb frame={cels[g.cel]} palette={palette} />
+                      </td>
+                      <td>
+                        <div>
+                          <code>{g.code}</code> {AUTOMAP_CODE_NAMES[g.code] ?? ''}
+                        </div>
+                        <div className="muted small">
+                          {g.tiles} tiles · {g.rows} style{g.rows === 1 ? '' : 's'} → piece {g.cel}
+                        </div>
+                        <button className="btn small" onClick={() => setPickingCode(g.sample)}>
+                          Use another piece…
+                        </button>{' '}
+                        <button className="btn small" onClick={() => props.onSkipCode(g.code)} title="Leave these tiles off the automap">
+                          Skip
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="muted small">Nothing to suggest: every tile already has an automap entry.</p>
+            )}
+            <div className="modal-actions">
+              <button className="btn" onClick={props.onCancelSuggestions}>
+                Discard
+              </button>
+              <button className="btn primary" disabled={!canSave || !byCode.length} onClick={props.onApplySuggestions} title={canSave ? '' : 'No writable mod folder'}>
+                Write to AutoMap.txt
+              </button>
+            </div>
+          </div>
+        )}
         {cell &&
           (here.length ? (
             <table className="kv automap-rows">
@@ -98,6 +173,22 @@ export function AutomapPanel({ table, cels, palette, level, onLevel, pieces, cel
             <p className="muted small">This cell has no floor or wall tiles.</p>
           ))}
       </div>
+      {pickingCode && level && (
+        <CelPicker
+          table={table}
+          cels={cels}
+          palette={palette}
+          level={level}
+          piece={{ cellX: 0, cellY: 0, orientation: pickingCode.orientation, main: pickingCode.style, sub: pickingCode.seqs[0] ?? 0, rule: null, cel: pickingCode.cel, layer: 'wall' }}
+          hideScope
+          title={`Piece for every suggested ${AUTOMAP_CODE_NAMES[pickingCode.code] ?? pickingCode.code} (${pickingCode.code})`}
+          onClose={() => setPickingCode(null)}
+          onPick={(cel) => {
+            props.onSuggestionCel(pickingCode.code, cel);
+            setPickingCode(null);
+          }}
+        />
+      )}
       {picking && level && (
         <CelPicker
           table={table}
@@ -116,7 +207,9 @@ export function AutomapPanel({ table, cels, palette, level, onLevel, pieces, cel
   );
 }
 
-function CelPicker({ table, cels, palette, level, piece, onPick, onClose }: {
+function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideScope, title }: {
+  hideScope?: boolean;
+  title?: string;
   table: AutomapTable;
   cels: SpriteFrame[];
   palette: Palette;
@@ -146,7 +239,7 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose }: {
     .sort((a, b) => a - b)
     .filter((c) => !filter || String(c) === filter.trim() || (labels.get(c) ?? '').toLowerCase().includes(filter.toLowerCase()));
   return (
-    <Modal title={`Automap piece for ${code} · style ${piece.main} · seq ${piece.sub}`} onClose={onClose} wide>
+    <Modal title={title ?? `Automap piece for ${code} · style ${piece.main} · seq ${piece.sub}`} onClose={onClose} wide>
       <div className="cel-toolbar small">
         <select value={which} onChange={(e) => setWhich(e.target.value as typeof which)}>
           <option value="kind">
@@ -156,12 +249,16 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose }: {
           <option value="all">Every piece ({cels.length})</option>
         </select>
         <input className="small-input" placeholder="Filter by name or cel #" value={filter} onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
-        <label>
-          <input type="radio" checked={scope === 'seq'} onChange={() => setScope('seq')} /> this sequence ({piece.sub}) only
-        </label>
-        <label>
-          <input type="radio" checked={scope === 'style'} onChange={() => setScope('style')} /> every sequence of style {piece.main}
-        </label>
+        {!hideScope && (
+          <>
+            <label>
+              <input type="radio" checked={scope === 'seq'} onChange={() => setScope('seq')} /> this sequence ({piece.sub}) only
+            </label>
+            <label>
+              <input type="radio" checked={scope === 'style'} onChange={() => setScope('style')} /> every sequence of style {piece.main}
+            </label>
+          </>
+        )}
       </div>
       <div className="cel-grid">
         {list.map((c) => (

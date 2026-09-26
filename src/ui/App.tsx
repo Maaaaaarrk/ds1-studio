@@ -9,6 +9,8 @@ import {
   FolderCog,
   Footprints,
   Grid3x3,
+  Palette as PaletteIcon,
+  ScanEye,
   Map as MapIcon,
   Keyboard,
   LayoutGrid,
@@ -44,7 +46,7 @@ import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type Im
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, hitTest, hitTestAll, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
@@ -60,10 +62,12 @@ import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
 import { syncLevelTables } from '../game/levelTables';
-import { AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, type AutomapPiece, type AutomapTable } from '../game/automap';
+import { applyAutomapSuggestions, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
+import { ObjectGallery } from './ObjectGallery';
+import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
@@ -111,6 +115,7 @@ export function App() {
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fitSignal, setFitSignal] = useState(0);
+  const [gameView, setGameView] = useState<{ on: boolean; signal: number; center?: [number, number] | null }>({ on: false, signal: 0 });
   const [tool, setTool] = useState<Tool>('select');
   const [activeLayer, setActiveLayer] = useState<LayerRef>({ kind: 'floor', index: 0 });
   const [brush, setBrush] = useState<Brush | null>(null);
@@ -118,6 +123,7 @@ export function App() {
   /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
   const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
     setActiveLayer(layer);
+    setSidePanel('tiles');
     setPaletteFocus((f) => ({ tile, seq: (f?.seq ?? 0) + 1 }));
   }, []);
   const [selection, setSelection] = useState<CellRect | null>(null);
@@ -129,7 +135,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -739,10 +745,29 @@ export function App() {
     () => (visibility.automap && automapData && map && automapLevel ? automapPieces(map.ds1, automapData.table, automapLevel) : null),
     [visibility.automap, automapData, map, automapLevel, revision], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  const [automapSuggestions, setAutomapSuggestions] = useState<AutomapSuggestion[] | null>(null);
+  useEffect(() => setAutomapSuggestions(null), [map?.path, automapLevel]);
   const automapView = useMemo(
-    () => (automapPiecesNow && automapData && map ? { pieces: automapPiecesNow, cels: automapData.cels, palette: map.palette } : null),
-    [automapPiecesNow, automapData, map],
+    () =>
+      automapPiecesNow && automapData && map
+        ? { pieces: automapSuggestions ? withSuggestions(automapPiecesNow, automapSuggestions) : automapPiecesNow, cels: automapData.cels, palette: map.palette }
+        : null,
+    [automapPiecesNow, automapData, map, automapSuggestions],
   );
+  const applyAutomapSuggestionsNow = useCallback(async () => {
+    if (!gd || !automapLevel || !automapSuggestions) return;
+    try {
+      const bytes = await gd.fs.read(AUTOMAP_TXT);
+      if (!bytes) throw new Error('AutoMap.txt not found');
+      const { doc: next, rows } = applyAutomapSuggestions(parseTxtTable(bytes), automapLevel, automapSuggestions);
+      await writeFiles([{ path: AUTOMAP_TXT, bytes: serializeTxtTable(next) }]);
+      setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
+      setAutomapSuggestions(null);
+      notify(`AutoMap.txt: added ${rows} rows for ${automapLevel}`);
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
+  }, [gd, automapLevel, automapSuggestions, writeFiles, notify]);
   const setAutomapPiece = useCallback(
     async (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => {
       if (!gd || !automapLevel) return;
@@ -759,6 +784,35 @@ export function App() {
       }
     },
     [gd, automapLevel, writeFiles, notify],
+  );
+
+  /** DT1 editor: write the edited DT1, optionally swap it in for the original, then reload so every cache sees it. */
+  const saveEditedDt1 = useCallback(
+    async (r: Dt1EditResult) => {
+      if (!gd || !map || !doc) return;
+      await writeFiles([{ path: r.path, bytes: r.bytes }]);
+      const notes: string[] = [`Saved ${r.path.split('/').pop()}`];
+      if (r.switchMap) {
+        const paths = map.lib.loaded
+          .filter((l) => l.found && !l.path.startsWith('winds1/'))
+          .map((l) => (normalizePath(l.path) === normalizePath(r.original) ? r.path : l.path));
+        mutate((d) => {
+          const others = d.files.filter((f) => !/data[\\/]/i.test(f));
+          d.files = [...paths.map(embeddedFileName), ...others];
+        });
+        try {
+          const writes = await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
+          if (writes.length) await writeFiles(writes);
+          notes.push(writes.length ? 'LvlTypes/Dt1Mask updated' : 'map now uses it');
+        } catch (e) {
+          notes.push(`game tables not updated: ${(e as Error).message}`);
+        }
+      }
+      await reloadTables();
+      setDialog(null);
+      notify(notes.join(' · '));
+    },
+    [gd, map, doc, writeFiles, mutate, reloadTables, notify],
   );
 
   // Presets: saved ones come from the mod folder.
@@ -907,6 +961,14 @@ export function App() {
       return 'object';
     });
   }, []);
+  const toggleGameView = useCallback(() => {
+    setGameView((g) => {
+      if (g.on) return { ...g, on: false };
+      const r = selection;
+      const center = r ? (cellToWorld((r.x0 + r.x1 + 1) / 2, (r.y0 + r.y1 + 1) / 2) as [number, number]) : null;
+      return { on: true, signal: g.signal + 1, center };
+    });
+  }, [selection]);
   const actions = useMemo((): Partial<Record<ActionId, () => void>> => {
     const vis = (f: (v: Visibility) => Visibility) => () => setVisibility(f);
     const layerToggle = (key: 'floors' | 'walls', i: number) => vis((v) => ({ ...v, [key]: v[key].map((x, n) => (n === i ? !x : x)) }));
@@ -946,6 +1008,7 @@ export function App() {
       },
       'edit.deleteAll': () => clearSelection(true),
       'view.fit': () => setFitSignal((n) => n + 1),
+      'view.game': toggleGameView,
       'view.grid': vis((v) => ({ ...v, grid: !v.grid })),
       'view.rooms': vis((v) => ({ ...v, rooms: !v.rooms })),
       'view.walkable': vis((v) => ({ ...v, walkable: !v.walkable })),
@@ -964,7 +1027,7 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null };
   useEffect(() => {
@@ -1073,6 +1136,7 @@ export function App() {
           label: 'View',
           items: [
             { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: kb['view.fit'] },
+            { label: 'Game view', icon: <ScanEye />, onClick: toggleGameView, active: gameView.on, disabled: noMap, shortcut: kb['view.game'], title: 'Zoom to what the character sees in game (800×600, centred on the selection)' },
             { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: kb['view.grid'] },
             { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
             { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: kb['view.walkable'] },
@@ -1115,7 +1179,13 @@ export function App() {
             },
           ],
         },
-        { label: 'Tiles', items: [{ label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' }] },
+        {
+          label: 'Tiles',
+          items: [
+            { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
+            { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+          ],
+        },
         {
           label: 'Presets',
           items: [
@@ -1215,6 +1285,7 @@ export function App() {
             onZoom={setZoom}
             onStroke={onStroke}
             fitSignal={fitSignal}
+            gameView={gameView}
             focus={focus}
             onCycle={cycleStack}
             automap={automapView}
@@ -1265,6 +1336,23 @@ export function App() {
                 onChange={setObjects}
                 onStartPlacing={setPlacing}
               />
+            )}
+            {tool === 'object' && (
+              <section className="panel">
+                <div className="panel-header static">
+                  <span>Objects &amp; NPCs</span>
+                  <span className="muted small">{placing ? 'click the map to place · Esc to stop' : 'click one to place it'}</span>
+                </div>
+                <div className="panel-body">
+                  <ObjectGallery
+                    gd={data.gd}
+                    act={map.ds1.act}
+                    palette={map.palette}
+                    placing={placing}
+                    onPlace={(o) => setPlacing(placing && placing.type === o.type && placing.id === o.id ? null : o)}
+                  />
+                </div>
+              </section>
             )}
             {tool !== 'object' && (
               <div className="side-tabs">
@@ -1342,6 +1430,12 @@ export function App() {
                 cell={selection && isSingleCell(selection) ? { x: selection.x0, y: selection.y0 } : null}
                 canSave={canWrite}
                 onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
+                suggestions={automapSuggestions}
+                onSuggest={(floors) => automapLevel && setAutomapSuggestions(suggestAutomap(automapData.table, automapLevel, automapPiecesNow ?? [], { floors }))}
+                onSuggestionCel={(code, cel) => setAutomapSuggestions((list) => list && list.map((sg) => (sg.code === code ? { ...sg, cel } : sg)))}
+                onSkipCode={(code) => setAutomapSuggestions((list) => list && list.filter((sg) => sg.code !== code))}
+                onApplySuggestions={() => void applyAutomapSuggestionsNow()}
+                onCancelSuggestions={() => setAutomapSuggestions(null)}
                 levelLabel={(l) => {
                   const t = /^\d+$/.test(l.trim()) ? data.gd.lvlType(Number(l)) : null;
                   return t && t.name !== l.trim() ? `${l} · ${t.name}` : l;
@@ -1371,6 +1465,17 @@ export function App() {
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
+ {dialog === 'dt1edit' && map && (
+        <Dt1Editor
+          map={map}
+          gd={data.gd}
+          presets={[...presets, ...(suggested ?? [])]}
+          selection={selection}
+          canSave={canWrite}
+          onSave={saveEditedDt1}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
       {dialog === 'tables' && (
         <DataTables
