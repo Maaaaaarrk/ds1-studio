@@ -2,16 +2,32 @@ import { COMPONENTS, drawOrder, parseCof, type Cof } from '../formats/cof';
 import { parseDc6, type SpriteFrame } from '../formats/dc6';
 import { decodeDccDirection, parseDcc } from '../formats/dcc';
 import type { LayeredFs } from '../vfs/vfs';
-import { cofPath, layerPath, type SpriteSpec } from './sprites';
+import { cofPath, composite, layerPath, type SpriteSpec } from './sprites';
 
 /**
  * Full animations of objects/monsters: every frame of one direction, composited with the
  * COF's per-frame draw order and placed on one shared canvas so playback doesn't jitter.
  */
 
+/**
+ * How a sprite layer is drawn, from the COF: -1 = solid, else the layer is translucent with D2's draw effect
+ * (0-2 = 75% / 50% / 25% opaque, 3 = luminance (glow), 4 = additive, 5 = multiply, 6 = black is transparent).
+ */
+export type LayerBlend = number;
+
+export interface SpritePart {
+  image: SpriteFrame;
+  blend: LayerBlend;
+}
+
 export interface SpriteAnimation {
-  /** All frames, each `width` x `height`, sharing the same offsets. */
+  /** All frames, each `width` x `height`, sharing the same offsets (every layer flattened: for thumbnails). */
   frames: SpriteFrame[];
+  /**
+   * The same frames as the game draws them: solid layers merged, translucent/blended layers kept separate so the
+   * renderer can blend them (fog, glows, magic). Offsets are the parts' own, relative to the feet.
+   */
+  parts: SpritePart[][];
   /** Playback rate in frames per second (1..25). */
   fps: number;
   /** Direction count of the COF (valid directions are 0..directions-1). */
@@ -97,16 +113,23 @@ async function build(fs: LayeredFs, spec: SpriteSpec, direction: number): Promis
   }
   if (!layerFrames.size) return null;
 
-  // Per-frame layer stacks, back to front.
+  // Per-frame layer stacks, back to front, with each layer's blend mode.
+  const blendOf = new Map(cof.layers.map((l) => [l.component, l.transparent ? l.drawEffect : -1]));
   const stacks: SpriteFrame[][] = [];
+  const blends: LayerBlend[][] = [];
   for (let f = 0; f < cof.framesPerDir; f++) {
     const stack: SpriteFrame[] = [];
+    const b: LayerBlend[] = [];
     for (const comp of drawOrder(cof, dir, f)) {
       const frames = layerFrames.get(comp);
       const img = frames?.[Math.min(f, frames.length - 1)];
-      if (img && img.width > 0 && img.height > 0) stack.push(img);
+      if (img && img.width > 0 && img.height > 0) {
+        stack.push(img);
+        b.push(blendOf.get(comp) ?? -1);
+      }
     }
     stacks.push(stack);
+    blends.push(b);
   }
 
   // Shared box: the union of all frames' layers.
@@ -135,5 +158,25 @@ async function build(fs: LayeredFs, spec: SpriteSpec, direction: number): Promis
     return { width, height, offsetX: left, offsetY: top, pixels };
   });
 
-  return { frames, fps: animationFps(cof.animationRate), directions: cof.directions, width, height, offsetX: left, offsetY: top };
+  // Runs of solid layers merge into one image; each translucent layer stays its own part.
+  const parts = stacks.map((stack, f) => {
+    const out: SpritePart[] = [];
+    let run: SpriteFrame[] = [];
+    const flush = () => {
+      const img = run.length === 1 ? run[0] : composite(run);
+      if (img) out.push({ image: img, blend: -1 });
+      run = [];
+    };
+    stack.forEach((img, i) => {
+      if (blends[f][i] < 0) run.push(img);
+      else {
+        if (run.length) flush();
+        out.push({ image: img, blend: blends[f][i] });
+      }
+    });
+    if (run.length) flush();
+    return out;
+  });
+
+  return { frames, parts, fps: animationFps(cof.animationRate), directions: cof.directions, width, height, offsetX: left, offsetY: top };
 }

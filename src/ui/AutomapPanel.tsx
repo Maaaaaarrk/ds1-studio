@@ -47,6 +47,8 @@ interface Props {
   onSkipCode: (code: string) => void;
   onApplySuggestions: () => void;
   onCancelSuggestions: () => void;
+  /** Opens the full automap editor. */
+  onOpenEditor: () => void;
 }
 
 /** Shows which automap piece each tile uses (AutoMap.txt row + MaxiMap cel) and lets you pick a different one. */
@@ -88,6 +90,9 @@ export function AutomapPanel(props: Props) {
             ))}
           </select>
         </label>
+        <button className="btn primary ame-open" onClick={props.onOpenEditor}>
+          Open automap editor…
+        </button>
         <p className="muted small">
           What the map looks like on the in-game automap (Tab in game). Walls outlined in pink have no AutoMap.txt entry and won&apos;t show.
           Select a cell to see and change its pieces.

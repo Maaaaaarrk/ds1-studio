@@ -324,3 +324,95 @@ export function applyAutomapSuggestions(doc: TxtTableDoc, level: string, suggest
   rows.splice(at, 0, ...lines);
   return { doc: { ...doc, rows }, rows: lines.length };
 }
+
+/** A pending automap change for one tile: its pieces (Cel1..Cel4, picked at random in game), or none = hidden. */
+export interface AutomapEdit {
+  orientation: number;
+  style: number;
+  sub: number;
+  cels: number[];
+}
+
+export const editKey = (orientation: number, style: number, sub: number) => `${orientation}|${style}|${sub}`;
+
+/** The pieces a tile gets with pending edits applied: edit first, else its rule; [] = hidden, null = no entry. */
+export function effectiveCels(t: AutomapTable, level: string, edits: Map<string, AutomapEdit>, orientation: number, style: number, sub: number): number[] | null {
+  const e = edits.get(editKey(orientation, style, sub));
+  if (e) return e.cels;
+  const rule = findRule(t, level, orientation, style, sub);
+  return rule ? rule.cels.map((c) => c.cel) : null;
+}
+
+/**
+ * Writes pending edits into AutoMap.txt: per tile code and style, consecutive sequences with the same pieces become
+ * one row, placed in front of the level's other rows so the game's first-match lookup uses them. Rows this editor
+ * wrote before for the same sequences are replaced rather than piled up; everything else is left alone. A tile
+ * with no pieces gets a row whose cels are all -1: deliberately not on the automap.
+ */
+export function applyAutomapEdits(doc: TxtTableDoc, level: string, edits: AutomapEdit[]): { doc: TxtTableDoc; rows: number } {
+  const cols = celColumns(doc);
+  const byGroup = new Map<string, AutomapEdit[]>();
+  for (const e of edits) {
+    const code = AUTOMAP_CODES[e.orientation];
+    if (!code) continue;
+    const k = `${code}|${e.style}`;
+    (byGroup.get(k) ?? byGroup.set(k, []).get(k)!).push(e);
+  }
+  const lines: string[][] = [];
+  const covered = new Map<string, Set<number>>(); // code|style → sequences now written
+  for (const [k, list] of byGroup) {
+    const [code, style] = k.split('|');
+    const sorted = [...new Map(list.map((e) => [e.sub, e])).values()].sort((a, b) => a.sub - b.sub);
+    covered.set(k, new Set(sorted.map((e) => e.sub)));
+    for (let i = 0; i < sorted.length; ) {
+      let j = i;
+      const sig = sorted[i].cels.join(',');
+      while (j + 1 < sorted.length && sorted[j + 1].sub === sorted[j].sub + 1 && sorted[j + 1].cels.join(',') === sig) j++;
+      const line = Array<string>(doc.columns.length).fill('');
+      line[0] = level;
+      line[1] = code;
+      line[2] = style;
+      line[3] = String(sorted[i].sub);
+      line[4] = String(sorted[j].sub);
+      cols.forEach((c, n) => {
+        const cel = sorted[i].cels[n];
+        line[c.type] = cel !== undefined ? 'DS1 Studio' : '';
+        line[c.cel] = cel !== undefined ? String(cel) : '-1';
+      });
+      if (!sorted[i].cels.length) line[cols[0].type] = 'DS1 Studio (hidden)';
+      lines.push(line);
+      i = j + 1;
+    }
+  }
+  // Drop this editor's earlier rows that the new ones fully replace.
+  const lvl = level.trim().toLowerCase();
+  const rows = doc.rows.filter((r) => {
+    if ((r[0] ?? '').trim().toLowerCase() !== lvl || !/^DS1 Studio/.test((r[cols[0].type] ?? '').trim())) return true;
+    const seqs = covered.get(`${(r[1] ?? '').trim().toLowerCase()}|${Number(r[2]) || 0}`);
+    if (!seqs) return true;
+    const start = Number(r[3]);
+    const end = Number(r[4]) < 0 ? start : Number(r[4]);
+    if (start < 0) return true;
+    for (let s = start; s <= end; s++) if (!seqs.has(s)) return true;
+    return false;
+  });
+  const first = rows.findIndex((r) => (r[0] ?? '').trim().toLowerCase() === lvl);
+  let at = first >= 0 ? first : rows.length;
+  while (first < 0 && at > 0 && rows[at - 1].length === 1 && rows[at - 1][0] === '') at--;
+  rows.splice(at, 0, ...lines);
+  return { doc: { ...doc, rows }, rows: lines.length };
+}
+
+/** Groups for the editor's list, by tile code. */
+export const AUTOMAP_KINDS: { label: string; codes: string[] }[] = [
+  { label: 'Floors', codes: ['fl'] },
+  { label: 'Walls', codes: ['wl', 'wr'] },
+  { label: 'Corners', codes: ['wtlr', 'wtll', 'wtr', 'wbl', 'wbr'] },
+  { label: 'Doors', codes: ['wld', 'wrd'] },
+  { label: 'Wall ends', codes: ['wle', 'wre'] },
+  { label: 'Columns & props', codes: ['co'] },
+  { label: 'Trees & objects', codes: ['tr'] },
+  { label: 'Roofs', codes: ['rf'] },
+  { label: 'Lower walls', codes: ['ld', 'lr', 'lf', 'ls'] },
+  { label: 'Shadows', codes: ['sh'] },
+];

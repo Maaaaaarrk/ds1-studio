@@ -14,6 +14,11 @@ export const enum InstanceFlag {
   Ghost = 8,
 }
 
+/** Instance flag bits for a sprite layer's blend (a COF draw effect, or -1 for solid). */
+export function blendFlag(blend: number): number {
+  return blend < 0 ? 0 : (Math.min(blend, 6) + 1) << 4;
+}
+
 export interface Instance {
   x: number;
   y: number;
@@ -101,10 +106,20 @@ void main() {
     if (coverage < 0.5) discard;
     rgb = toSrgb(sum / hits);
   }
+  // Output is premultiplied (blendFunc ONE, ONE_MINUS_SRC_ALPHA), so alpha 0 with colour means "add".
   if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45); return; }
   if ((vFlags & 2) != 0) rgb = mix(rgb, vec3(1.0, 0.78, 0.3), 0.35);
   if ((vFlags & 4) != 0) rgb *= 0.35;
-  outColor = vec4(rgb, (vFlags & 8) != 0 ? 0.6 : 1.0);
+  float a = (vFlags & 8) != 0 ? 0.6 : 1.0;
+  // Sprite layer blend (bits 4-7): 0 solid, else Diablo II's draw effect + 1.
+  int mode = (vFlags >> 4) & 15;
+  if (mode == 1) a *= 0.75;
+  else if (mode == 2) a *= 0.5;
+  else if (mode == 3) a *= 0.25;
+  else if (mode == 4 || mode == 5) { outColor = vec4(rgb * a, 0.0); return; }             // luminance / additive: glow
+  else if (mode == 6) { float l = dot(rgb, vec3(0.299, 0.587, 0.114)); outColor = vec4(0.0, 0.0, 0.0, (1.0 - l) * a); return; } // multiply (darken)
+  else if (mode == 7) { float m = max(rgb.r, max(rgb.g, rgb.b)); outColor = vec4(rgb * m * a, m * a); return; }  // black is transparent
+  outColor = vec4(rgb * a, a);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
@@ -227,7 +242,7 @@ export class MapRenderer {
 
     gl.useProgram(this.program);
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); // premultiplied: also allows additive (glow) layers
     gl.uniform2f(this.uViewport, width, height);
     // Snap the camera to whole device pixels so tiles don't shimmer while panning.
     const snap = (v: number) => Math.round(v * camera.zoom) / camera.zoom;

@@ -66,10 +66,11 @@ import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
 import { syncLevelTables } from '../game/levelTables';
-import { applyAutomapSuggestions, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
+import { applyAutomapEdits, applyAutomapSuggestions, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
+import { AutomapEditor } from './AutomapEditor';
 import { ObjectGallery } from './ObjectGallery';
 import type { SpriteAnimation } from '../game/spriteAnim';
 import { GameSizePicker } from './GameSizePicker';
@@ -163,7 +164,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -629,7 +630,8 @@ export function App() {
   // Animations for the same objects, loaded only while animation and sprites are shown.
   const [animations, setAnimations] = useState<Map<string, SpriteAnimation>>(() => new Map());
   useEffect(() => {
-    if (!gd || !map || !objectKeys || !visibility.animate || !visibility.sprites) return setAnimations(new Map());
+    // Loaded whenever sprites show (not only while animating): they also carry the translucent/glowing layers.
+    if (!gd || !map || !objectKeys || !visibility.sprites) return setAnimations(new Map());
     let cancelled = false;
     const act = map.ds1.act;
     Promise.all(
@@ -638,12 +640,12 @@ export function App() {
         return [k, await gd.objectAnimation(act, type, id)] as const;
       }),
     ).then((entries) => {
-      if (!cancelled) setAnimations(new Map(entries.filter((e): e is [string, SpriteAnimation] => !!e[1] && e[1].frames.length > 1)));
+      if (!cancelled) setAnimations(new Map(entries.filter((e): e is [string, SpriteAnimation] => !!e[1] && e[1].parts.length > 0)));
     });
     return () => {
       cancelled = true;
     };
-  }, [gd, map, objectKeys, visibility.animate, visibility.sprites]);
+  }, [gd, map, objectKeys, visibility.sprites]);
 
   const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
   const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
@@ -787,7 +789,7 @@ export function App() {
   const [automapData, setAutomapData] = useState<{ gd: GameData; table: AutomapTable; cels: SpriteFrame[] } | null>(null);
   const [automapLevelOverride, setAutomapLevelOverride] = useState<{ path: string; level: string } | null>(null);
   useEffect(() => {
-    if (!visibility.automap || !gd || automapData?.gd === gd) return;
+    if ((!visibility.automap && dialog !== 'automap') || !gd || automapData?.gd === gd) return;
     void (async () => {
       try {
         const [txt, dc6] = await Promise.all([gd.fs.read(AUTOMAP_TXT), gd.fs.read(AUTOMAP_DC6)]);
@@ -798,7 +800,7 @@ export function App() {
         setVisibility((v) => ({ ...v, automap: false }));
       }
     })();
-  }, [visibility.automap, gd, automapData, notify]);
+  }, [visibility.automap, dialog, gd, automapData, notify]);
   const automapLevel = useMemo(() => {
     if (!automapData || !map) return null;
     if (automapLevelOverride?.path === map.path) return automapLevelOverride.level;
@@ -817,6 +819,28 @@ export function App() {
         : null,
     [automapPiecesNow, automapData, map, automapSuggestions],
   );
+  /** Opens the automap editor (loading AutoMap.txt first if the automap view hasn't yet). */
+  const openAutomapEditor = useCallback(() => setDialog('automap'), []);
+  const saveAutomapEdits = useCallback(
+    async (edits: AutomapEdit[]) => {
+      if (!gd || !automapLevel) return;
+      const bytes = await gd.fs.read(AUTOMAP_TXT);
+      if (!bytes) throw new Error('AutoMap.txt not found');
+      const { doc: next, rows } = applyAutomapEdits(parseTxtTable(bytes), automapLevel, edits);
+      await writeFiles([{ path: AUTOMAP_TXT, bytes: serializeTxtTable(next) }]);
+      setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
+      notify(`AutoMap.txt: ${edits.length} tile kinds saved as ${rows} rows for ${automapLevel}`);
+    },
+    [gd, automapLevel, writeFiles, notify],
+  );
+  const automapLevelLabel = useCallback(
+    (l: string) => {
+      const t = gd && /^\d+$/.test(l.trim()) ? gd.lvlType(Number(l)) : null;
+      return t && t.name !== l.trim() ? `${l} · ${t.name}` : l;
+    },
+    [gd],
+  );
+
   const applyAutomapSuggestionsNow = useCallback(async () => {
     if (!gd || !automapLevel || !automapSuggestions) return;
     try {
@@ -1274,6 +1298,7 @@ export function App() {
           items: [
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
             { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+            { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],
         },
         {
@@ -1533,6 +1558,7 @@ export function App() {
             )}
             {visibility.automap && automapData && (
               <AutomapPanel
+                onOpenEditor={openAutomapEditor}
                 table={automapData.table}
                 cels={automapData.cels}
                 palette={map.palette}
@@ -1635,7 +1661,25 @@ export function App() {
           </div>
         </Modal>
       )}
-      {dialog === 'dt1edit' && map && (
+           {dialog === 'automap' && map && (automapData && automapLevel ? (
+        <AutomapEditor
+          map={map}
+          table={automapData.table}
+          cels={automapData.cels}
+          palette={map.palette}
+          level={automapLevel}
+          onLevel={(level) => setAutomapLevelOverride({ path: map.path, level })}
+          levelLabel={automapLevelLabel}
+          canSave={canWrite}
+          onSave={saveAutomapEdits}
+          onClose={() => setDialog(null)}
+        />
+      ) : (
+        <Modal title="Automap editor" onClose={() => setDialog(null)}>
+          <p className="small">{automapData ? 'Pick the AutoMap.txt level for this map in the Automap panel first.' : 'Loading AutoMap.txt and MaxiMap.dc6…'}</p>
+        </Modal>
+      ))}
+ {dialog === 'dt1edit' && map && (
         <Dt1Editor
           map={map}
           gd={data.gd}

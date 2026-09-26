@@ -327,9 +327,21 @@ export class TileLibrary {
     return this.byKey.get(TileLibrary.key(orientation, main, sub)) ?? [];
   }
 
-  /** Animation frames for an animated tile: all variants ordered by frame index (the "rarity" field). */
+  /**
+   * Animation frames for an animated tile: its variants ordered by frame index (the "rarity" field). Only a real frame
+   * sequence counts: every variant flagged animated and the rarities distinct, starting at 0 (water, lava). Some DT1s
+   * (e.g. Act 5's snow) flag plain random variations as animated with repeated rarity weights; the game doesn't
+   * animate those, so they get no frames.
+   */
   frames(orientation: number, main: number, sub: number): Dt1Tile[] {
-    return [...this.variants(orientation, main, sub)].sort((a, b) => a.rarity - b.rarity);
+    const list = this.variants(orientation, main, sub);
+    return TileLibrary.isAnimation(list) ? [...list].sort((a, b) => a.rarity - b.rarity) : [];
+  }
+
+  static isAnimation(list: Dt1Tile[]): boolean {
+    if (list.length < 2 || !list.every((t) => t.animated)) return false;
+    const r = list.map((t) => t.rarity);
+    return new Set(r).size === r.length && Math.min(...r) === 0;
   }
 
   /** Picks a variant deterministically from a per-cell seed, weighted by rarity (like the game's random pick). */
@@ -337,7 +349,7 @@ export class TileLibrary {
     const list = this.variants(orientation, main, sub);
     if (list.length <= 1) return list[0] ?? null;
     // Animated tiles use "rarity" as a frame index; show frame 0.
-    if (list[0].animated) return list.find((t) => t.rarity === 0) ?? list[0];
+    if (TileLibrary.isAnimation(list)) return list.find((t) => t.rarity === 0) ?? list[0];
     const total = list.reduce((s, t) => s + Math.max(t.rarity, 0), 0);
     if (total === 0) return list[0];
     let r = hash(seed) % total;

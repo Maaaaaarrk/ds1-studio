@@ -6,7 +6,7 @@ import type { ResizeDelta } from '../formats/ds1ops';
 import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
-import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
+import { blendFlag, InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
 import type { SpriteAnimation } from '../game/spriteAnim';
 import { AUTOMAP_SCALE, automapCellOrigin, type AutomapPiece } from '../game/automap';
 import type { SpriteFrame } from '../formats/dc6';
@@ -154,7 +154,7 @@ export function MapView(props: Props) {
   // Animation clock in game ticks (25 per second, like the game). Animated floors advance every 2.5 ticks (10 fps);
   // objects at their own rate. Without animated objects the clock only needs the floors' 10 fps.
   const animations = props.animations;
-  const hasObjectAnims = !!animations?.size && visibility.sprites;
+  const hasObjectAnims = useMemo(() => visibility.sprites && [...(animations?.values() ?? [])].some((an) => an.parts.length > 1), [animations, visibility.sprites]);
   useEffect(() => {
     if (!visibility.animate || (!scene.animated && !hasObjectAnims)) return;
     const ms = hasObjectAnims ? 40 : 100;
@@ -266,16 +266,20 @@ export function MapView(props: Props) {
     const flushObjects = (maxDepth: number) => {
       for (; next < objs.length && objs[next].depth <= maxDepth; next++) {
         const { o, i, sprite } = objs[next];
-        // Animated: this object's current frame (each object starts at its own phase, so they don't move in step).
-        const anim = visibility.animate ? animations?.get(`${o.type}:${o.id}`) : undefined;
-        const img = anim?.frames.length ? anim.frames[Math.floor((frame / 25) * anim.fps + i * 7) % anim.frames.length] : sprite;
-        const e = a.getImage(img, img);
-        if (!e) continue;
+        // Drawn like the game: solid layers plus translucent / glowing ones with their own blend. Animated objects
+        // show their current frame (each starts at its own phase so they don't move in step); otherwise frame 0.
+        const anim = animations?.get(`${o.type}:${o.id}`);
         const [wx, wy] = subTileToWorld(o.x, o.y);
         const flags = i === selectedObject ? InstanceFlag.Highlight : 0;
-        const ox = anim?.frames.length ? anim.offsetX : sprite.offsetX;
-        const oy = anim?.frames.length ? anim.offsetY : sprite.offsetY;
-        instances.push({ x: wx + ox, y: wy + 4 + oy, w: img.width, h: img.height, u: e.u, v: e.v, layer: e.layer, flags });
+        const parts = anim?.parts.length
+          ? anim.parts[visibility.animate ? Math.floor((frame / 25) * anim.fps + i * 7) % anim.parts.length : 0]
+          : [{ image: sprite, blend: -1 }];
+        for (const part of parts) {
+          const e = a.getImage(part.image, part.image);
+          if (!e) continue;
+          const img = part.image;
+          instances.push({ x: wx + img.offsetX, y: wy + 4 + img.offsetY, w: img.width, h: img.height, u: e.u, v: e.v, layer: e.layer, flags: flags | blendFlag(part.blend) });
+        }
       }
     };
     for (const it of scene.items) {
@@ -298,7 +302,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover]);
 
   // Input.
   useEffect(() => {
@@ -944,10 +948,18 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   }
 
   if (showObjects) {
-    const r = Math.max(4 * px, 5);
+    const full = Math.max(4 * px, 5);
     ds1.objects.forEach((o, i) => {
       const [x, y] = subTileToWorld(o.x, o.y);
       const selected = i === selectedObject;
+      // Objects drawn with their real sprite don't need a marker on top (the map should look like the game): only
+      // when hovered or selected, or as a small dot in object mode. Invisible objects keep their full marker.
+      const key = `${o.type}:${o.id}`;
+      const drawn = v.sprites && (s.sprites.has(key) || !!s.animations?.get(key)?.parts.length);
+      const hovered = !!hover && Math.floor(o.x / 5) === hover.cellX && Math.floor(o.y / 5) === hover.cellY;
+      if (drawn && tool !== 'object' && !selected && !hovered) return;
+      const r = drawn && !selected ? full * 0.6 : full;
+      const showLabel = selected || hovered || (cam.zoom > 0.45 && (!drawn || tool === 'object'));
       ctx.beginPath();
       ctx.arc(x, y, selected ? r * 1.5 : r, 0, Math.PI * 2);
       ctx.fillStyle = o.type === 1 ? 'rgba(240, 80, 80, 0.9)' : 'rgba(80, 160, 255, 0.9)';
@@ -955,7 +967,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
       ctx.lineWidth = (selected ? 2.5 : 1) * px;
       ctx.strokeStyle = selected ? 'rgba(255, 225, 150, 1)' : 'rgba(0,0,0,0.8)';
       ctx.stroke();
-      if (cam.zoom > 0.45 || selected) {
+      if (showLabel) {
         ctx.font = `${selected ? 600 : 400} ${11 * px}px ui-sans-serif, system-ui, sans-serif`;
         const label = objectLabel(o);
         const tx = x + r + 3 * px;

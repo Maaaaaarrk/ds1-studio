@@ -56,7 +56,9 @@ downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` pac
 - Picks the same tile libraries (DT1s) the game would, from `LvlPrest.txt` → `Levels.txt` → `LvlTypes.txt` and the
   preset's `Dt1Mask`, and the right act palette.
 - Floors, walls, roofs, shadows, lower walls, animated tiles, special tiles, objects and NPCs with their real sprites
-  — **animated in real time** at the game's own speeds — NPC paths, substitution groups.
+  — **animated in real time** at the game's own speeds, with fire, glows, magic and fog blended like in game — NPC
+  paths, substitution groups. Objects that show their sprite don't get a marker on top (hover or select one to see its
+  name); object mode shows them all.
 - Smooth zooming and panning on the GPU, even on 150×150 maps. At 100% you see exactly the game's pixels; zoomed out,
   tiles are properly downscaled instead of turning grainy.
 
@@ -119,9 +121,17 @@ tree groups.
 
 ### Automap
 
-Toggle the in-game automap over your map, see which AutoMap.txt row and piece each tile uses, and pick different
-pieces from a visual gallery. **Suggest pieces for missing tiles** fills in every tile that wouldn't show on the
-automap with the piece your level normally uses for that kind of tile — preview it, swap or skip kinds, then write it.
+Toggle the in-game automap over your map (**A**) to see what players will see. Walls outlined in **pink** have no
+AutoMap.txt entry, so the automap draws nothing there.
+
+The **Automap editor** (Map → Automap editor) lists every kind of tile the map uses, grouped (floors, walls, corners,
+doors, columns, trees…), with the real tile image next to the automap piece it gets — or a **missing** / **hidden**
+badge. Select kinds in the list (Shift/Ctrl for several) or click spots on the live automap preview, then pick pieces
+from the gallery: set one, add up to four random variants, **hide** a kind on purpose (so it's no longer "missing"), or
+**Suggest** the piece your level or act normally uses. Nothing is written until **Save to AutoMap.txt**, and saving
+again replaces the editor's earlier rows instead of piling them up.
+
+![Automap editor](docs/media/automap-editor.png)
 
 | | |
 | :-: | :-: |

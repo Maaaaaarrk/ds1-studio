@@ -128,6 +128,19 @@ export function makeScenes(h) {
       await automapOn(false);
     },
 
+    async automapEditor() {
+      await town();
+      await ribbonTab('Map');
+      await button('Automap editor');
+      for (let i = 0; i < 20 && !(await js(`return !!document.querySelector('.am-editor')`)); i++) await sleep(500);
+      await sleep(1200);
+      await js(`[...document.querySelectorAll('.am-editor .ame-row')].find((r) => /wl/.test(r.innerText))?.click();`);
+      await sleep(800);
+      await shot('automap-editor');
+      await js(`[...document.querySelectorAll('.am-editor .modal-actions button')].find((b) => b.innerText.trim() === 'Close')?.click();`);
+      await ribbonTab('Home');
+    },
+
     async objects() {
       await town();
       await zoom(-2);

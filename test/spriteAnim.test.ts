@@ -67,6 +67,16 @@ describe.runIf(hasD2 && hasObjTxt)('sprite animations', async () => {
     expect(a.frames.some((f) => f.pixels.some((p, i) => p !== first[i]))).toBe(true);
   });
 
+  it('keeps glowing / translucent layers as separate parts, like the game draws them', async () => {
+    const fire = await loadSpriteAnimation(fs, spec(1, 2, 43)); // Fire, small: flames are a luminance (glow) layer
+    expect(fire).not.toBeNull();
+    expect(fire!.parts).toHaveLength(fire!.frames.length);
+    const blends = new Set(fire!.parts.flat().map((p) => p.blend));
+    expect(blends.has(3)).toBe(true);
+    // Every part is a real image placed relative to the feet.
+    for (const f of fire!.parts) for (const part of f) expect(part.image.width * part.image.height).toBe(part.image.pixels.length);
+  });
+
   it('caches per spec and direction', async () => {
     const s = spec(1, 1, 7);
     const a = await loadSpriteAnimation(fs, s, 0);

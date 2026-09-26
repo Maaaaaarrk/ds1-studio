@@ -191,3 +191,33 @@ describe('automap suggestions', () => {
     expect(findRule(parseAutomap(out), '1 Town', 1, 5, 7)!.cels[0].cel).toBe(21);
   });
 });
+
+import { applyAutomapEdits, effectiveCels } from '../src/game/automap';
+
+describe('automap edits', () => {
+  const doc = ptt(enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tType1\tCel1\tType2\tCel2\tType2\tCel3\tType4\tCel4\r\n' +
+    '1 Town\twl\t0\t-1\t-1\tW\t21\t\t-1\t\t-1\t\t-1\r\n'));
+  it('writes runs in front of the level, hides with -1 rows, and replaces its own earlier rows', () => {
+    const first = applyAutomapEdits(doc, '1 Town', [
+      { orientation: 1, style: 3, sub: 0, cels: [5, 6] },
+      { orientation: 1, style: 3, sub: 1, cels: [5, 6] },
+      { orientation: 1, style: 3, sub: 2, cels: [] },
+    ]);
+    expect(first.rows).toBe(2);
+    expect(first.doc.rows[0].slice(0, 9)).toEqual(['1 Town', 'wl', '3', '0', '1', 'DS1 Studio', '5', 'DS1 Studio', '6']);
+    expect(first.doc.rows[1].slice(0, 7)).toEqual(['1 Town', 'wl', '3', '2', '2', 'DS1 Studio (hidden)', '-1']);
+    const t = parseAutomap(first.doc);
+    expect(findRule(t, '1 Town', 1, 3, 1)!.cels.map((c) => c.cel)).toEqual([5, 6]);
+    expect(findRule(t, '1 Town', 1, 3, 2)!.cels).toEqual([]); // hidden: a rule with no pieces
+    expect(effectiveCels(t, '1 Town', new Map(), 1, 0, 7)).toEqual([21]); // other styles keep the broad rule
+    expect(effectiveCels(t, '1 Town', new Map(), 1, 3, 7)).toBeNull(); // style 3 seq 7: no entry
+    // Editing the same sequences again replaces the earlier rows instead of adding more.
+    const second = applyAutomapEdits(first.doc, '1 Town', [
+      { orientation: 1, style: 3, sub: 0, cels: [9] },
+      { orientation: 1, style: 3, sub: 1, cels: [9] },
+      { orientation: 1, style: 3, sub: 2, cels: [9] },
+    ]);
+    expect(second.doc.rows.length).toBe(doc.rows.length + 1);
+    expect(findRule(parseAutomap(second.doc), '1 Town', 1, 3, 2)!.cels.map((c) => c.cel)).toEqual([9]);
+  });
+});
