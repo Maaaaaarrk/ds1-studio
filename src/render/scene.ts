@@ -200,7 +200,21 @@ export function walkability(ds1: Ds1, scene: Scene): Uint8Array {
 
 /** Topmost drawn item whose opaque pixels cover world point (wx, wy). Shadows are skipped. */
 export function hitTest(scene: Scene, wx: number, wy: number, visible: (it: DrawItem) => boolean): DrawItem | null {
-  for (let i = scene.items.length - 1; i >= 0; i--) {
+  return hitTestAll(scene, wx, wy, visible, 1)[0] ?? null;
+}
+
+/** Same layer + cell (a scene rebuild makes new items, so identity doesn't survive edits). */
+export function sameItem(a: DrawItem, b: DrawItem): boolean {
+  return a.kind === b.kind && a.layer === b.layer && a.cellX === b.cellX && a.cellY === b.cellY;
+}
+
+/**
+ * Every tile with an opaque pixel under a world point, frontmost first (overlapping trees, a wall over a floor…).
+ * The two halves of a north-corner wall count once.
+ */
+export function hitTestAll(scene: Scene, wx: number, wy: number, visible: (it: DrawItem) => boolean, limit = Infinity): DrawItem[] {
+  const out: DrawItem[] = [];
+  for (let i = scene.items.length - 1; i >= 0 && out.length < limit; i--) {
     const it = scene.items[i];
     if (it.kind === 'shadow' || !visible(it)) continue;
     // Cheap reject on the block bounding box before decoding pixels.
@@ -215,9 +229,12 @@ export function hitTest(scene: Scene, wx: number, wy: number, visible: (it: Draw
     const ly = Math.floor(wy - it.y);
     if (lx < minX || ly < minY || lx >= maxX || ly >= maxY) continue;
     const img = decodeTile(it.tile);
-    if (img && img.pixels[(ly - img.offsetY) * img.width + (lx - img.offsetX)] !== 0) return it;
+    if (!img) continue;
+    const px = lx - img.offsetX;
+    const py = ly - img.offsetY;
+    if (px >= 0 && px < img.width && py >= 0 && py < img.height && img.pixels[py * img.width + px] !== 0 && !out.some((o) => sameItem(o, it))) out.push(it);
   }
-  return null;
+  return out;
 }
 
 /** The tile(s) drawn for one cell (a north-corner wall is two tiles), positioned in world space. */

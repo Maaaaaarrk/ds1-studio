@@ -91,3 +91,64 @@ export function pasteEdits(doc: MapDocument, clip: Clipboard, x: number, y: numb
   }
   return edits;
 }
+
+/** Most layers a DS1 can hold of each kind. */
+export const MAX_WALL_LAYERS = 4;
+export const MAX_FLOOR_LAYERS = 2;
+
+export interface OverlapPaste {
+  edits: CellEdit[];
+  /** Layer counts the map needs for these edits (more than it has when a layer must be added). */
+  walls: number;
+  floors: number;
+  /** Cells that found no free layer and replace what is there. */
+  replaced: number;
+}
+
+/**
+ * Like `pasteEdits`, but stacks onto what is already there (Alt while placing): a wall or floor cell that would land
+ * on an occupied cell goes into the next free layer of the same kind instead, adding a layer when the map has room
+ * for one (up to 4 walls / 2 floors). When every layer is taken, the cell replaces the one in its own layer.
+ */
+export function overlapEdits(doc: MapDocument, clip: Clipboard, x: number, y: number): OverlapPaste {
+  const ds1 = doc.ds1;
+  const counts = { wall: ds1.walls.length, floor: ds1.floors.length, shadow: ds1.shadows.length };
+  const max = { wall: MAX_WALL_LAYERS, floor: MAX_FLOOR_LAYERS, shadow: ds1.shadows.length };
+  const taken = new Set<string>();
+  const occupied = (layer: LayerRef, cx: number, cy: number) => {
+    if (taken.has(`${layerKey(layer)}:${cx},${cy}`)) return true;
+    const have = layer.kind === 'wall' ? ds1.walls.length : layer.kind === 'floor' ? ds1.floors.length : ds1.shadows.length;
+    return layer.index < have && !isEmptyCell(doc.cell(layer, cx, cy));
+  };
+  const edits: CellEdit[] = [];
+  let replaced = 0;
+  for (const { layer, cells } of clip.layers) {
+    cells.forEach((cell, i) => {
+      const cx = x + (i % clip.width);
+      const cy = y + Math.floor(i / clip.width);
+      if (isEmptyCell(cell) || !doc.inBounds(cx, cy)) return;
+      let target: LayerRef | null = null;
+      if (layer.kind === 'shadow') target = layer.index < counts.shadow ? layer : null;
+      else {
+        // Its own layer first, then the others of that kind, front to back.
+        const order = [layer.index, ...Array.from({ length: max[layer.kind] }, (_, n) => n).filter((n) => n !== layer.index)];
+        for (const n of order) {
+          const l: LayerRef = { kind: layer.kind, index: n };
+          if (!occupied(l, cx, cy)) {
+            target = l;
+            break;
+          }
+        }
+        if (!target && layer.index < max[layer.kind]) {
+          target = layer;
+          replaced++;
+        }
+      }
+      if (!target) return;
+      taken.add(`${layerKey(target)}:${cx},${cy}`);
+      if (target.kind !== 'shadow') counts[target.kind] = Math.max(counts[target.kind], target.index + 1);
+      edits.push({ layer: target, x: cx, y: cy, cell });
+    });
+  }
+  return { edits, walls: counts.wall, floors: counts.floor, replaced };
+}

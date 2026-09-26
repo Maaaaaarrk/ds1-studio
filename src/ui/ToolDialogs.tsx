@@ -158,7 +158,9 @@ export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: 
           ))}
         {plan.txtMerges.map((m, i) => (
           <div key={i} className="small">
-            {m.table}: {m.action} row {m.keyValue}
+            <span className={m.action === 'failed' || m.action === 'missing-table' ? 'warn-text' : ''}>
+              {m.table}: {m.note ?? `${m.action} row ${m.keyValue}`}
+            </span>
           </div>
         ))}
       </div>

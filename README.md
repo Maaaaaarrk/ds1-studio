@@ -86,8 +86,18 @@ file list; you can override the level type per map in the **Map** panel.
   this map's tile libraries and proposes recurring structures (buildings, wall runs, tree groups…), ranked by how often they occur.
 - **Compatibility check**: missing tiles/DT1s, LvlPrest/Levels/LvlTypes wiring, DT1s used but not loaded by the level type (Dt1Mask),
   entry/warp markers, NPCs on unwalkable ground, stacked objects, compiled .bin reminders.
-- **Map packages** (.zip): the DS1, its DT1s, custom object sprites and the map's LvlPrest/Levels/LvlTypes rows, plus a manifest.
-  Import shows exactly which files are new/replaced and merges table rows by key.
+- **Tile libraries** keep the game's tables in step: adding a DT1 puts it in a free `File N` slot of the level type
+  (LvlTypes.txt) and recomputes the preset's `Dt1Mask` (LvlPrest.txt); removing one clears its bit. Maps not yet in LvlPrest
+  need *Add to game* first.
+- **Map packages** (.zip): the DS1, its DT1s, custom object sprites and every table row the map needs: LvlPrest, Levels,
+  LvlTypes, the level's LvlWarp and LvlMaze rows, and a cube recipe made for it (CubeMain + its Misc item). Import merges the level
+  tables by meaning (reuses same-named rows, gives clashing ids new ones, puts DT1s into free slots and recomputes Dt1Mask against
+  the importer's own LvlTypes) and the rest by key; re-importing an unchanged map changes nothing.
+- **Overlapping tiles**: Shift+mouse wheel over tiles that overlap (trees over trees, a wall over a floor) steps through them one
+  at a time; the chosen tile is outlined and only its layer is selected, so copy/cut/Delete leave the others alone. Esc goes back
+  to all layers.
+- **Stacking**: hold **Alt** when you click to place a preset or paste, and tiles landing on occupied cells go into the next free
+  wall/floor layer (adding Wall 2–4 / Floor 2 when needed) instead of replacing what is there.
 - What the app may write (mod folder only, originals kept as `.bak`): `.ds1/.dt1/.cof/.dcc/.dc6` under `data/global/`, `.txt` under
   `data/global/excel/`, and presets under `data/ds1studio/`.
 

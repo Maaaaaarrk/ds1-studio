@@ -154,6 +154,20 @@ describe.runIf(hasD2)('map packages over the real game data', async () => {
     }, 120_000);
   }
 
+  it('collects the warp and maze rows of a maze level', async () => {
+    if (!hasD2) return;
+    // Cave Level 1 presets: a maze level with warps.
+    const prest = parseTxt((await vanilla.read('data/global/excel/LvlPrest.txt'))!);
+    const maze = parseTxt((await vanilla.read('data/global/excel/LvlMaze.txt'))!);
+    const mazeLevels = new Set(maze.rows.map((r) => r['Level']?.trim()));
+    const row = prest.rows.find((r) => Number(r['LevelId']) > 0 && mazeLevels.has(String(Number(r['LevelId']))) && r['File1'] && r['File1'] !== '0');
+    expect(row).toBeDefined();
+    const rows = await collectMapTxtRows(vanilla, `data/global/tiles/${row!['File1']}`);
+    const tables = new Set(rows.map((r) => r.table));
+    expect([...tables]).toEqual(expect.arrayContaining(['LvlPrest', 'Levels', 'LvlTypes', 'LvlMaze', 'LvlWarp']));
+    expect(rows.find((r) => r.table === 'LvlMaze')!.row[rows.find((r) => r.table === 'LvlMaze')!.columns.indexOf('Level')]).toBe(String(Number(row!['LevelId'])));
+  });
+
   it('can leave base-game DT1s out of the zip but lists them', async () => {
     const gd = await GameData.load(vanilla);
     const map = await openMap(gd, MAP);

@@ -275,7 +275,7 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: CubeProps) {
     m = setIf(m, row, '*name', itemName);
     m = setCell(m, row, 'code', code); // namestr and graphics stay the template's, so the item has a name and an icon
     const parts = inputs.match(/"[^"]*"|[^,]+/g)?.map((s) => s.trim()).filter(Boolean) ?? [];
-    const values: Record<string, string> = { description: `${itemName} (DS1 Studio)`, enabled: '1', version: '100', numinputs: String(parts.length), output: code };
+    const values: Record<string, string> = { description: `${itemName} [map:${mapName.toLowerCase()}] (DS1 Studio)`, enabled: '1', version: '100', numinputs: String(parts.length), output: code };
     parts.slice(0, 7).forEach((p, i) => (values[`input ${i + 1}`] = p));
     for (const k of Object.keys(values)) if (!has(cube, k)) delete values[k];
     const c = appendRow(cube, values);

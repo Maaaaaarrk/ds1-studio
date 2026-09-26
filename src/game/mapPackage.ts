@@ -4,6 +4,7 @@ import { COMPONENTS, parseCof } from '../formats/cof';
 import { parseTxt } from '../formats/txt';
 import { CLASSIC_MPQS, normalizePath, type LayeredFs } from '../vfs/vfs';
 import { cofPath, layerPath, type SpriteSpec } from './sprites';
+import { mergeMapRows } from './levelTables';
 
 /**
  * Map packages: one zip holding a DS1 plus everything it needs (DT1s, modded object sprites, txt rows), so a map can
@@ -286,7 +287,9 @@ export interface TxtMergePlan {
   keyValue: string;
   /** Whether a row with that key already exists (false also when the table itself is missing). */
   exists: boolean;
-  action: TxtMergeAction | 'missing-table';
+  action: TxtMergeAction | 'missing-table' | 'merged' | 'failed';
+  /** What changed, in words (level tables are merged by meaning, not row by row). */
+  note?: string;
 }
 
 export interface ImportPlan {
@@ -314,7 +317,31 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
   }
   const txtMerges: TxtMergePlan[] = [];
   const tables = new Map<string, { path: string; original: Uint8Array; bytes: Uint8Array }>();
-  for (const r of pkg.manifest.txtRows) {
+  const tableName = (t: string) => t.replace(/\.txt$/i, '').split('/').pop()!.toLowerCase();
+  const LEVEL_TABLES = ['lvlprest', 'levels', 'lvltypes'];
+  const core = pkg.manifest.txtRows.filter((r) => LEVEL_TABLES.includes(tableName(r.table)));
+  // LvlPrest / Levels / LvlTypes are merged by meaning: DT1s go into free LvlTypes slots, clashing ids get new ones
+  // and the Dt1Mask is recomputed against this install's slots.
+  let levelIds = new Map<string, string>();
+  if (core.length) {
+    const dt1s = pkg.manifest.files.filter((f) => /\.dt1$/i.test(f.path)).map((f) => f.path);
+    try {
+      const merged = await mergeMapRows(fs, pkg.manifest.map, core, dt1s);
+      levelIds = merged.levelIds;
+      for (const w of merged.writes) {
+        const original = (await fs.read(w.path))!;
+        tables.set(normalizePath(w.path), { path: w.path, original, bytes: w.bytes });
+        for (const note of w.summary) txtMerges.push({ table: w.table, path: w.path, key: '', keyValue: '', exists: true, action: 'merged', note });
+      }
+      if (!merged.writes.length) txtMerges.push({ table: 'Level tables', path: '', key: '', keyValue: '', exists: true, action: 'unchanged', note: 'already set up' });
+    } catch (e) {
+      const missing = /not found/.test((e as Error).message);
+      txtMerges.push({ table: 'Level tables', path: '', key: '', keyValue: '', exists: false, action: missing ? 'missing-table' : 'failed', note: (e as Error).message });
+    }
+  }
+  for (const r0 of pkg.manifest.txtRows) {
+    if (LEVEL_TABLES.includes(tableName(r0.table))) continue;
+    const r = remapLevelIds(r0, levelIds);
     const path = txtTablePath(r.table);
     const keyValue = r.row[r.columns.indexOf(r.key)] ?? '';
     const key = normalizePath(path);
@@ -336,6 +363,16 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
 }
 
 export type TxtMergeAction = 'appended' | 'replaced' | 'unchanged';
+
+/** Columns of the extra tables that hold a Levels.txt Id. */
+const LEVEL_ID_COLUMNS: Record<string, string[]> = { lvlmaze: ['Level'] };
+
+function remapLevelIds(r: TxtRowEntry, ids: Map<string, string>): TxtRowEntry {
+  const cols = LEVEL_ID_COLUMNS[r.table.replace(/\.txt$/i, '').split('/').pop()!.toLowerCase()];
+  if (!cols || !ids.size) return r;
+  const row = r.row.map((v, i) => (cols.includes(r.columns[i]) && ids.has(v.trim()) ? ids.get(v.trim())! : v));
+  return { ...r, row };
+}
 
 function latin1(bytes: Uint8Array): string {
   let s = '';
@@ -438,6 +475,34 @@ export async function collectMapTxtRows(fs: LayeredFs, mapPath: string): Promise
   for (const r of types?.rows ?? []) {
     if (!typeIds.has(r['Id']?.trim()) || r['Name'] === 'Expansion') continue;
     out.push({ table: 'LvlTypes', key: 'Id', columns: types!.columns, row: types!.columns.map((c) => r[c] ?? '') });
+  }
+  const levelRows = (levels?.rows ?? []).filter((r) => levelIds.has(r['Id']?.trim()));
+  const push = (table: string, key: string, t: NonNullable<Awaited<ReturnType<typeof load>>>, r: Record<string, string>) =>
+    out.push({ table, key, columns: t.columns, row: t.columns.map((c) => r[c] ?? '') });
+
+  // The level's warps (Levels Warp0..7 -> LvlWarp Id) and its maze settings (LvlMaze Level).
+  const warps = new Set(levelRows.flatMap((r) => [0, 1, 2, 3, 4, 5, 6, 7].map((i) => r[`Warp${i}`]?.trim()).filter((v) => v && v !== '-1' && v !== '0')));
+  if (warps.size) {
+    const lvlWarp = await load('LvlWarp');
+    for (const r of lvlWarp?.rows ?? []) if (warps.has(r['Id']?.trim())) push('LvlWarp', 'Id', lvlWarp!, r);
+  }
+  if (levelIds.size) {
+    const maze = await load('LvlMaze');
+    for (const r of maze?.rows ?? []) if (levelIds.has(r['Level']?.trim())) push('LvlMaze', 'Level', maze!, r);
+  }
+  // A cube recipe made for this map (Map → Cube recipe tags it) and the item it makes.
+  const mapName = rel.split('/').pop()!.replace(/\.ds1$/i, '').toLowerCase();
+  const cube = await load('CubeMain');
+  const codes = new Set<string>();
+  for (const r of cube?.rows ?? []) {
+    if (!(r['description'] ?? '').toLowerCase().includes(`[map:${mapName}]`)) continue;
+    push('CubeMain', 'description', cube!, r);
+    const code = (r['output'] ?? '').split(',')[0].replace(/"/g, '').trim();
+    if (code) codes.add(code);
+  }
+  if (codes.size) {
+    const misc = await load('Misc');
+    for (const r of misc?.rows ?? []) if (codes.has(r['code']?.trim())) push('Misc', 'code', misc!, r);
   }
   return out;
 }

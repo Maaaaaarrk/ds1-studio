@@ -131,8 +131,9 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
           </p>
         )}
         <p className="muted small">
-          Changes apply to the editor and to the DS1&apos;s embedded file list (saved with the map).
-          {map.resolution.source === 'lvlprest' && ' In game, this map’s tiles come from LvlTypes.txt + the Dt1Mask in LvlPrest.txt: update those in the Data tab to match.'}
+          Changes apply to the editor and to the DS1&apos;s embedded file list (saved with the map). If the map is in LvlPrest.txt, the game&apos;s tables
+          are updated too: new DT1s go into free File slots of its level type in LvlTypes.txt and its Dt1Mask is recomputed (originals kept as .bak).
+          {!map.resolution.preset && ' This map is not in LvlPrest.txt yet: use Data → Add to game so the game can load it.'}
         </p>
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>

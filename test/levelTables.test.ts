@@ -1,0 +1,132 @@
+import { describe, expect, it } from 'vitest';
+import { decodeCell, withTile, type Ds1 } from '../src/formats/ds1';
+import { parseTxtTable, getCell } from '../src/formats/txtTable';
+import { MapDocument } from '../src/game/MapDocument';
+import { overlapEdits, pasteEdits, type Clipboard } from '../src/game/clipboard';
+import { maskFor, mergeMapRows, syncLevelTables, type PackageRow } from '../src/game/levelTables';
+import { LayeredFs, LooseSource } from '../src/vfs/vfs';
+
+const enc = (s: string) => new Uint8Array([...s].map((c) => c.charCodeAt(0)));
+const EX = 'data/global/excel/';
+const MAP = 'data/global/tiles/Act1/Test/mymap.ds1';
+const fileCols = Array.from({ length: 32 }, (_, i) => `File ${i + 1}`);
+
+function tables(opts: { prestMask?: number; typeFiles?: string[]; withPreset?: boolean; extraLevel?: string } = {}) {
+  const typeFiles = opts.typeFiles ?? ['Act1/Test/a.dt1', 'Act1/Test/b.dt1'];
+  const types = `Name\tId\t${fileCols.join('\t')}\tAct\r\nAct 1 - Test\t1\t${fileCols.map((_, i) => typeFiles[i] ?? '0').join('\t')}\t1\r\n`;
+  const levels = `Name\tId\tLevelType\r\nTest Level\t5\t1\r\n${opts.extraLevel ?? ''}`;
+  const prest =
+    'Name\tDef\tLevelId\tFile1\tFile2\tFile3\tFile4\tFile5\tFile6\tDt1Mask\r\n' +
+    (opts.withPreset === false ? '' : `My Map\t10\t5\tAct1/Test/mymap.ds1\t0\t0\t0\t0\t0\t${opts.prestMask ?? 3}\r\n`);
+  const files = new Map<string, () => Promise<Uint8Array>>([
+    [`${EX}LvlTypes.txt`, async () => enc(types)],
+    [`${EX}Levels.txt`, async () => enc(levels)],
+    [`${EX}LvlPrest.txt`, async () => enc(prest)],
+  ]);
+  return new LayeredFs([new LooseSource('test', files)]);
+}
+
+const tile = (p: string) => `data/global/tiles/${p}`;
+
+describe('syncLevelTables', () => {
+  it('adds a new DT1 to a free LvlTypes slot and turns on its Dt1Mask bit', async () => {
+    const fs = tables();
+    const writes = await syncLevelTables(fs, MAP, [tile('Act1/Test/a.dt1'), tile('Act1/Test/b.dt1'), tile('Act1/Test/c.dt1')]);
+    expect(writes.map((w) => w.table)).toEqual(['LvlTypes.txt', 'LvlPrest.txt']);
+    const types = parseTxtTable(writes[0].bytes);
+    expect(getCell(types, 0, 'File 3')).toBe('Act1/Test/c.dt1');
+    const prest = parseTxtTable(writes[1].bytes);
+    expect(getCell(prest, 0, 'Dt1Mask')).toBe('7');
+  });
+
+  it('clears the bit of a removed DT1 and changes nothing when already in step', async () => {
+    const fs = tables();
+    const removed = await syncLevelTables(fs, MAP, [tile('Act1/Test/b.dt1')]);
+    expect(removed.map((w) => w.table)).toEqual(['LvlPrest.txt']);
+    expect(getCell(parseTxtTable(removed[0].bytes), 0, 'Dt1Mask')).toBe('2');
+    expect(await syncLevelTables(fs, MAP, [tile('Act1/Test/a.dt1'), tile('Act1/Test/b.dt1')])).toEqual([]);
+  });
+
+  it('refuses maps that are not in LvlPrest.txt', async () => {
+    await expect(syncLevelTables(tables({ withPreset: false }), MAP, [tile('Act1/Test/a.dt1')])).rejects.toThrow(/Add to game/);
+  });
+
+  it('keeps an already-selected duplicate slot and leaves empty-slot bits alone', () => {
+    const types = parseTxtTable(enc(`Name\tId\t${fileCols.join('\t')}\r\nT\t1\t${fileCols.map((_, i) => (i === 0 || i === 3 ? 'x/a.dt1' : '0')).join('\t')}\r\n`));
+    // Slot 4 duplicates slot 1 and is the one selected; bit 6 is an empty slot.
+    expect(maskFor(types, 0, [tile('x/a.dt1')], (1 << 3) | (1 << 5))).toBe((1 << 3) | (1 << 5));
+    expect(maskFor(types, 0, [tile('x/a.dt1')], 0)).toBe(1);
+  });
+});
+
+describe('mergeMapRows (import)', () => {
+  const pkgRows = (levelId: string, typeName: string): PackageRow[] => [
+    { table: 'LvlTypes', key: 'Id', columns: ['Name', 'Id', 'File 1'], row: [typeName, '1', 'Act1/Test/z.dt1'] },
+    { table: 'Levels', key: 'Id', columns: ['Name', 'Id', 'LevelType'], row: ['Imported Level', levelId, '1'] },
+    { table: 'LvlPrest', key: 'Name', columns: ['Name', 'Def', 'LevelId', 'File1', 'Dt1Mask'], row: ['Imported', '10', levelId, 'Act1/Test/new.ds1', '1'] },
+  ];
+
+  it('gives clashing ids new ones and computes the mask against the local slots', async () => {
+    const fs = tables();
+    const { writes, levelIds } = await mergeMapRows(fs, 'data/global/tiles/Act1/Test/new.ds1', pkgRows('5', 'Imported Type'), [tile('Act1/Test/b.dt1'), tile('Act1/Test/z.dt1')]);
+    const byTable = Object.fromEntries(writes.map((w) => [w.table, parseTxtTable(w.bytes)]));
+    const types = byTable['LvlTypes.txt'];
+    expect(getCell(types, 1, 'Name')).toBe('Imported Type');
+    expect(getCell(types, 1, 'Id')).toBe('2'); // 1 was taken
+    expect(getCell(types, 1, 'File 1')).toBe('Act1/Test/z.dt1');
+    expect(getCell(types, 1, 'File 2')).toBe('Act1/Test/b.dt1');
+    const levels = byTable['Levels.txt'];
+    expect(getCell(levels, 1, 'Id')).toBe('6'); // 5 was taken
+    expect(getCell(levels, 1, 'LevelType')).toBe('2');
+    expect(levelIds.get('5')).toBe('6');
+    const prest = byTable['LvlPrest.txt'];
+    expect(getCell(prest, 1, 'Def')).toBe('11');
+    expect(getCell(prest, 1, 'LevelId')).toBe('6');
+    expect(getCell(prest, 1, 'Dt1Mask')).toBe('3');
+  });
+
+  it('reuses same-named rows, so importing again changes nothing', async () => {
+    const fs = tables();
+    const rows: PackageRow[] = [
+      { table: 'LvlTypes', key: 'Id', columns: ['Name', 'Id'], row: ['Act 1 - Test', '1'] },
+      { table: 'Levels', key: 'Id', columns: ['Name', 'Id', 'LevelType'], row: ['Test Level', '5', '1'] },
+      { table: 'LvlPrest', key: 'Name', columns: ['Name', 'Def', 'LevelId', 'File1', 'Dt1Mask'], row: ['My Map', '10', '5', 'Act1/Test/mymap.ds1', '3'] },
+    ];
+    const { writes } = await mergeMapRows(fs, MAP, rows, [tile('Act1/Test/a.dt1'), tile('Act1/Test/b.dt1')]);
+    expect(writes).toEqual([]);
+  });
+});
+
+function ds1(w: number, h: number): Ds1 {
+  const cells = () => Array.from({ length: w * h }, () => decodeCell(0));
+  return {
+    version: 18, width: w, height: h, act: 0, actRaw: 0, tagType: 0, files: [],
+    walls: [cells().map((c) => ({ ...c, orientation: 0, orientationHigh: 0 }))],
+    floors: [cells()], shadows: [cells()], tags: [], objects: [], groups: [], groupsHeader: 0, orphanPaths: [], hasPathSection: true, trailing: 0,
+  };
+}
+
+describe('overlapEdits (Alt while placing)', () => {
+  const tree = { ...withTile(decodeCell(0), 3, 7, 0x81), orientation: 13, orientationHigh: 0 };
+  const clip: Clipboard = { width: 1, height: 1, layers: [{ layer: { kind: 'wall', index: 0 }, cells: [tree] }] };
+
+  it('puts a wall into the next free layer instead of replacing', () => {
+    const doc = new MapDocument('x.ds1', ds1(2, 2));
+    doc.ds1.walls[0][0] = { ...withTile(decodeCell(0), 1, 1, 0x81), orientation: 13, orientationHigh: 0 };
+    expect(pasteEdits(doc, clip, 0, 0)[0].layer).toEqual({ kind: 'wall', index: 0 });
+    const o = overlapEdits(doc, clip, 0, 0);
+    expect(o.edits[0].layer).toEqual({ kind: 'wall', index: 1 });
+    expect(o.walls).toBe(2);
+    expect(o.replaced).toBe(0);
+    // An empty cell stays in its own layer.
+    expect(overlapEdits(doc, clip, 1, 1).edits[0].layer).toEqual({ kind: 'wall', index: 0 });
+  });
+
+  it('replaces when all four wall layers are taken', () => {
+    const d = ds1(1, 1);
+    d.walls = [0, 1, 2, 3].map(() => [{ ...withTile(decodeCell(0), 1, 1, 0x81), orientation: 13, orientationHigh: 0 }]);
+    const o = overlapEdits(new MapDocument('x.ds1', d), clip, 0, 0);
+    expect(o.edits[0].layer).toEqual({ kind: 'wall', index: 0 });
+    expect(o.replaced).toBe(1);
+  });
+});

@@ -7,7 +7,7 @@ import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
-import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, type DrawItem, type Scene } from '../render/scene';
+import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
 
 export interface HoverInfo {
@@ -23,6 +23,11 @@ export interface GhostTile {
 }
 
 export type StrokePhase = 'start' | 'move' | 'end';
+/** Modifier keys held when the stroke started. */
+export interface StrokeMods {
+  alt: boolean;
+  shift: boolean;
+}
 
 interface Props {
   map: OpenMap;
@@ -47,9 +52,13 @@ interface Props {
   onHover: (h: HoverInfo | null) => void;
   onZoom: (zoom: number) => void;
   /** Tool strokes in cell coordinates; `cells` are all cells crossed since the last event, `world` is the cursor. */
-  onStroke: (phase: StrokePhase, cells: [number, number][], world: [number, number]) => void;
+  onStroke: (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => void;
   /** Bumped by the parent to request "fit map to view". */
   fitSignal: number;
+  /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
+  focus: { item: DrawItem; index: number; count: number; label: string } | null;
+  /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
+  onCycle: (dir: 1 | -1, world: [number, number]) => void;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -113,7 +122,7 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
 }
 
 export function MapView(props: Props) {
-  const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, sprites, fitSignal } = props;
+  const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, sprites, fitSignal, focus } = props;
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
@@ -217,7 +226,9 @@ export function MapView(props: Props) {
       else if (it.kind === 'roof' || it.kind === 'special') flushObjects(Infinity);
       if (!isVisible(it, visibility)) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : 0;
-      if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
+      if (focus) {
+        if (sameItem(it, focus.item)) flags |= InstanceFlag.Highlight;
+      } else if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
       const tile = it.frames && visibility.animate ? it.frames[frame % it.frames.length] : it.tile;
       push(tile, it.x, it.y, flags);
     }
@@ -226,11 +237,11 @@ export function MapView(props: Props) {
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost, frame, tool, sprites, selectedObject]);
+  }, [scene, visibility, hover, ghost, frame, tool, sprites, selectedObject, focus]);
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus]);
 
   // Input.
   useEffect(() => {
@@ -272,7 +283,7 @@ export function MapView(props: Props) {
       const toolDrag = ev.button === 0 && !space;
       if (toolDrag) {
         stroke = toCell(ev);
-        latest.current.onStroke('start', [stroke], toWorld(ev));
+        latest.current.onStroke('start', [stroke], toWorld(ev), { alt: ev.altKey, shift: ev.shiftKey });
       } else if (ev.button <= 2) {
         pan = { x: ev.clientX, y: ev.clientY };
       }
@@ -327,6 +338,12 @@ export function MapView(props: Props) {
       const r = el.getBoundingClientRect();
       const wx = cam.x + ((ev.clientX - r.left) * dpr() - el.width / 2) / cam.zoom;
       const wy = cam.y + ((ev.clientY - r.top) * dpr() - el.height / 2) / cam.zoom;
+      if (ev.shiftKey) {
+        // Shift+wheel picks one tile out of a stack instead of zooming (Windows turns it into a horizontal scroll).
+        const d = ev.deltaY || ev.deltaX;
+        if (d) latest.current.onCycle(d > 0 ? 1 : -1, [wx, wy]);
+        return;
+      }
       const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015));
       const zoom = Math.min(Math.max(cam.zoom * factor, 0.05), 8 * dpr());
       // Keep the world point under the cursor fixed.
@@ -546,6 +563,32 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.strokeStyle = stroke;
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  if (s.focus) {
+    // Outline the chosen tile and say which of the stack it is.
+    const { item, index, count, label } = s.focus;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const b of item.tile.blocks) {
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + 32);
+      maxY = Math.max(maxY, b.y + (b.format === 1 ? 15 : 32));
+    }
+    if (minX < maxX) {
+      ctx.lineWidth = 1.5 * px;
+      ctx.strokeStyle = 'rgba(120, 230, 255, 0.95)';
+      ctx.setLineDash([4 * px, 3 * px]);
+      ctx.strokeRect(item.x + minX, item.y + minY, maxX - minX, maxY - minY);
+      ctx.setLineDash([]);
+      const text = `${label} · ${index + 1} of ${count}`;
+      ctx.font = `${12 * px}px system-ui, sans-serif`;
+      const w = ctx.measureText(text).width + 8 * px;
+      ctx.fillStyle = 'rgba(10, 20, 30, 0.85)';
+      ctx.fillRect(item.x + minX, item.y + minY - 18 * px, w, 16 * px);
+      ctx.fillStyle = 'rgb(160, 235, 255)';
+      ctx.fillText(text, item.x + minX + 4 * px, item.y + minY - 6 * px);
+    }
   }
 
   if (s.marks?.length) {

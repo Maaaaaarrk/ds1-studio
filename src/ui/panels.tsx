@@ -136,6 +136,8 @@ interface CellPanelProps {
   scene: Scene;
   /** Reveal a tile in the Tiles panel. */
   onFocusTile: (tile: Dt1Tile, layer: LayerRef) => void;
+  /** The one layer chosen out of a stack with Shift+wheel (copy/cut/delete only touch it). */
+  onlyLayer?: LayerRef | null;
 }
 
 /** The tile actually drawn for a layer of a cell (the chosen variant), if any. */
@@ -145,7 +147,7 @@ function drawnTile(scene: Scene, layer: LayerRef, x: number, y: number): Dt1Tile
 }
 
 /** Shows every layer of one cell; editable when that cell is selected. */
-export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile }: CellPanelProps) {
+export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer }: CellPanelProps) {
   const { ds1, lib } = map;
   if (!cell) {
     return (
@@ -191,7 +193,7 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
       );
     }
     return (
-      <tr key={layerKey(layer)} className={empty ? 'row-empty' : ''}>
+      <tr key={layerKey(layer)} className={`${empty ? 'row-empty' : ''}${onlyLayer && layerKey(onlyLayer) === layerKey(layer) ? ' row-focus' : ''}`}>
         <td className="muted">{label}</td>
         <td>
           <div className="cell-edit">
@@ -238,6 +240,12 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
   const visible = rows.filter(Boolean);
   return (
     <Panel title={editable ? 'Cell · editing' : 'Cell'} extra={`${x}, ${y}`}>
+      {editable && onlyLayer && (
+        <p className="small accent-text">
+          Only {layerLabel(onlyLayer)} is selected: copy, cut and Delete leave the other layers alone. Shift+wheel steps through the stacked tiles, Esc
+          selects all layers again.
+        </p>
+      )}
       {visible.length ? (
         <table className="kv">
           <tbody>{visible}</tbody>
@@ -289,12 +297,16 @@ interface SelectionPanelProps {
   onCopy: (cut: boolean) => void;
   onPaste: () => void;
   onDeselect: () => void;
+  /** Set when one tile of a stack was chosen (Shift+wheel): copy/cut only take that layer. */
+  onlyLayer?: LayerRef | null;
 }
 
-export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill, onClear, onCopy, onPaste, onDeselect }: SelectionPanelProps) {
+export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill, onClear, onCopy, onPaste, onDeselect, onlyLayer }: SelectionPanelProps) {
   const [w, h] = rectSize(selection);
+  const what = onlyLayer ? layerLabel(onlyLayer) : 'all tile layers';
   return (
     <Panel title="Selection" extra={`${w} × ${h} · from ${selection.x0}, ${selection.y0}`}>
+      {onlyLayer && <p className="small accent-text">Only {layerLabel(onlyLayer)} (Shift+wheel to step through the stacked tiles, Esc for all layers)</p>}
       <div className="button-grid">
         <button className="btn" disabled={!brush} onClick={onFill} title="Fill the selection with the brush tile on the active layer">
           Fill {layerLabel(activeLayer)}
@@ -305,10 +317,10 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
         <button className="btn" onClick={() => onClear(true)} title="Clear every tile layer in the selection (Shift+Delete)">
           Clear all layers
         </button>
-        <button className="btn" onClick={() => onCopy(false)} title="Copy all tile layers (Ctrl+C)">
+        <button className="btn" onClick={() => onCopy(false)} title={`Copy ${what} (Ctrl+C)`}>
           Copy
         </button>
-        <button className="btn" onClick={() => onCopy(true)} title="Cut all tile layers (Ctrl+X); paste to move">
+        <button className="btn" onClick={() => onCopy(true)} title={`Cut ${what} (Ctrl+X); paste to move`}>
           Cut
         </button>
         <button className="btn" disabled={!canPaste} onClick={onPaste} title="Paste; click on the map to place it (Ctrl+V)">

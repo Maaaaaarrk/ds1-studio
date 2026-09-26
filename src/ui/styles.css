@@ -315,3 +315,16 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .presets-sticky .panel-header { padding-left: 0; padding-right: 0; }
 .presets-panel .panel-body { padding-top: 8px; }
 .thumb-grid { resize: none; }
+
+.accent-text {
+  color: #8fe3ff;
+  margin: 0 0 6px;
+}
+
+.row-focus td {
+  background: rgba(120, 230, 255, 0.10);
+}
+.row-focus td:first-child {
+  color: #8fe3ff;
+  box-shadow: inset 2px 0 0 #8fe3ff;
+}

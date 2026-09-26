@@ -32,23 +32,23 @@ import {
   FileOutput,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
+import { EMPTY_CELL, isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
-import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
+import { clampRect, clearEdits, copyRect, fillEdits, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult } from '../game/compat';
 import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, hitTest, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, hitTest, hitTestAll, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
-import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } from './MapView';
+import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
@@ -58,6 +58,7 @@ import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './D
 import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
+import { syncLevelTables } from '../game/levelTables';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
@@ -115,6 +116,11 @@ export function App() {
     setPaletteFocus((f) => ({ tile, seq: (f?.seq ?? 0) + 1 }));
   }, []);
   const [selection, setSelection] = useState<CellRect | null>(null);
+  /**
+   * Tiles stacked under the last Shift+wheel / click point, frontmost first, and which one is chosen (-1 = none:
+   * the selection covers every layer). While one is chosen, copy/cut/delete only touch its layer.
+   */
+  const [stack, setStack] = useState<{ items: DrawItem[]; index: number } | null>(null);
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
@@ -301,6 +307,31 @@ export function App() {
     return tilesAt(map.lib, brushOrientation(activeLayer, brush), brush.main, brush.sub, hover.cellX, hover.cellY);
   }, [map, hover, tool, brush, activeLayer, pasting, clipboard]);
 
+  // The chosen stacked tile, found again in the current scene (edits rebuild it); gone when its tile is gone.
+  const focus = useMemo(() => {
+    if (!stack || stack.index < 0 || !scene) return null;
+    const want = stack.items[stack.index];
+    const item = scene.items.find((it) => sameItem(it, want));
+    if (!item) return null;
+    return { item, index: stack.index, count: stack.items.length, label: `${layerLabel(layerOfItem(item))} ${item.tile.mainIndex}/${item.tile.subIndex}` };
+  }, [stack, scene]);
+  const onlyLayer = focus ? layerOfItem(focus.item) : null;
+  const cycleStack = useCallback(
+    (dir: 1 | -1, world: [number, number]) => {
+      if (!doc || !scene || tool === 'object' || pasting) return;
+      const items = hitTestAll(scene, world[0], world[1], (it) => isVisible(it, visibility));
+      if (!items.length) return;
+      const same = stack && stack.items.length === items.length && stack.items.every((it, i) => sameItem(it, items[i]));
+      const index = same && stack.index >= 0 ? (stack.index + dir + items.length) % items.length : dir > 0 ? 0 : items.length - 1;
+      const item = items[index];
+      setStack({ items, index });
+      setSelection({ x0: item.cellX, y0: item.cellY, x1: item.cellX, y1: item.cellY });
+      focusTile(item.tile, layerOfItem(item));
+      if (tool !== 'select' && tool !== 'paint') setTool('select');
+    },
+    [doc, scene, tool, pasting, visibility, stack, focusTile],
+  );
+
   const pickAt = useCallback(
     (x: number, y: number, world: [number, number]) => {
       if (!doc || !scene) return;
@@ -335,7 +366,7 @@ export function App() {
   );
 
   const onStroke = useCallback(
-    (phase: StrokePhase, cells: [number, number][], world: [number, number]) => {
+    (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => {
       if (!doc) return;
       if (tool === 'object') {
         const [fx, fy] = worldToSubTile(world[0], world[1]);
@@ -399,11 +430,18 @@ export function App() {
       if (pasting) {
         if (phase === 'start' && cells[0] && clipboard) {
           const [x, y] = cells[0];
-          const edits = pasteEdits(doc, clipboard, x, y);
+          // Alt: stack onto the tiles already there (next free wall/floor layer) instead of replacing them.
+          const overlap = mods?.alt ? overlapEdits(doc, clipboard, x, y) : null;
+          const edits = overlap ? overlap.edits : pasteEdits(doc, clipboard, x, y);
           const objects = pasteObjects(doc, clipboard, x, y);
-          if (objects.length) {
-            // Cells and objects together, as one undo step.
+          const addsLayers = !!overlap && (overlap.walls > doc.ds1.walls.length || overlap.floors > doc.ds1.floors.length);
+          if (overlap) notify(`Stacked onto existing tiles${addsLayers ? ` (now ${overlap.walls} wall / ${overlap.floors} floor layers)` : ''}${overlap.replaced ? ` · ${overlap.replaced} cells had no free layer and were replaced` : ''}`);
+          if (objects.length || addsLayers) {
+            // Cells, new layers and objects together, as one undo step.
             doc.mutate((d) => {
+              const cellCount = d.width * d.height;
+              while (overlap && d.walls.length < overlap.walls) d.walls.push(Array.from({ length: cellCount }, () => ({ ...EMPTY_CELL, orientation: 0, orientationHigh: 0 })));
+              while (overlap && d.floors.length < overlap.floors) d.floors.push(Array.from({ length: cellCount }, () => EMPTY_CELL));
               for (const e of edits) {
                 const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
                 (layers[e.layer.index] as typeof e.cell[])[e.y * d.width + e.x] = e.cell;
@@ -423,15 +461,22 @@ export function App() {
           selectAnchor.current = cell;
           // Clicking a tile selects the cell it belongs to (tall walls and trees overlap the cells behind them)
           // and reveals the tile in its DT1 in the Tiles panel.
-          const hit = scene && hitTest(scene, world[0], world[1], (it) => isVisible(it, visibility));
+          const hits = scene ? hitTestAll(scene, world[0], world[1], (it) => isVisible(it, visibility)) : [];
+          const hit = hits[0];
+          setStack(hits.length > 1 ? { items: hits, index: -1 } : null);
           if (hit) {
             selectAnchor.current = [hit.cellX, hit.cellY];
             focusTile(hit.tile, layerOfItem(hit));
+            if (hits.length > 1) notify(`${hits.length} tiles overlap here: Shift+wheel to pick one layer`);
           }
           setSelection(clampRect(rectFrom(selectAnchor.current, selectAnchor.current), doc.ds1.width, doc.ds1.height));
           return;
         }
-        if (cell && selectAnchor.current) setSelection(clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height));
+        if (cell && selectAnchor.current) {
+          const r = clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height);
+          if (!r || !isSingleCell(r)) setStack(null);
+          setSelection(r);
+        }
         if (phase === 'end') selectAnchor.current = null;
         return;
       }
@@ -460,17 +505,25 @@ export function App() {
   const copy = useCallback(
     (cut: boolean) => {
       if (!doc || !selection) return;
-      setClipboard(copyRect(doc, selection));
+      const clip = copyRect(doc, selection);
       const [w, h] = rectSize(selection);
+      if (onlyLayer) {
+        // One tile of a stack (Shift+wheel): just its layer, no objects.
+        setClipboard({ ...clip, layers: clip.layers.filter((l) => layerKey(l.layer) === layerKey(onlyLayer)), objects: undefined });
+        if (cut && doc.apply(clearEdits(doc, selection, [onlyLayer]))) bump();
+        notify(`${cut ? 'Cut' : 'Copied'} ${layerLabel(onlyLayer)} only`);
+        return;
+      }
+      setClipboard(clip);
       if (cut && doc.apply(clearEdits(doc, selection, doc.layers()))) bump();
       notify(`${cut ? 'Cut' : 'Copied'} ${w}×${h} cells (all layers)`);
     },
-    [doc, selection, notify],
+    [doc, selection, notify, onlyLayer],
   );
   const startPaste = useCallback(() => {
     if (!clipboard) return notify('Nothing to paste: copy a selection first (Ctrl+C).');
     setPasting(true);
-    notify('Click to place the paste · Esc to cancel');
+    notify('Click to place the paste (hold Alt to stack onto existing tiles) · Esc to cancel');
   }, [clipboard, notify]);
   const clearSelection = useCallback(
     (allLayers: boolean) => {
@@ -633,11 +686,27 @@ export function App() {
         const notes = d.files.filter((f) => !/data[\\/]/i.test(f));
         d.files = [...paths.map(embeddedFileName), ...notes];
       });
-      setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths }, map.ds1));
       setDialog(null);
-      notify(`Tile libraries: ${paths.length}`);
+      // Keep the game's tables in step, or the game won't load the new tiles: new DT1s go into free File slots of
+      // the level type (LvlTypes.txt) and the preset's Dt1Mask (LvlPrest.txt) selects exactly these libraries.
+      let tableNote = '';
+      if (data.status === 'ready' && data.saveTarget) {
+        try {
+          const writes = await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
+          if (writes.length) {
+            await writeFiles(writes);
+            await reloadTables();
+            notify(`Tile libraries: ${paths.length}. Updated ${writes.flatMap((w) => w.summary).join('; ')}`);
+            return;
+          }
+        } catch (e) {
+          tableNote = ` (game tables not updated: ${(e as Error).message})`;
+        }
+      } else tableNote = ' (no writable mod folder, so LvlTypes/Dt1Mask were not updated)';
+      setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths }, map.ds1));
+      notify(`Tile libraries: ${paths.length}${tableNote}`, !!tableNote);
     },
-    [gd, map, doc, mutate, notify],
+    [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
   );
 
   // Presets: saved ones come from the mod folder.
@@ -669,7 +738,7 @@ export function App() {
     (p: Preset) => {
       setClipboard(presetToClipboard(p));
       setPasting(true);
-      notify(`Placing "${p.name}" · click the map · Esc to cancel`);
+      notify(`Placing "${p.name}" · click the map (hold Alt to stack onto existing tiles) · Esc to cancel`);
     },
     [notify],
   );
@@ -814,7 +883,11 @@ export function App() {
         setResizeMode(false);
         setMarks(undefined);
         if (tool === 'object') setSelectedObject(null);
-        else setSelection(null);
+        else if (stack && stack.index >= 0) setStack({ ...stack, index: -1 });
+        else {
+          setSelection(null);
+          setStack(null);
+        }
       },
       'edit.delete': () => {
         if (tool !== 'object' || !deleteSelectedObject()) clearSelection(false);
@@ -838,7 +911,7 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null };
   useEffect(() => {
@@ -1088,6 +1161,8 @@ export function App() {
             onZoom={setZoom}
             onStroke={onStroke}
             fitSignal={fitSignal}
+            focus={focus}
+            onCycle={cycleStack}
           />
         ) : (
           <div className="empty-stage">
@@ -1194,7 +1269,11 @@ export function App() {
                 onClear={clearSelection}
                 onCopy={copy}
                 onPaste={startPaste}
-                onDeselect={() => setSelection(null)}
+                onlyLayer={onlyLayer}
+                onDeselect={() => {
+                  setSelection(null);
+                  setStack(null);
+                }}
               />
             )}
             <CellPanel
@@ -1207,6 +1286,7 @@ export function App() {
               onMutate={mutate}
               scene={scene}
               onFocusTile={focusTile}
+              onlyLayer={onlyLayer}
             />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} keys={kb} />
