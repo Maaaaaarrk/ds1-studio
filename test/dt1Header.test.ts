@@ -1,14 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { parseDt1 } from '../src/formats/dt1';
 import { dt1ToIni, parseDt1Ini, readTileSettings, writeTileSettings } from '../src/formats/dt1Header';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
 import { D2_DIR, hasD2 } from '../tools/testdata';
 
-describe.runIf(hasD2)('DT1 tile settings (.ini fields)', async () => {
-  const fs = new LayeredFs(await Promise.all(['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq'].map((m) => MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`)))));
-  const bytes = (await fs.read('data/global/tiles/act1/barracks/exitdn.dt1'))!;
-  const dt1 = parseDt1(bytes);
+describe.runIf(hasD2)('DT1 tile settings (.ini fields)', () => {
+  let bytes: Uint8Array;
+  let dt1: ReturnType<typeof parseDt1>;
+  beforeAll(async () => {
+    const fs = new LayeredFs(await Promise.all(['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq'].map((m) => MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`)))));
+    bytes = (await fs.read('data/global/tiles/act1/barracks/exitdn.dt1'))!;
+    dt1 = parseDt1(bytes);
+  });
 
   it('reads what the parser reads', () => {
     dt1.tiles.forEach((t, i) => {
