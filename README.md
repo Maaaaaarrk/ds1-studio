@@ -264,6 +264,10 @@ Use **Help → Report a bug** in the app (it fills in your version and system), 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for running from source, the dev server, tests, releases and code
 signing.
 
+## License
+
+[MIT](LICENSE). Diablo II and its data are © Blizzard Entertainment and aren't part of this project.
+
 ## Credits
 
 - Diablo II and its data are © Blizzard Entertainment. DS1 Studio reads your own game files and never ships them.
