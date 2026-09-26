@@ -4,3 +4,4 @@ ds1studio.local.json
 node_modules
 src-tauri/gen
 src-tauri/target
+src-tauri/target-next
