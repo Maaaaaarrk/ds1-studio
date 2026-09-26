@@ -81,7 +81,7 @@ type WallBucket = 'lowerWall' | 'wall' | 'roof' | 'special';
 
 /**
  * Resolves every cell to positioned tiles in draw order, matching WinDS1 and the game:
- * lower walls, floors, shadows, then upright walls back to front, roofs, and editor-only special tiles last.
+ * floors, lower walls, shadows, then upright walls back to front, roofs, and editor-only special tiles last.
  */
 export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
   const items: DrawItem[] = [];
@@ -150,8 +150,10 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
     });
   };
 
-  addWalls('lowerWall');
   addGround('floor', ds1.floors, Orientation.Floor, (l) => l);
+  // Lower walls hang below the floor's edge into the void. Drawn after the floors: maps that fill the void with a
+  // (near-black) blank floor, like PD2's Arcane map, would otherwise hide them, which the game doesn't.
+  addWalls('lowerWall');
   addGround('shadow', ds1.shadows, Orientation.Shadow, () => 4);
   addWalls('wall');
   addWalls('roof');

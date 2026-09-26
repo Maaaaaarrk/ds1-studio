@@ -122,6 +122,8 @@ export function makeScenes(h) {
       await automapOn(true);
       await zoom(-2);
       await button('Suggest pieces for missing tiles');
+      // Wait for the analysis to finish (the Discard button appears with the suggestions).
+      for (let i = 0; i < 90 && !(await js(`return [...document.querySelectorAll('button')].some((b) => b.innerText.trim() === 'Discard')`)); i++) await sleep(1000);
       await sleep(800);
       await shot('automap-suggest');
       await button('Discard');
@@ -277,10 +279,42 @@ export function makeScenes(h) {
       await shot('compatibility', await dialog());
     },
 
-    async shortcuts() {
-      await button('Shortcuts');
-      await sleep(600);
-      await shot('shortcuts', await dialog());
+    async tileSettings() {
+      await town();
+      await ribbonTab('Map');
+      await button('DT1 editor');
+      await sleep(1200);
+      await pickLibrary('town/fence');
+      await sleep(1500);
+      await js(`document.querySelectorAll('.dte-grid .thumb')[2].click();`);
+      await sleep(500);
+      await js(`[...document.querySelectorAll('.dte-tabs .chip')].find((b) => /Tile settings/.test(b.innerText)).click();`);
+      await sleep(800);
+      // Paint "block missiles" on a row of sub-tiles to show the flag editor at work.
+      await js(`[...document.querySelectorAll('.st-bits button, .st-bit')].find((b) => /Block missiles/.test(b.innerText))?.click();`);
+      await sleep(200);
+      const c = await rect('.st-canvas');
+      await drag([c.x + c.width * 0.35, c.y + c.height * 0.88], [c.x + c.width * 0.72, c.y + c.height * 0.8], 10);
+      await sleep(500);
+      await js(`document.querySelector('.ts-field')?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));`);
+      await shot('tile-settings', await dialog());
+      await button('Close');
+      await sleep(300);
+      await js(`[...document.querySelectorAll('[role=dialog] button')].find((b) => /discard|close/i.test(b.innerText))?.click();`);
+      await ribbonTab('Home');
+    },
+
+    async cubeRecipe() {
+      await town();
+      await ribbonTab('Data');
+      await button('Cube recipe');
+      await sleep(2500);
+      // A template item picked, so the plan of what gets written shows.
+      await js(`[...document.querySelectorAll('.cr-list button')].find((b) => /Healing Potion/.test(b.innerText))?.click();`);
+      await sleep(800);
+      await shot('cube-recipe', await dialog());
+      await js(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.innerText.trim() === 'Cancel' || b.innerText.trim() === 'Close')?.click();`);
+      await ribbonTab('Home');
     },
 
     async help() {

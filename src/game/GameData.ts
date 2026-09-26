@@ -294,7 +294,9 @@ export class TileLibrary {
       const k = TileLibrary.key(t.orientation, t.mainIndex, t.subIndex);
       let list = this.byKey.get(k);
       if (!list) this.byKey.set(k, (list = []));
-      list.push(t);
+      // Newest first, like the game's tile lists: when a key has no random variants (all rarity 0) the tile loaded last
+      // is the one used, so a DT1 later in LvlTypes replaces same-numbered tiles of earlier ones (mods rely on this).
+      list.unshift(t);
     }
   }
 

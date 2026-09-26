@@ -62,7 +62,9 @@ downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` pac
 
 - Opens every DS1 in the game and your mod, straight from the MPQs and loose files — no extracting.
 - Picks the same tile libraries (DT1s) the game would, from `LvlPrest.txt` → `Levels.txt` → `LvlTypes.txt` and the
-  preset's `Dt1Mask`, and the right act palette.
+  preset's `Dt1Mask`, and the right act palette. When two loaded DT1s have the same tile, the one listed later in
+  `LvlTypes.txt` replaces it, as in the game (mods use this to swap tiles).
+- Special tiles (warps, town and map entries, corpse and portal spots) are invisible in game: DS1 Studio labels them.
 - Floors, walls, roofs, shadows, lower walls, animated tiles, special tiles, objects and NPCs with their real sprites
   — **animated in real time** at the game's own speeds, with fire, glows, magic and fog blended like in game — NPC
   paths, substitution groups. Objects that show their sprite don't get a marker on top (hover or select one to see its
@@ -134,6 +136,7 @@ tree groups.
 | :-: | :-: |
 | ![Tile libraries](docs/media/tile-libraries.png) **Tile libraries** with the DT1 viewer | ![Recolouring](docs/media/recolor.gif) **Recolour** tiles (hue shown) |
 | ![DT1 editor](docs/media/dt1-editor.png) **DT1 editor** | ![Pixel painting](docs/media/pixel-paint.gif) **Pixel painting** |
+| ![Tile settings](docs/media/tile-settings.png) **Tile settings (.ini)**: sub-tile flags painted on the tile | ![Pixel painter](docs/media/pixel-painter.png) **Pixel painter** with the Act 0 colours |
 
 ### Automap
 
@@ -171,6 +174,7 @@ again replaces the editor's earlier rows instead of piling them up.
 | | |
 | :-: | :-: |
 | ![Data tables](docs/media/data-tables.png) **Data tables** | ![Compatibility check](docs/media/compatibility.png) **Compatibility check** |
+| ![Cube recipe](docs/media/cube-recipe.png) **Cube recipe** from item lists | |
 
 ### Share maps
 
@@ -275,8 +279,6 @@ your computer.
 **Pixel painter** (DT1 editor): <kbd>B</kbd> pencil · <kbd>E</kbd> eraser · <kbd>G</kbd> fill · <kbd>I</kbd> colour
 picker · <kbd>[</kbd> / <kbd>]</kbd> brush size · <kbd>Alt</kbd>+click picks a colour · <kbd>Ctrl</kbd>+<kbd>Z</kbd> /
 <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo / redo · <kbd>Ctrl</kbd>+wheel zoom.
-
-![Shortcuts window](docs/media/shortcuts.png)
 
 ---
 

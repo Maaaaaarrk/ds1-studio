@@ -7,7 +7,15 @@ import type { Preset, SuggestProgress } from '../game/presets';
 import { tilesAt } from '../render/scene';
 import { normalizePath } from '../vfs/vfs';
 
-const thumbCache = new Map<string, string | null>();
+/** Thumbnails per map (tile library + palette): the same preset looks different with another map's DT1s. */
+const thumbCache = new WeakMap<TileLibrary, WeakMap<Palette, Map<string, string | null>>>();
+function thumbsFor(lib: TileLibrary, palette: Palette): Map<string, string | null> {
+  let byPal = thumbCache.get(lib);
+  if (!byPal) thumbCache.set(lib, (byPal = new WeakMap()));
+  let m = byPal.get(palette);
+  if (!m) byPal.set(palette, (m = new Map()));
+  return m;
+}
 
 /** Renders a preset's tiles (floors, then walls back to front) into a small image. */
 function renderPreset(p: Preset, lib: TileLibrary, palette: Palette): string | null {
@@ -63,8 +71,9 @@ const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: { preset
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     const key = `${preset.id}:${preset.foundIn ?? ''}`;
-    if (!thumbCache.has(key)) thumbCache.set(key, renderPreset(preset, lib, palette));
-    setUrl(thumbCache.get(key));
+    const cache = thumbsFor(lib, palette);
+    if (!cache.has(key)) cache.set(key, renderPreset(preset, lib, palette));
+    setUrl(cache.get(key));
   }, [preset, lib, palette]);
   return <div className="preset-img" style={url ? { backgroundImage: `url(${url})` } : undefined} />;
 });

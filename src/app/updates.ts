@@ -72,10 +72,15 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 
 /** Opens a web page in the user's browser. */
 export async function openExternal(url: string): Promise<void> {
-  if (isTauri) {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-  } else window.open(url, '_blank', 'noopener');
+  try {
+    if (isTauri) {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(url);
+    } else window.open(url, '_blank', 'noopener');
+  } catch (e) {
+    // Never fail silently: show the address so it can be opened by hand.
+    window.prompt(`Couldn't open your web browser (${String(e)}). Copy this address instead:`, url);
+  }
 }
 
 export function platformName(): string {
