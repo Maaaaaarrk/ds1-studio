@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { DEFAULT_PROP1, isEmptyCell, withFields, type TileCell, type WallCell } from '../formats/ds1';
+import { DEFAULT_PROP1, isEmptyCell, withFields, type Ds1, type TileCell, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { GameData } from '../game/GameData';
 import { rectSize, type CellRect } from '../game/clipboard';
@@ -125,10 +125,12 @@ interface CellPanelProps {
   /** Changes whenever the document changes, so the panel re-reads cells. */
   revision: number;
   onEdit: (edits: CellEdit[]) => void;
+  /** Structural edit (tag values). */
+  onMutate: (fn: (ds1: Ds1) => void) => void;
 }
 
 /** Shows every layer of one cell; editable when that cell is selected. */
-export function CellPanel({ map, doc, cell, editable, onEdit }: CellPanelProps) {
+export function CellPanel({ map, doc, cell, editable, onEdit, onMutate }: CellPanelProps) {
   const { ds1, lib } = map;
   if (!cell) {
     return (
@@ -220,10 +222,28 @@ export function CellPanel({ map, doc, cell, editable, onEdit }: CellPanelProps) 
         <p className="muted small">Empty cell.</p>
       )}
       {editable && <p className="muted small">main 0-63 · sub 0-255 · flags = prop1 (hex; 00 = empty). Enter to apply.</p>}
-      {tag !== undefined && tag !== 0 && (
-        <p className="small">
-          Tag: <code>{tag}</code>
-        </p>
+      {tag !== undefined && editable ? (
+        <div className="cell-edit">
+          <span className="muted small">Tag</span>
+          <NumField
+            value={tag}
+            min={0}
+            max={0xffffffff}
+            width={80}
+            onCommit={(v) =>
+              onMutate((d) => {
+                d.tags[0][i] = v;
+              })
+            }
+          />
+        </div>
+      ) : (
+        tag !== undefined &&
+        tag !== 0 && (
+          <p className="small">
+            Tag: <code>{tag}</code>
+          </p>
+        )
       )}
       {objs.map((o, n) => (
         <p key={n} className="small">
@@ -339,6 +359,82 @@ export function MapInfoPanel({ map, gd, onReopen }: { map: OpenMap; gd: GameData
             ))}
           </ul>
         </details>
+      )}
+    </Panel>
+  );
+}
+
+interface GroupsPanelProps {
+  ds1: Ds1;
+  selection: CellRect | null;
+  onMutate: (fn: (ds1: Ds1) => void) => void;
+  onShowGroups: () => void;
+}
+
+/** Tag layer and substitution groups (areas the level generator may swap for alternative presets). */
+export function GroupsPanel({ ds1, selection, onMutate, onShowGroups }: GroupsPanelProps) {
+  const hasTag = ds1.tagType === 1 || ds1.tagType === 2;
+  const setGroup = (n: number, patch: Partial<Ds1['groups'][number]>) =>
+    onMutate((d) => {
+      d.groups[n] = { ...d.groups[n], ...patch };
+    });
+  return (
+    <Panel title="Tags & groups" extra={hasTag ? `${ds1.groups.length} groups` : 'none'} defaultOpen={false}>
+      {!hasTag ? (
+        <>
+          <p className="muted small">This map has no tag layer, so it cannot have substitution groups.</p>
+          <button
+            className="btn"
+            onClick={() =>
+              onMutate((d) => {
+                d.tagType = 1;
+                d.tags = [new Uint32Array(d.width * d.height)];
+              })
+            }
+          >
+            Add tag layer
+          </button>
+        </>
+      ) : (
+        <>
+          {ds1.groups.map((g, n) => (
+            <div key={n} className="group-row">
+              <span className="muted small mono">{n}</span>
+              <NumField value={g.x} min={0} max={ds1.width - 1} onCommit={(x) => setGroup(n, { x })} width={36} />
+              <NumField value={g.y} min={0} max={ds1.height - 1} onCommit={(y) => setGroup(n, { y })} width={36} />
+              <span className="muted small">size</span>
+              <NumField value={g.width} min={1} max={ds1.width} onCommit={(width) => setGroup(n, { width })} width={36} />
+              <NumField value={g.height} min={1} max={ds1.height} onCommit={(height) => setGroup(n, { height })} width={36} />
+              <button
+                className="icon-btn"
+                title="Delete group"
+                onClick={() =>
+                  onMutate((d) => {
+                    d.groups.splice(n, 1);
+                  })
+                }
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <button
+            className="btn"
+            disabled={!selection}
+            title={selection ? 'Create a group covering the selected cells' : 'Select cells first (Select tool, V)'}
+            onClick={() => {
+              if (!selection) return;
+              const [width, height] = rectSize(selection);
+              onMutate((d) => {
+                d.groups.push({ x: selection.x0, y: selection.y0, width, height, unknown: 0 });
+              });
+              onShowGroups();
+            }}
+          >
+            Group from selection
+          </button>
+          <p className="muted small">Tag values are edited per cell: select a single cell. Tag type {ds1.tagType}.</p>
+        </>
       )}
     </Panel>
   );

@@ -103,3 +103,20 @@ describe('clipboard', async () => {
     expect(clampRect({ x0: 5, y0: 5, x1: 9, y1: 9 }, 3, 3)).toBeNull();
   });
 });
+
+describe('structural edits', async () => {
+  const { resizeDs1 } = await import('../src/formats/ds1ops');
+  it('resize is undoable and redoable', () => {
+    const doc = new MapDocument('x.ds1', blankDs1(4, 4));
+    const ds1 = doc.ds1;
+    doc.mutate((d) => resizeDs1(d, { left: 1, top: 0, right: 2, bottom: 0 }));
+    expect(doc.ds1).toBe(ds1); // same object, so views holding it stay valid
+    expect(doc.ds1.width).toBe(7);
+    doc.undo();
+    expect(doc.ds1.width).toBe(4);
+    expect(doc.ds1.floors[0].length).toBe(16);
+    doc.redo();
+    expect(doc.ds1.width).toBe(7);
+    expect(doc.ds1.walls[0].length).toBe(28);
+  });
+});

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1Object, type WallCell } from '../formats/ds1';
+import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
+import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation } from '../formats/dt1';
 import { GameData } from '../game/GameData';
 import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
@@ -11,8 +12,9 @@ import { devServerSaveTarget, directorySaveTarget, downloadFile, type SaveTarget
 import { LayeredFs, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } from './MapView';
-import { CellPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
+import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
+import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette } from './TilePalette';
 
@@ -54,6 +56,8 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
@@ -366,6 +370,58 @@ export function App() {
   const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
   const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
 
+  const mutate = useCallback(
+    (fn: (ds1: Ds1) => Ds1 | void) => {
+      if (!doc) return;
+      doc.mutate(fn);
+      bump();
+    },
+    [doc],
+  );
+  const resize = useCallback(
+    (d: ResizeDelta) => {
+      mutate((ds1) => resizeDs1(ds1, d));
+      setSelection(null);
+      setSelectedObject(null);
+      setDialog(null);
+      setFitSignal((n) => n + 1);
+    },
+    [mutate],
+  );
+  const createMap = useCallback(
+    async (c: NewMapChoice) => {
+      if (!gd || !confirmDiscard()) return;
+      const paths = GameData.dt1sFor(c.lvlType, 0xffffffff);
+      const ds1 = newDs1({ ...c, files: paths.map(embeddedFileName) });
+      try {
+        const m = await openMap(gd, c.path, { source: 'manual', lvlType: c.lvlType, paths }, ds1);
+        const d = new MapDocument(c.path, m.ds1);
+        d.revision = 1; // unsaved
+        setMap(m);
+        setDoc(d);
+        setSelection(null);
+        setSelectedObject(null);
+        setActiveLayer({ kind: 'floor', index: 0 });
+        setDialog(null);
+        notify(`New ${c.width}×${c.height} map. Pick tiles in the Tiles panel and paint (B); Save writes ${c.path}.`);
+      } catch (e) {
+        notify((e as Error).message, true);
+      }
+    },
+    [gd, confirmDiscard, notify],
+  );
+  const saveAs = useCallback(
+    (path: string) => {
+      if (!doc || !map) return;
+      doc.path = path;
+      setMap({ ...map, path });
+      setDialog(null);
+      // Save on the next render, once `data.files`/`doc.path` reflect the new name.
+      setTimeout(() => void handlers.current.save(), 0);
+    },
+    [doc, map],
+  );
+
   const applyEdits = useCallback(
     (edits: CellEdit[]) => {
       if (doc?.apply(edits)) bump();
@@ -382,6 +438,8 @@ export function App() {
 
   const save = useCallback(async () => {
     if (!doc || !gd || data.status !== 'ready') return;
+    const known = data.files.some((f) => f.toLowerCase() === doc.path.toLowerCase());
+    if (!known) setData({ ...data, files: [...data.files, doc.path].sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1)) });
     const bytes = writeDs1(doc.ds1);
     const name = doc.path.split('/').pop()!;
     try {
@@ -487,6 +545,25 @@ export function App() {
             </>
           ) : (
             <span className="muted">No map open</span>
+          )}
+        </div>
+        <div className="menu">
+          <button className="btn ghost" onClick={() => setMenuOpen((o) => !o)} onBlur={() => setTimeout(() => setMenuOpen(false), 150)}>
+            Map ▾
+          </button>
+          {menuOpen && (
+            <div className="menu-list">
+              <button onMouseDown={() => setDialog('new')}>New map…</button>
+              <button disabled={!doc} onMouseDown={() => setDialog('saveAs')}>
+                Save as…
+              </button>
+              <button disabled={!doc} onMouseDown={() => setDialog('resize')}>
+                Resize…
+              </button>
+              <button disabled={!doc} onMouseDown={exportFile}>
+                Export .ds1 <span className="kbd">download</span>
+              </button>
+            </div>
           )}
         </div>
         {doc && (
@@ -628,12 +705,18 @@ export function App() {
               editable={!!selection && isSingleCell(selection)}
               revision={revision}
               onEdit={applyEdits}
+              onMutate={mutate}
             />
+            <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} />
             <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} />
           </>
         )}
       </aside>
+
+      {dialog === 'new' && <NewMapDialog gd={data.gd} onCreate={createMap} onClose={() => setDialog(null)} />}
+      {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
+      {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
 
       <footer className="statusbar">
         <span>{data.gd.fs.baseSources.map((s) => s.label.split(/[\\/]/).slice(-2).join('/')).join('  ›  ')}</span>

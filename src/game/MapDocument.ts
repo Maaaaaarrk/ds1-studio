@@ -35,6 +35,8 @@ interface CellChange {
 interface HistoryStep {
   cells: CellChange[];
   objects?: { before: Ds1Object[]; after: Ds1Object[] };
+  /** Whole-map snapshots, for structural edits (resize, tags, groups). */
+  map?: { before: Ds1; after: Ds1 };
 }
 
 const cloneObjects = (objs: Ds1Object[]): Ds1Object[] => objs.map((o) => ({ ...o, path: o.path.map((p) => ({ ...p })) }));
@@ -147,6 +149,24 @@ export class MapDocument {
     return true;
   }
 
+  /**
+   * A structural edit (resize, tag layer, substitution groups) as one undoable step. `fn` either mutates the map in
+   * place or returns a replacement map.
+   */
+  mutate(fn: (ds1: Ds1) => Ds1 | void): void {
+    this.endStroke();
+    this.endObjectEdit();
+    const before = structuredClone(this.ds1);
+    const result = fn(this.ds1);
+    if (result) this.restore(result);
+    this.pushHistory({ cells: [], map: { before, after: structuredClone(this.ds1) } });
+    this.revision++;
+  }
+
+  private restore(snapshot: Ds1): void {
+    Object.assign(this.ds1, structuredClone(snapshot));
+  }
+
   /** Replaces the object list as one undoable step. */
   setObjects(next: Ds1Object[]): void {
     this.endObjectEdit();
@@ -187,6 +207,7 @@ export class MapDocument {
     if (!step) return false;
     for (const c of [...step.cells].reverse()) this.cells(c.layer)[c.index] = c.before;
     if (step.objects) this.ds1.objects = cloneObjects(step.objects.before);
+    if (step.map) this.restore(step.map.before);
     this.redoStack.push(step);
     this.revision++;
     return true;
@@ -197,6 +218,7 @@ export class MapDocument {
     if (!step) return false;
     for (const c of step.cells) this.cells(c.layer)[c.index] = c.after;
     if (step.objects) this.ds1.objects = cloneObjects(step.objects.after);
+    if (step.map) this.restore(step.map.after);
     this.undoStack.push(step);
     this.revision++;
     return true;
