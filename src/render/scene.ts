@@ -159,3 +159,25 @@ export function hitTest(scene: Scene, wx: number, wy: number, visible: (it: Draw
   }
   return null;
 }
+
+/** The tile(s) drawn for one cell (a north-corner wall is two tiles), positioned in world space. */
+export function tilesAt(
+  lib: TileLibrary,
+  orientation: number,
+  main: number,
+  sub: number,
+  cx: number,
+  cy: number,
+  seed = 0,
+): { tile: Dt1Tile; x: number; y: number }[] {
+  if (orientation === Orientation.SpecialTile1 || orientation === Orientation.SpecialTile2) return [];
+  const out: { tile: Dt1Tile; x: number; y: number }[] = [];
+  const add = (tile: Dt1Tile | null) => {
+    if (!tile) return;
+    const [x, y] = placeTile(tile, cx, cy);
+    out.push({ tile, x, y });
+  };
+  add(lib.pick(orientation, main, sub, seed));
+  if (out.length && orientation === Orientation.RightPartOfNorthCornerWall) add(lib.pick(Orientation.LeftPartOfNorthCornerWall, main, sub, seed));
+  return out;
+}

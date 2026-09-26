@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, writeDs1, WRITE_VERSION, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { GameData } from '../game/GameData';
+import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, hitTest, placeTile } from '../render/scene';
+import { buildScene, hitTest, tilesAt } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, type SaveTarget } from '../vfs/save';
 import { LayeredFs, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } from './MapView';
-import { Inspector, LayersPanel, MapInfoPanel } from './panels';
+import { CellPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { TilePalette } from './TilePalette';
 
@@ -23,6 +24,10 @@ type DataState =
 interface Toast {
   text: string;
   error?: boolean;
+}
+
+function isSingleCell(r: CellRect): boolean {
+  return r.x0 === r.x1 && r.y0 === r.y1;
 }
 
 /** Orientation used when painting a brush on a layer kind. */
@@ -44,6 +49,10 @@ export function App() {
   const [tool, setTool] = useState<Tool>('select');
   const [activeLayer, setActiveLayer] = useState<LayerRef>({ kind: 'floor', index: 0 });
   const [brush, setBrush] = useState<Brush | null>(null);
+  const [selection, setSelection] = useState<CellRect | null>(null);
+  const [clipboard, setClipboard] = useState<Clipboard | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const selectAnchor = useRef<[number, number] | null>(null);
 
   const bump = () => setRevision((r) => r + 1);
   const notify = useCallback((text: string, error = false) => setToast({ text, error }), []);
@@ -107,6 +116,8 @@ export function App() {
         setHover(null);
         setActiveLayer((l) => (l.kind === 'wall' && m.ds1.walls.length ? { kind: 'wall', index: 0 } : { kind: 'floor', index: 0 }));
         setBrush(null);
+        setSelection(null);
+        setPasting(false);
         setTool((t) => (t === 'paint' ? 'select' : t));
       } catch (e) {
         notify(`${path}: ${(e as Error).message}`, true);
@@ -133,23 +144,30 @@ export function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` invalidates the scene after in-place edits
   const scene = useMemo(() => (map ? buildScene(map.ds1, map.lib) : null), [map, revision]);
 
-  // Brush preview under the cursor.
+  // Preview under the cursor: the pending paste, or the paint brush.
+  const pasteRect = useMemo(
+    (): CellRect | null =>
+      pasting && clipboard && hover
+        ? { x0: hover.cellX, y0: hover.cellY, x1: hover.cellX + clipboard.width - 1, y1: hover.cellY + clipboard.height - 1 }
+        : null,
+    [pasting, clipboard, hover],
+  );
   const ghost = useMemo((): GhostTile[] => {
-    if (!map || !hover || tool !== 'paint' || !brush) return [];
-    const o = brushOrientation(activeLayer, brush);
-    const tile = map.lib.pick(o, brush.main, brush.sub, 0);
-    if (!tile) return [];
-    const [x, y] = placeTile(tile, hover.cellX, hover.cellY);
-    const out: GhostTile[] = [{ tile, x, y }];
-    if (o === Orientation.RightPartOfNorthCornerWall) {
-      const partner = map.lib.pick(Orientation.LeftPartOfNorthCornerWall, brush.main, brush.sub, 0);
-      if (partner) {
-        const [px, py] = placeTile(partner, hover.cellX, hover.cellY);
-        out.push({ tile: partner, x: px, y: py });
-      }
+    if (!map || !hover) return [];
+    if (pasting && clipboard) {
+      return clipboard.layers.flatMap(({ layer, cells }) =>
+        layer.kind === 'shadow'
+          ? []
+          : cells.flatMap((c, i) => {
+              if (isEmptyCell(c)) return [];
+              const o = layer.kind === 'wall' ? (c as WallCell).orientation : Orientation.Floor;
+              return tilesAt(map.lib, o, c.mainIndex, c.subIndex, hover.cellX + (i % clipboard.width), hover.cellY + Math.floor(i / clipboard.width));
+            }),
+      );
     }
-    return out;
-  }, [map, hover, tool, brush, activeLayer]);
+    if (tool !== 'paint' || !brush) return [];
+    return tilesAt(map.lib, brushOrientation(activeLayer, brush), brush.main, brush.sub, hover.cellX, hover.cellY);
+  }, [map, hover, tool, brush, activeLayer, pasting, clipboard]);
 
   const pickAt = useCallback(
     (x: number, y: number, world: [number, number]) => {
@@ -187,6 +205,22 @@ export function App() {
   const onStroke = useCallback(
     (phase: StrokePhase, cells: [number, number][], world: [number, number]) => {
       if (!doc) return;
+      if (pasting) {
+        if (phase === 'start' && cells[0] && clipboard) {
+          const [x, y] = cells[0];
+          if (doc.apply(pasteEdits(doc, clipboard, x, y))) bump();
+          setSelection(clampRect({ x0: x, y0: y, x1: x + clipboard.width - 1, y1: y + clipboard.height - 1 }, doc.ds1.width, doc.ds1.height));
+          setPasting(false);
+        }
+        return;
+      }
+      if (tool === 'select') {
+        const cell = cells[cells.length - 1];
+        if (phase === 'start' && cell) selectAnchor.current = cell;
+        if (cell && selectAnchor.current) setSelection(clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height));
+        if (phase === 'end') selectAnchor.current = null;
+        return;
+      }
       if (tool === 'pick') {
         if (phase === 'start' && cells[0]) pickAt(cells[0][0], cells[0][1], world);
         return;
@@ -205,7 +239,42 @@ export function App() {
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, activeLayer, pickAt, notify],
+    [doc, tool, brush, activeLayer, pickAt, notify, pasting, clipboard],
+  );
+
+  // Selection commands.
+  const copy = useCallback(
+    (cut: boolean) => {
+      if (!doc || !selection) return;
+      setClipboard(copyRect(doc, selection));
+      const [w, h] = rectSize(selection);
+      if (cut && doc.apply(clearEdits(doc, selection, doc.layers()))) bump();
+      notify(`${cut ? 'Cut' : 'Copied'} ${w}×${h} cells (all layers)`);
+    },
+    [doc, selection, notify],
+  );
+  const startPaste = useCallback(() => {
+    if (!clipboard) return notify('Nothing to paste: copy a selection first (Ctrl+C).');
+    setPasting(true);
+    notify('Click to place the paste · Esc to cancel');
+  }, [clipboard, notify]);
+  const clearSelection = useCallback(
+    (allLayers: boolean) => {
+      if (!doc || !selection) return;
+      if (doc.apply(clearEdits(doc, selection, allLayers ? doc.layers() : [activeLayer]))) bump();
+    },
+    [doc, selection, activeLayer],
+  );
+  const fillSelection = useCallback(() => {
+    if (!doc || !selection) return;
+    if (!brush) return notify('Choose a tile in the Tiles panel first.', true);
+    if (doc.apply(fillEdits(doc, selection, activeLayer, { ...brush, orientation: brushOrientation(activeLayer, brush) }))) bump();
+  }, [doc, selection, brush, activeLayer, notify]);
+  const applyEdits = useCallback(
+    (edits: CellEdit[]) => {
+      if (doc?.apply(edits)) bump();
+    },
+    [doc],
   );
 
   const undo = useCallback(() => {
@@ -240,8 +309,8 @@ export function App() {
   }, [doc]);
 
   // Keyboard shortcuts.
-  const handlers = useRef({ undo, redo, save });
-  handlers.current = { undo, redo, save };
+  const handlers = useRef({ undo, redo, save, copy, startPaste, clearSelection, doc });
+  handlers.current = { undo, redo, save, copy, startPaste, clearSelection, doc };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -258,6 +327,23 @@ export function App() {
       } else if (mod && k === 's') {
         e.preventDefault();
         void handlers.current.save();
+      } else if (mod && (k === 'c' || k === 'x')) {
+        handlers.current.copy(k === 'x');
+      } else if (mod && k === 'v') {
+        handlers.current.startPaste();
+      } else if (mod && k === 'a') {
+        const d = handlers.current.doc;
+        if (d) {
+          e.preventDefault();
+          setSelection({ x0: 0, y0: 0, x1: d.ds1.width - 1, y1: d.ds1.height - 1 });
+          setTool('select');
+        }
+      } else if (k === 'escape') {
+        setPasting(false);
+        setSelection(null);
+      } else if (k === 'delete' || k === 'backspace') {
+        e.preventDefault();
+        handlers.current.clearSelection(e.shiftKey);
       } else if (!mod && !e.altKey) {
         const t = TOOLS.find((t) => t.key === k);
         if (t) setTool(t.id);
@@ -364,6 +450,8 @@ export function App() {
             hover={hover}
             tool={tool}
             ghost={ghost}
+            selection={selection}
+            pasteRect={pasteRect}
             onHover={setHover}
             onZoom={setZoom}
             onStroke={onStroke}
@@ -408,7 +496,27 @@ export function App() {
                 }}
               />
             </section>
-            <Inspector map={map} hover={hover} />
+            {selection && !isSingleCell(selection) && (
+              <SelectionPanel
+                selection={selection}
+                activeLayer={activeLayer}
+                brush={brush}
+                canPaste={!!clipboard}
+                onFill={fillSelection}
+                onClear={clearSelection}
+                onCopy={copy}
+                onPaste={startPaste}
+                onDeselect={() => setSelection(null)}
+              />
+            )}
+            <CellPanel
+              map={map}
+              doc={doc}
+              cell={selection && isSingleCell(selection) ? { cellX: selection.x0, cellY: selection.y0 } : hover}
+              editable={!!selection && isSingleCell(selection)}
+              revision={revision}
+              onEdit={applyEdits}
+            />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} />
             <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} />
           </>

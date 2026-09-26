@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
+import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
@@ -27,6 +28,9 @@ interface Props {
   hover: HoverInfo | null;
   tool: Tool;
   ghost: GhostTile[];
+  selection: CellRect | null;
+  /** Footprint of a pending paste, drawn as an outline. */
+  pasteRect: CellRect | null;
   onHover: (h: HoverInfo | null) => void;
   onZoom: (zoom: number) => void;
   /** Tool strokes in cell coordinates; `cells` are all cells crossed since the last event, `world` is the cursor. */
@@ -75,15 +79,15 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
   }
 }
 
-export function MapView({ map, scene, visibility, hover, tool, ghost, onHover, onZoom, onStroke, fitSignal }: Props) {
+export function MapView({ map, scene, visibility, hover, tool, ghost, selection, pasteRect, onHover, onZoom, onStroke, fitSignal }: Props) {
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
   const atlas = useRef(new TileAtlas());
   const camera = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const dirty = useRef(true);
-  const latest = useRef({ map, scene, visibility, hover, tool, onHover, onZoom, onStroke });
-  latest.current = { map, scene, visibility, hover, tool, onHover, onZoom, onStroke };
+  const latest = useRef({ map, scene, visibility, hover, tool, selection, pasteRect, onHover, onZoom, onStroke });
+  latest.current = { map, scene, visibility, hover, tool, selection, pasteRect, onHover, onZoom, onStroke };
 
   // One renderer per canvas; redraw on demand.
   useEffect(() => {
@@ -152,6 +156,10 @@ export function MapView({ map, scene, visibility, hover, tool, ghost, onHover, o
     dirty.current = true;
   }, [scene, visibility, hover, ghost]);
 
+  useEffect(() => {
+    dirty.current = true;
+  }, [selection, pasteRect]);
+
   // Input.
   useEffect(() => {
     const el = overlay.current!;
@@ -170,11 +178,11 @@ export function MapView({ map, scene, visibility, hover, tool, ghost, onHover, o
     };
     const setCursor = () => {
       const t = latest.current.tool;
-      el.style.cursor = pan ? 'grabbing' : space || t === 'select' ? 'grab' : t === 'pick' ? 'copy' : 'crosshair';
+      el.style.cursor = pan ? 'grabbing' : space ? 'grab' : t === 'pick' ? 'copy' : t === 'select' ? 'default' : 'crosshair';
     };
     const down = (ev: PointerEvent) => {
       el.setPointerCapture(ev.pointerId);
-      const toolDrag = ev.button === 0 && !space && latest.current.tool !== 'select';
+      const toolDrag = ev.button === 0 && !space;
       if (toolDrag) {
         stroke = toCell(ev);
         latest.current.onStroke('start', [stroke], toWorld(ev));
@@ -264,7 +272,7 @@ export function MapView({ map, scene, visibility, hover, tool, ghost, onHover, o
   // Keep the cursor in sync with the tool.
   useEffect(() => {
     const el = overlay.current!;
-    el.style.cursor = tool === 'select' ? 'grab' : tool === 'pick' ? 'copy' : 'crosshair';
+    el.style.cursor = tool === 'pick' ? 'copy' : tool === 'select' ? 'default' : 'crosshair';
   }, [tool]);
 
   return (
@@ -290,10 +298,10 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
 function drawOverlay(
   canvas: HTMLCanvasElement,
   cam: Camera,
-  s: { map: OpenMap; scene: Scene; visibility: Visibility; hover: HoverInfo | null; tool: Tool },
+  s: { map: OpenMap; scene: Scene; visibility: Visibility; hover: HoverInfo | null; tool: Tool; selection: CellRect | null; pasteRect: CellRect | null },
 ) {
   const ctx = canvas.getContext('2d')!;
-  const { map, scene, visibility: v, hover, tool } = s;
+  const { map, scene, visibility: v, hover, tool, selection, pasteRect } = s;
   const { ds1 } = map;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -356,6 +364,22 @@ function drawOverlay(
       ctx.fill();
       ctx.stroke();
     }
+  }
+
+  for (const [rect, fill, stroke] of [
+    [selection, 'rgba(212, 168, 79, 0.10)', 'rgba(255, 205, 110, 0.95)'],
+    [pasteRect, 'rgba(110, 190, 255, 0.08)', 'rgba(130, 200, 255, 0.95)'],
+  ] as const) {
+    if (!rect) continue;
+    ctx.beginPath();
+    diamond(ctx, rect.x0, rect.y0, rect.x1 - rect.x0 + 1, rect.y1 - rect.y0 + 1);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.setLineDash([6 * px, 4 * px]);
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   if (hover) {

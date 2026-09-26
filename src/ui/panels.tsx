@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from 'react';
-import { isEmptyCell, type TileCell } from '../formats/ds1';
+import { DEFAULT_PROP1, isEmptyCell, withFields, type TileCell, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { GameData } from '../game/GameData';
+import { rectSize, type CellRect } from '../game/clipboard';
+import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import type { MapOverride, OpenMap } from '../game/openMap';
 import type { Scene } from '../render/scene';
 import type { HoverInfo } from './MapView';
@@ -64,66 +66,209 @@ export function LayersPanel({ map, scene, visibility: v, onChange }: { map: Open
         <Toggle label="Missing tiles" swatch="rgb(255,70,90)" checked={v.missing} onChange={(x) => set({ missing: x })} count={scene.missing.length} />
         <Toggle label="Grid (G)" checked={v.grid} onChange={(x) => set({ grid: x })} />
       </div>
-      <p className="muted small">Objects (blue) share the monster toggle. Drag to pan, scroll to zoom, F to fit.</p>
+      <p className="muted small">Objects (blue) share the monster toggle. Space/right-drag to pan, scroll to zoom, F to fit.</p>
     </Panel>
   );
 }
 
-function cellRow(label: string, c: TileCell, found: boolean | null, orientation?: number) {
-  if (isEmptyCell(c)) return null;
+function hex(n: number): string {
+  return n.toString(16).padStart(2, '0');
+}
+
+/** Number input that commits on Enter/blur (one undo step per commit, not per keystroke). */
+function NumField({ value, min, max, onCommit, hexMode = false, width = 44 }: { value: number; min: number; max: number; onCommit: (v: number) => void; hexMode?: boolean; width?: number }) {
+  const shown = hexMode ? hex(value) : String(value);
+  const [text, setText] = useState(shown);
+  const [editing, setEditing] = useState(false);
+  const commit = () => {
+    setEditing(false);
+    const v = hexMode ? parseInt(text, 16) : Number(text);
+    if (Number.isFinite(v) && v >= min && v <= max && v !== value) onCommit(v);
+    else setText(shown);
+  };
   return (
-    <tr key={label}>
-      <td className="muted">{label}</td>
-      <td>
-        <code>
-          {c.mainIndex}/{c.subIndex}
-        </code>
-        {orientation !== undefined && <span className="muted"> · {ORIENTATION_NAMES[orientation] ?? `o${orientation}`}</span>}
-        {c.hidden && <span className="badge">hidden</span>}
-        {found === false && <span className="badge error">missing</span>}
-      </td>
-      <td className="muted mono small">{`${c.prop1.toString(16).padStart(2, '0')}${c.prop2.toString(16).padStart(2, '0')}${c.prop3.toString(16).padStart(2, '0')}${c.prop4.toString(16).padStart(2, '0')}`}</td>
-    </tr>
+    <input
+      className="num-field mono"
+      style={{ width }}
+      value={editing ? text : shown}
+      onFocus={(e) => {
+        setText(shown);
+        setEditing(true);
+        e.target.select();
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') {
+          setText(shown);
+          setEditing(false);
+          (e.target as HTMLInputElement).blur();
+        }
+        e.stopPropagation();
+      }}
+    />
   );
 }
 
-export function Inspector({ map, hover }: { map: OpenMap; hover: HoverInfo | null }) {
+interface CellPanelProps {
+  map: OpenMap;
+  doc: MapDocument;
+  cell: HoverInfo | null;
+  /** True when one cell is selected: fields become editable. */
+  editable: boolean;
+  /** Changes whenever the document changes, so the panel re-reads cells. */
+  revision: number;
+  onEdit: (edits: CellEdit[]) => void;
+}
+
+/** Shows every layer of one cell; editable when that cell is selected. */
+export function CellPanel({ map, doc, cell, editable, onEdit }: CellPanelProps) {
   const { ds1, lib } = map;
-  if (!hover) {
+  if (!cell) {
     return (
-      <Panel title="Inspector">
-        <p className="muted small">Hover a cell to inspect it.</p>
+      <Panel title="Cell">
+        <p className="muted small">Hover a cell to inspect it; click one with Select (V) to edit it.</p>
       </Panel>
     );
   }
-  const i = hover.cellY * ds1.width + hover.cellX;
-  const has = (o: number, c: TileCell) => lib.variants(o, c.mainIndex, c.subIndex).length > 0 || (o === Orientation.Floor && c.mainIndex >= 30);
-  const rows = [
-    ...ds1.floors.map((l, n) => cellRow(`Floor ${n + 1}`, l[i], has(Orientation.Floor, l[i]))),
-    ...ds1.walls.map((l, n) => {
-      const special = l[i].orientation === Orientation.SpecialTile1 || l[i].orientation === Orientation.SpecialTile2;
-      return cellRow(`Wall ${n + 1}`, l[i], special ? null : has(l[i].orientation, l[i]), l[i].orientation);
-    }),
-    ...ds1.shadows.map((l) => cellRow('Shadow', l[i], has(Orientation.Shadow, l[i]))),
-  ].filter(Boolean);
-  const objs = ds1.objects.filter((o) => Math.floor(o.x / 5) === hover.cellX && Math.floor(o.y / 5) === hover.cellY);
+  const { cellX: x, cellY: y } = cell;
+  const i = y * ds1.width + x;
+  const found = (o: number, c: TileCell) =>
+    o === Orientation.SpecialTile1 || o === Orientation.SpecialTile2 || lib.variants(o, c.mainIndex, c.subIndex).length > 0 || (o === Orientation.Floor && c.mainIndex >= 30);
+
+  const rows = doc.layers().map((layer) => {
+    const c = doc.cell(layer, x, y);
+    const orientation = layer.kind === 'wall' ? (c as WallCell).orientation : layer.kind === 'floor' ? Orientation.Floor : Orientation.Shadow;
+    const empty = isEmptyCell(c);
+    const set = (next: TileCell | WallCell) => onEdit([{ layer, x, y, cell: next }]);
+    const label = layerLabel(layer);
+    if (!editable) {
+      if (empty) return null;
+      return (
+        <tr key={layerKey(layer)}>
+          <td className="muted">{label}</td>
+          <td>
+            <code>
+              {c.mainIndex}/{c.subIndex}
+            </code>
+            {layer.kind === 'wall' && <span className="muted"> · {ORIENTATION_NAMES[orientation] ?? `o${orientation}`}</span>}
+            {c.hidden && <span className="badge">hidden</span>}
+            {!found(orientation, c) && <span className="badge error">missing</span>}
+          </td>
+          <td className="muted mono small">{hex(c.prop1) + hex(c.prop2) + hex(c.prop3) + hex(c.prop4)}</td>
+        </tr>
+      );
+    }
+    return (
+      <tr key={layerKey(layer)} className={empty ? 'row-empty' : ''}>
+        <td className="muted">{label}</td>
+        <td>
+          <div className="cell-edit">
+            <NumField value={c.mainIndex} min={0} max={63} onCommit={(v) => set(withFields(c, { main: v, prop1: c.prop1 || DEFAULT_PROP1[layer.kind] }))} />
+            <span className="muted">/</span>
+            <NumField value={c.subIndex} min={0} max={255} onCommit={(v) => set(withFields(c, { sub: v, prop1: c.prop1 || DEFAULT_PROP1[layer.kind] }))} />
+            <span className="muted small">flags</span>
+            <NumField value={c.prop1} min={0} max={255} hexMode width={34} onCommit={(v) => set(withFields(c, { prop1: v }))} />
+            <label className="mini-check" title="Hidden (prop4 bit 0x80): the game does not draw this tile">
+              <input type="checkbox" checked={c.hidden} disabled={empty} onChange={(e) => set(withFields(c, { hidden: e.target.checked }))} />
+              hid
+            </label>
+            {!empty && (
+              <button className="icon-btn" title="Clear this layer" onClick={() => set(MapDocument.painted(layer, c, null))}>
+                ×
+              </button>
+            )}
+          </div>
+          {layer.kind === 'wall' && (
+            <select
+              className="orient-select"
+              value={orientation}
+              onChange={(e) => set({ ...(c as WallCell), orientation: Number(e.target.value) })}
+            >
+              <option value={0}>0 · (none)</option>
+              {Object.entries(ORIENTATION_NAMES)
+                .filter(([o]) => Number(o) !== Orientation.Floor && Number(o) !== Orientation.Shadow)
+                .map(([o, name]) => (
+                  <option key={o} value={o}>
+                    {o} · {name}
+                  </option>
+                ))}
+            </select>
+          )}
+          {!empty && !found(orientation, c) && <span className="badge error">missing</span>}
+        </td>
+      </tr>
+    );
+  });
+
+  const objs = ds1.objects.filter((o) => Math.floor(o.x / 5) === x && Math.floor(o.y / 5) === y);
   const tag = ds1.tags[0]?.[i];
+  const visible = rows.filter(Boolean);
   return (
-    <Panel title="Inspector" extra={`${hover.cellX}, ${hover.cellY}`}>
-      {rows.length ? (
+    <Panel title={editable ? 'Cell · editing' : 'Cell'} extra={`${x}, ${y}`}>
+      {visible.length ? (
         <table className="kv">
-          <tbody>{rows}</tbody>
+          <tbody>{visible}</tbody>
         </table>
       ) : (
         <p className="muted small">Empty cell.</p>
       )}
-      {tag !== undefined && tag !== 0 && <p className="small">Tag: <code>{tag}</code></p>}
+      {editable && <p className="muted small">main 0-63 · sub 0-255 · flags = prop1 (hex; 00 = empty). Enter to apply.</p>}
+      {tag !== undefined && tag !== 0 && (
+        <p className="small">
+          Tag: <code>{tag}</code>
+        </p>
+      )}
       {objs.map((o, n) => (
         <p key={n} className="small">
           {o.type === 1 ? 'Monster/NPC' : 'Object'} <code>#{o.id}</code> at sub-tile ({o.x}, {o.y}){o.path.length ? ` · path of ${o.path.length}` : ''}
           {o.flags ? ` · flags ${o.flags}` : ''}
         </p>
       ))}
+    </Panel>
+  );
+}
+
+interface SelectionPanelProps {
+  selection: CellRect;
+  activeLayer: LayerRef;
+  brush: Brush | null;
+  canPaste: boolean;
+  onFill: () => void;
+  onClear: (allLayers: boolean) => void;
+  onCopy: (cut: boolean) => void;
+  onPaste: () => void;
+  onDeselect: () => void;
+}
+
+export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill, onClear, onCopy, onPaste, onDeselect }: SelectionPanelProps) {
+  const [w, h] = rectSize(selection);
+  return (
+    <Panel title="Selection" extra={`${w} × ${h} · from ${selection.x0}, ${selection.y0}`}>
+      <div className="button-grid">
+        <button className="btn" disabled={!brush} onClick={onFill} title="Fill the selection with the brush tile on the active layer">
+          Fill {layerLabel(activeLayer)}
+        </button>
+        <button className="btn" onClick={() => onClear(false)} title="Clear the active layer in the selection (Delete)">
+          Clear {layerLabel(activeLayer)}
+        </button>
+        <button className="btn" onClick={() => onClear(true)} title="Clear every tile layer in the selection (Shift+Delete)">
+          Clear all layers
+        </button>
+        <button className="btn" onClick={() => onCopy(false)} title="Copy all tile layers (Ctrl+C)">
+          Copy
+        </button>
+        <button className="btn" onClick={() => onCopy(true)} title="Cut all tile layers (Ctrl+X); paste to move">
+          Cut
+        </button>
+        <button className="btn" disabled={!canPaste} onClick={onPaste} title="Paste; click on the map to place it (Ctrl+V)">
+          Paste
+        </button>
+      </div>
+      <p className="muted small">
+        Empty cells paste as transparent. Move = Cut, then Paste. <button className="link" onClick={onDeselect}>Deselect (Esc)</button>
+      </p>
     </Panel>
   );
 }

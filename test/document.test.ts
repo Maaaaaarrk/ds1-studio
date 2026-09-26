@@ -68,3 +68,38 @@ describe('MapDocument', () => {
     expect(back.trailing).toBe(0);
   });
 });
+
+describe('clipboard', async () => {
+  const { clearEdits, copyRect, fillEdits, pasteEdits, clampRect } = await import('../src/game/clipboard');
+  const floor = { kind: 'floor' as const, index: 0 };
+  const wall = { kind: 'wall' as const, index: 0 };
+
+  it('copies a block and pastes it transparently elsewhere as one undo step', () => {
+    const doc = new MapDocument('x.ds1', blankDs1(6, 6));
+    doc.apply(fillEdits(doc, { x0: 0, y0: 0, x1: 1, y1: 1 }, floor, { orientation: 0, main: 2, sub: 7 }));
+    doc.apply([{ layer: wall, x: 1, y: 1, cell: MapDocument.painted(wall, doc.cell(wall, 1, 1), { orientation: 1, main: 4, sub: 0 }) }]);
+    // Destination already has a floor tile under where the empty wall cells will land.
+    doc.apply([{ layer: floor, x: 4, y: 4, cell: MapDocument.painted(floor, doc.cell(floor, 4, 4), { orientation: 0, main: 9, sub: 9 }) }]);
+    const clip = copyRect(doc, { x0: 0, y0: 0, x1: 1, y1: 1 });
+    expect(clip.width).toBe(2);
+    doc.apply(pasteEdits(doc, clip, 4, 4));
+    expect(doc.cell(floor, 4, 4)).toMatchObject({ mainIndex: 2, subIndex: 7 });
+    expect(doc.cell(wall, 5, 5)).toMatchObject({ mainIndex: 4, orientation: 1 });
+    expect(doc.cell(wall, 4, 4).prop1).toBe(0);
+    doc.undo();
+    expect(doc.cell(floor, 4, 4)).toMatchObject({ mainIndex: 9, subIndex: 9 });
+    expect(doc.cell(wall, 5, 5).prop1).toBe(0);
+  });
+
+  it('clips pastes at the map edge and clears only the requested layers', () => {
+    const doc = new MapDocument('x.ds1', blankDs1(3, 3));
+    doc.apply(fillEdits(doc, { x0: 0, y0: 0, x1: 2, y1: 2 }, floor, { orientation: 0, main: 1, sub: 1 }));
+    doc.apply(fillEdits(doc, { x0: 0, y0: 0, x1: 2, y1: 2 }, wall, { orientation: 2, main: 1, sub: 1 }));
+    expect(pasteEdits(doc, copyRect(doc, { x0: 0, y0: 0, x1: 2, y1: 2 }), 2, 2).length).toBe(2); // one cell x 2 layers
+    doc.apply(clearEdits(doc, { x0: 0, y0: 0, x1: 0, y1: 2 }, [wall]));
+    expect(doc.cell(wall, 0, 1).prop1).toBe(0);
+    expect(doc.cell(floor, 0, 1).prop1).not.toBe(0);
+    expect(clampRect({ x0: -2, y0: 1, x1: 9, y1: 1 }, 3, 3)).toEqual({ x0: 0, y0: 1, x1: 2, y1: 1 });
+    expect(clampRect({ x0: 5, y0: 5, x1: 9, y1: 9 }, 3, 3)).toBeNull();
+  });
+});

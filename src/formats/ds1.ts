@@ -119,6 +119,17 @@ export function withTile<T extends TileCell>(c: T, main: number, sub: number, de
 
 export const EMPTY_CELL: TileCell = decodeCell(0);
 
+/** Returns a copy of `c` with the given fields changed, keeping the raw prop bytes consistent. */
+export function withFields<T extends TileCell>(c: T, patch: { main?: number; sub?: number; hidden?: boolean; prop1?: number }): T {
+  const main = (patch.main ?? c.mainIndex) & 0x3f;
+  const sub = (patch.sub ?? c.subIndex) & 0xff;
+  const hidden = patch.hidden ?? c.hidden;
+  const prop1 = (patch.prop1 ?? c.prop1) & 0xff;
+  const prop3 = ((main & 0x0f) << 4) | (c.prop3 & 0x0f);
+  const prop4 = (c.prop4 & 0x7c) | ((main >> 4) & 0x03) | (hidden ? 0x80 : 0);
+  return { ...c, prop1, prop2: sub, prop3, prop4, mainIndex: main, subIndex: sub, hidden };
+}
+
 /** True when a cell holds no tile. */
 export function isEmptyCell(c: TileCell): boolean {
   return c.prop1 === 0;

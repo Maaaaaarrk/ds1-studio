@@ -139,3 +139,18 @@ details summary { cursor: pointer; margin-top: 8px; }
 .thumb-img { height: 52px; background: center / contain no-repeat; image-rendering: pixelated; }
 .thumb-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 2px; }
 .thumb-o { color: #6f7785; }
+
+/* Cell editor & selection */
+.num-field { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; font-size: 12px; }
+.num-field:focus { outline: none; border-color: var(--accent); }
+.cell-edit { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.mini-check { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.mini-check input { accent-color: var(--accent); margin: 0; }
+.icon-btn { background: none; border: 1px solid transparent; border-radius: 4px; color: var(--muted); cursor: pointer; padding: 0 5px; }
+.icon-btn:hover { color: var(--error); border-color: var(--border); }
+.orient-select { margin-top: 4px; padding: 3px 6px; font-size: 12px; }
+.row-empty td:first-child { opacity: 0.55; }
+.kv tr + tr td { border-top: 1px solid rgba(255, 255, 255, 0.03); }
+.button-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.button-grid .btn { padding: 5px 8px; font-size: 12px; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: inherit; }
