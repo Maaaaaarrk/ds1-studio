@@ -58,7 +58,7 @@ function thumbnail(tile: Dt1Tile, palette: Palette): string | null {
   return url;
 }
 
-const Thumb = memo(function Thumb({ tile, palette }: { tile: Dt1Tile; palette: Palette }) {
+export const Thumb = memo(function Thumb({ tile, palette }: { tile: Dt1Tile; palette: Palette }) {
   const ref = useRef<HTMLDivElement>(null);
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   // Decode lazily, only once the thumbnail scrolls into view.
@@ -98,6 +98,33 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
   const [query, setQuery] = useState('');
   const [dt1, setDt1] = useState<string>('all');
   const grid = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState(() => {
+    try {
+      return Number(localStorage.getItem('ds1studio.thumbSize')) || 52;
+    } catch {
+      return 52;
+    }
+  });
+
+  // Ctrl + wheel zooms the thumbnails (a native listener, so the page itself doesn't zoom).
+  useEffect(() => {
+    const el = grid.current!;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setThumb((t) => {
+        const next = Math.round(Math.min(220, Math.max(36, t * Math.exp(-e.deltaY * 0.0015))));
+        try {
+          localStorage.setItem('ds1studio.thumbSize', String(next));
+        } catch {
+          // per-viewer convenience only
+        }
+        return next;
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   // A new map (tile library) starts in the combined view.
   useEffect(() => setDt1('all'), [lib]);
@@ -161,7 +188,12 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
         )}
         <input className="search small-input" placeholder="main/sub…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-      <div className="thumb-grid" ref={grid}>
+      <div
+        className="thumb-grid"
+        ref={grid}
+        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumb + 14}px, 1fr))`, ['--thumb-h' as string]: `${thumb}px` }}
+        title="Ctrl + scroll to zoom the thumbnails"
+      >
         {entries.map((e) => {
           const active = brush && brush.orientation === e.orientation && brush.main === e.main && brush.sub === e.sub;
           const src = e.index === undefined ? null : `${shortPath(dt1)} #${e.index}`;

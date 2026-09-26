@@ -36,7 +36,17 @@ export interface ManifestSource {
 }
 
 const BASE_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'];
-const RELEVANT = /\.(ds1|dt1|dat|txt)$/i;
+const RELEVANT = /\.(ds1|dt1|dat|txt|json|bin)$/i;
+
+/** Same write rules as the desktop app: maps/tiles/sprites under data/global, tables under excel, presets under data/ds1studio. */
+function writable(rel: string): boolean {
+  const p = rel.replace(/\\/g, '/').toLowerCase();
+  return (
+    (p.startsWith('data/global/') && /\.(ds1|dt1|cof|dcc|dc6)$/.test(p)) ||
+    (p.startsWith('data/global/excel/') && p.endsWith('.txt')) ||
+    (p.startsWith('data/ds1studio/') && p.endsWith('.json'))
+  );
+}
 
 function loadConfig(root: string): Config {
   const file = join(root, 'ds1studio.local.json');
@@ -110,7 +120,7 @@ export function gameDataPlugin(): Plugin {
           if (!saveRoot) return json(409, { error: 'No saveDir or modDirs configured in ds1studio.local.json' });
           const rel = parts.slice(1).join('/');
           const file = resolve(saveRoot, rel);
-          if (!/\.ds1$/i.test(rel) || !file.startsWith(resolve(saveRoot) + sep)) return json(400, { error: `refusing to write ${rel}` });
+          if (!writable(rel) || !file.startsWith(resolve(saveRoot) + sep)) return json(400, { error: `refusing to write ${rel}` });
           const chunks: Buffer[] = [];
           req.on('data', (c: Buffer) => chunks.push(c));
           req.on('end', () => {

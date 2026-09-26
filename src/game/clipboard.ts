@@ -1,4 +1,4 @@
-import { isEmptyCell, type TileCell, type WallCell } from '../formats/ds1';
+import { isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { layerKey, MapDocument, type Brush, type CellEdit, type LayerRef } from './MapDocument';
 
 /** Inclusive cell rectangle. */
@@ -14,6 +14,8 @@ export interface Clipboard {
   width: number;
   height: number;
   layers: { layer: LayerRef; cells: (TileCell | WallCell)[] }[];
+  /** Objects/NPCs on the copied cells, with sub-tile coordinates relative to the top-left cell. */
+  objects?: Ds1Object[];
 }
 
 export function rectFrom(a: [number, number], b: [number, number]): CellRect {
@@ -36,11 +38,32 @@ function* cellsIn(r: CellRect): Generator<[number, number]> {
 
 export function copyRect(doc: MapDocument, r: CellRect): Clipboard {
   const [width, height] = rectSize(r);
+  const inside = (o: Ds1Object) => {
+    const cx = Math.floor(o.x / 5);
+    const cy = Math.floor(o.y / 5);
+    return cx >= r.x0 && cx <= r.x1 && cy >= r.y0 && cy <= r.y1;
+  };
   return {
     width,
     height,
     layers: doc.layers().map((layer) => ({ layer, cells: [...cellsIn(r)].map(([x, y]) => doc.cell(layer, x, y)) })),
+    objects: doc.ds1.objects.filter(inside).map((o) => ({
+      ...o,
+      x: o.x - r.x0 * 5,
+      y: o.y - r.y0 * 5,
+      path: o.path.map((p) => ({ ...p, x: p.x - r.x0 * 5, y: p.y - r.y0 * 5 })),
+      pathOrder: undefined,
+    })),
   };
+}
+
+/** Objects of a clipboard placed with its top-left cell at (x, y), dropping any that land off the map. */
+export function pasteObjects(doc: MapDocument, clip: Clipboard, x: number, y: number): Ds1Object[] {
+  const dx = x * 5;
+  const dy = y * 5;
+  return (clip.objects ?? [])
+    .map((o) => ({ ...o, x: o.x + dx, y: o.y + dy, path: o.path.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })) }))
+    .filter((o) => doc.inBounds(Math.floor(o.x / 5), Math.floor(o.y / 5)));
 }
 
 export function clearEdits(doc: MapDocument, r: CellRect, layers: LayerRef[]): CellEdit[] {

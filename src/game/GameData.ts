@@ -163,6 +163,11 @@ export class GameData {
     return this.objRows.get(`${act}:${type}:${n}`) ?? null;
   }
 
+  /** WinDS1 obj.txt sprite recipe of an object, if any. */
+  objectSpec(act0: number, type: number, id: number): SpriteSpec | null {
+    return this.objRow(act0, type, id)?.spec ?? null;
+  }
+
   /** Still frame of an object's sprite (cached), or null when obj.txt has no recipe or the files are missing. */
   objectSprite(act0: number, type: number, id: number): Promise<Sprite | null> {
     const key = `${act0}:${type}:${id}`;

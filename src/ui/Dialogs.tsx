@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { ResizeDelta } from '../formats/ds1ops';
 import type { GameData, LvlTypeInfo } from '../game/GameData';
 
-function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -13,7 +13,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   }, [onClose]);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label={title}>
+      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-label={title}>
         <div className="modal-title">{title}</div>
         {children}
       </div>

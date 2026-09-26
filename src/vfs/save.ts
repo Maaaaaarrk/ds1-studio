@@ -72,6 +72,32 @@ export function directorySaveTarget(root: FileSystemDirectoryHandle): SaveTarget
   };
 }
 
+/** Desktop app: native "Save as" dialog. Browser: a download. Returns where it went (or null if cancelled). */
+export async function exportBytes(name: string, bytes: Uint8Array): Promise<string | null> {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string | null>('export_file', bytes.slice(), { headers: { 'x-name': encodeURIComponent(name) } });
+  }
+  downloadFile(name, bytes);
+  return `Downloads/${name}`;
+}
+
+/** Desktop app: native "Open" dialog. Browser: a file input. Resolves null if cancelled. */
+export async function importBytes(extension: string): Promise<Uint8Array | null> {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const buf = new Uint8Array(await invoke<ArrayBuffer>('import_file', { extension }));
+    return buf.length ? buf : null;
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = `.${extension}`;
+    input.onchange = async () => resolve(input.files?.[0] ? new Uint8Array(await input.files[0].arrayBuffer()) : null);
+    input.click();
+  });
+}
+
 /** Fallback: hand the file to the user as a download. */
 export function downloadFile(name: string, bytes: Uint8Array): void {
   const url = URL.createObjectURL(new Blob([bytes.slice()], { type: 'application/octet-stream' }));

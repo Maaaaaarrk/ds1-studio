@@ -1,0 +1,46 @@
+/* TableEditor: virtualized spreadsheet for D2 excel .txt tables. Row height must match ROW_H (24px), header HEADER_H (28px). */
+.te { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--bg); color: var(--text); }
+
+.te-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 7px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.te-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-right: auto; }
+.te-title-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.te-dirty { color: var(--accent); font-size: 10px; }
+.te-search.search { margin: 0; width: 170px; padding: 5px 9px; }
+.te-actions { display: flex; gap: 6px; }
+.te-actions .btn { padding: 5px 10px; white-space: nowrap; }
+
+.te-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; outline: none; font-family: var(--mono); font-size: 12px; }
+.te-scroll:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-dim); }
+.te-inner { position: relative; }
+
+.te-head { position: sticky; top: 0; z-index: 3; display: flex; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.te-body { position: relative; }
+.te-row { position: absolute; left: 0; display: flex; }
+.te-pad { flex: none; }
+
+.te-cell { flex: none; height: 100%; padding: 0 6px; line-height: 23px; white-space: pre; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--border); border-bottom: 1px solid #1a1d23; cursor: default; }
+.te-hcell { line-height: 27px; font-family: var(--font); font-size: 11.5px; font-weight: 600; color: #aeb4bf; background: var(--panel-2); border-bottom: 0; }
+.te-hcell.active { color: var(--accent); }
+
+.te-row .te-cell { background: var(--bg); }
+.te-row.odd .te-cell { background: #0e1014; }
+.te-row.sel-row .te-cell { background: #14161c; }
+.te-row.hl .te-cell { background: #262117; }
+.te-row .te-cell.missing { background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(255, 255, 255, 0.025) 4px 8px); }
+
+/* Sticky row-index and name columns. */
+.te-idx { position: sticky; left: 0; z-index: 1; width: 56px; text-align: right; color: var(--muted); cursor: pointer; }
+.te-name { position: sticky; left: 56px; z-index: 1; border-right: 1px solid #3a404c; color: #e8e2d4; }
+.te-head .te-idx, .te-head .te-name { z-index: 4; background: var(--panel-2); cursor: default; }
+.te-row .te-idx, .te-row.odd .te-idx { background: var(--panel); }
+.te-row.sel-row .te-idx { color: var(--accent); }
+
+.te-cell.sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.te-row .te-cell.sel { background: #1c1a14; }
+
+.te-input { width: calc(100% + 12px); height: 100%; margin: 0 -6px; padding: 0 5px; background: var(--bg); color: var(--text); border: 0; outline: none; font: inherit; }
+
+.te-empty { position: absolute; top: 44px; left: 0; right: 0; text-align: center; font-family: var(--font); }
+
+.te-status { display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; background: var(--panel); border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+.te-status-value { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; }

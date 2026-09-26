@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Ds1Object } from '../formats/ds1';
 import type { Dt1Tile } from '../formats/dt1';
 import type { Sprite } from '../game/sprites';
+import type { ResizeDelta } from '../formats/ds1ops';
 import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
@@ -35,6 +36,11 @@ interface Props {
   selectedObject: number | null;
   /** Object sprites by "type:id". */
   sprites: Map<string, Sprite>;
+  /** Cells to call out (e.g. problems found by the compatibility check). */
+  marks?: { x: number; y: number }[];
+  /** Show edge handles that resize the map by dragging. */
+  resizeMode: boolean;
+  onResize: (delta: ResizeDelta) => void;
   selection: CellRect | null;
   /** Footprint of a pending paste, drawn as an outline. */
   pasteRect: CellRect | null;
@@ -63,6 +69,24 @@ export function isVisible(it: DrawItem, v: Visibility): boolean {
     case 'special':
       return v.specials;
   }
+}
+
+type Side = keyof ResizeDelta;
+const SIDES: Side[] = ['left', 'top', 'right', 'bottom'];
+
+/** Midpoint of a map edge, in cell coordinates. */
+function sideAnchor(side: Side, w: number, h: number): [number, number] {
+  return side === 'left' ? [0, h / 2] : side === 'right' ? [w, h / 2] : side === 'top' ? [w / 2, 0] : [w / 2, h];
+}
+
+/** The delta produced by dragging `side` to fractional cell (fx, fy). Keeps at least one cell. */
+function dragDelta(side: Side, fx: number, fy: number, w: number, h: number): ResizeDelta {
+  const d: ResizeDelta = { left: 0, top: 0, right: 0, bottom: 0 };
+  if (side === 'left') d.left = Math.min(-Math.round(fx), w - 1);
+  if (side === 'right') d.right = Math.max(Math.round(fx) - w, 1 - w);
+  if (side === 'top') d.top = Math.min(-Math.round(fy), h - 1);
+  if (side === 'bottom') d.bottom = Math.max(Math.round(fy) - h, 1 - h);
+  return d;
 }
 
 /** Cells on the grid line from a to b (inclusive), so fast drags don't skip cells. */
@@ -98,8 +122,9 @@ export function MapView(props: Props) {
   const dirty = useRef(true);
   const [frame, setFrame] = useState(0);
   const walk = useMemo(() => (visibility.walkable ? walkability(map.ds1, scene) : null), [visibility.walkable, map, scene]);
-  const latest = useRef({ ...props, walk });
-  latest.current = { ...props, walk };
+  const resizeDrag = useRef<{ side: Side; delta: ResizeDelta } | null>(null);
+  const latest = useRef({ ...props, walk, resizeDrag });
+  latest.current = { ...props, walk, resizeDrag };
 
   // Animated floors run at 10 fps, like the game.
   useEffect(() => {
@@ -205,7 +230,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks]);
 
   // Input.
   useEffect(() => {
@@ -229,6 +254,21 @@ export function MapView(props: Props) {
     };
     const down = (ev: PointerEvent) => {
       el.setPointerCapture(ev.pointerId);
+      // Resize handles take precedence over tools.
+      if (ev.button === 0 && latest.current.resizeMode) {
+        const { width: w, height: h } = latest.current.map.ds1;
+        const [wx, wy] = toWorld(ev);
+        const reach = 14 / camera.current.zoom * dpr();
+        const side = SIDES.find((sd) => {
+          const [ax, ay] = cellToWorld(...sideAnchor(sd, w, h));
+          return Math.hypot(ax - wx, ay - wy) < reach;
+        });
+        if (side) {
+          resizeDrag.current = { side, delta: { left: 0, top: 0, right: 0, bottom: 0 } };
+          dirty.current = true;
+          return;
+        }
+      }
       const toolDrag = ev.button === 0 && !space;
       if (toolDrag) {
         stroke = toCell(ev);
@@ -239,6 +279,13 @@ export function MapView(props: Props) {
       setCursor();
     };
     const move = (ev: PointerEvent) => {
+      if (resizeDrag.current) {
+        const { width: w, height: h } = latest.current.map.ds1;
+        const [fx, fy] = worldToCell(...toWorld(ev));
+        resizeDrag.current = { side: resizeDrag.current.side, delta: dragDelta(resizeDrag.current.side, fx, fy, w, h) };
+        dirty.current = true;
+        return;
+      }
       if (pan) {
         const cam = camera.current;
         cam.x -= ((ev.clientX - pan.x) * dpr()) / cam.zoom;
@@ -260,6 +307,14 @@ export function MapView(props: Props) {
       }
     };
     const up = (ev: PointerEvent) => {
+      if (resizeDrag.current) {
+        const { delta } = resizeDrag.current;
+        resizeDrag.current = null;
+        dirty.current = true;
+        if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
+        if (delta.left || delta.top || delta.right || delta.bottom) latest.current.onResize(delta);
+        return;
+      }
       if (stroke) latest.current.onStroke('end', [], toWorld(ev));
       stroke = null;
       pan = null;
@@ -342,7 +397,7 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
   ctx.closePath();
 }
 
-type OverlayState = Props & { walk: Uint8Array | null };
+type OverlayState = Props & { walk: Uint8Array | null; resizeDrag: { current: { side: Side; delta: ResizeDelta } | null } };
 
 function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   const ctx = canvas.getContext('2d')!;
@@ -455,6 +510,48 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.strokeStyle = stroke;
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  if (s.marks?.length) {
+    ctx.lineWidth = 3 * px;
+    ctx.strokeStyle = 'rgba(255, 120, 60, 0.95)';
+    ctx.fillStyle = 'rgba(255, 120, 60, 0.18)';
+    for (const m of s.marks) {
+      ctx.beginPath();
+      diamond(ctx, m.x, m.y);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  if (s.resizeMode) {
+    const { width: w, height: h } = ds1;
+    const drag = s.resizeDrag.current;
+    if (drag) {
+      const d = drag.delta;
+      ctx.beginPath();
+      diamond(ctx, -d.left, -d.top, w + d.left + d.right, h + d.top + d.bottom);
+      ctx.setLineDash([8 * px, 5 * px]);
+      ctx.lineWidth = 2 * px;
+      ctx.strokeStyle = 'rgba(130, 200, 255, 0.95)';
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const [lx, ly] = cellToWorld(...sideAnchor(drag.side, w, h));
+      ctx.font = `600 ${13 * px}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(200, 230, 255, 1)';
+      ctx.fillText(`${w + d.left + d.right} × ${h + d.top + d.bottom}`, lx + 14 * px, ly - 10 * px);
+    }
+    for (const side of SIDES) {
+      const [ax, ay] = cellToWorld(...sideAnchor(side, w, h));
+      const r = 7 * px;
+      ctx.fillStyle = drag?.side === side ? 'rgba(130, 200, 255, 1)' : 'rgba(212, 168, 79, 1)';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.lineWidth = 1.5 * px;
+      ctx.beginPath();
+      ctx.rect(ax - r, ay - r, 2 * r, 2 * r);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
 
   if (hover && tool !== 'object') {

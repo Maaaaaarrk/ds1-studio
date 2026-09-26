@@ -74,6 +74,23 @@ Like the game: the DS1's row in `LvlPrest.txt` gives a `LevelId` and `Dt1Mask`; 
 (`LevelId` 0) and presets not in LvlPrest at all get the level type whose files best match the DS1's embedded
 file list; you can override the level type per map in the **Map** panel.
 
+## Ribbon
+
+| Tab | What's there |
+|---|---|
+| **Home** | Save / Save as / Export, clipboard, undo/redo, tools, active layer, view toggles, Compatibility check |
+| **Map** | New map, **Resize** (drag the handles on the map edges) or Resize…, palette, **Tile libraries** (add/remove DT1s), **Presets** (panel, save selection, suggest), **Export / Import package** |
+| **Data** | **Data tables** (edit any .txt table in a spreadsheet), shortcuts to LvlPrest/LvlTypes/Levels/…, **Add to game** (LvlPrest/Levels/LvlTypes rows), **Cube recipe** (Misc.txt item + CubeMain.txt recipe), Compatibility |
+
+- **Presets** are saved as JSON in the mod (`data/ds1studio/presets/`), so they travel with it. *Suggest* scans every map that shares
+  this map's tile libraries and proposes recurring structures (buildings, wall runs, tree groups…), ranked by how often they occur.
+- **Compatibility check**: missing tiles/DT1s, LvlPrest/Levels/LvlTypes wiring, DT1s used but not loaded by the level type (Dt1Mask),
+  entry/warp markers, NPCs on unwalkable ground, stacked objects, compiled .bin reminders.
+- **Map packages** (.zip): the DS1, its DT1s, custom object sprites and the map's LvlPrest/Levels/LvlTypes rows, plus a manifest.
+  Import shows exactly which files are new/replaced and merges table rows by key.
+- What the app may write (mod folder only, originals kept as `.bak`): `.ds1/.dt1/.cof/.dcc/.dc6` under `data/global/`, `.txt` under
+  `data/global/excel/`, and presets under `data/ds1studio/`.
+
 ## Roadmap
 
 - [x] Viewer: MPQ + loose files, all DS1 versions, walls/floors/shadows/roofs/lower walls, objects, NPC paths, inspector
@@ -84,3 +101,4 @@ file list; you can override the level type per map in the **Map** panel.
 - [x] Substitution groups and tag layer editing; resize map; new map; save as
 - [x] Object sprites (COF/DCC/DC6), depth-sorted with walls
 - [x] Tauri desktop shell
+- [x] Ribbon UI, DT1 manager, presets (+ suggestions), table editor, add-to-game and cube-recipe wizards, compatibility check, map packages, animated object preview

@@ -1,21 +1,62 @@
+import {
+  Box,
+  ClipboardPaste,
+  Copy,
+  Download,
+  Eraser,
+  Expand,
+  FilePlus2,
+  FolderCog,
+  Footprints,
+  Grid3x3,
+  Layers,
+  Library,
+  Maximize,
+  MousePointer2,
+  PackageOpen,
+  PackagePlus,
+  Paintbrush,
+  Pipette,
+  Redo2,
+  Save,
+  Scissors,
+  ShieldCheck,
+  Sparkles,
+  Stamp,
+  Table2,
+  Trash2,
+  Undo2,
+  FlaskConical,
+  FileOutput,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
-import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
+import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
+import { checkMap, type CheckResult } from '../game/compat';
+import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
+import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, hitTest, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
-import { devServerSaveTarget, directorySaveTarget, downloadFile, type SaveTarget } from '../vfs/save';
-import { LayeredFs, type FileSource } from '../vfs/vfs';
+import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, type SaveTarget } from '../vfs/save';
+import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
+import { DataTables, type TableTarget } from './DataTables';
+import { Dt1Manager } from './Dt1Manager';
+import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
+import { ObjectPreview } from './ObjectPreview';
+import { PresetsPanel } from './PresetsPanel';
+import { Ribbon, type RibbonTab } from './Ribbon';
+import { CompatDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
 import type { Sprite } from '../game/sprites';
 import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
 import { DesktopSetup } from './DesktopSetup';
@@ -85,9 +126,18 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | null>(null);
+  const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
+  const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
+  const [resizeMode, setResizeMode] = useState(false);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [suggested, setSuggested] = useState<Preset[] | null>(null);
+  const [suggesting, setSuggesting] = useState<SuggestProgress | null>(null);
+  const [checkResults, setCheckResults] = useState<CheckResult[] | null>(null);
+  const [marks, setMarks] = useState<{ x: number; y: number }[] | undefined>(undefined);
+  const [exportState, setExportState] = useState<{ building: boolean; result: { files: { path: string; size: number; from: string }[]; missing: string[] } | null }>({ building: false, result: null });
+  const [importState, setImportState] = useState<{ pkg: MapPackage; plan: ImportPlan } | null>(null);
   const [sprites, setSprites] = useState<Map<string, Sprite>>(() => new Map());
-  const [menuOpen, setMenuOpen] = useState(false);
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
   const [desktopCfg, setDesktopCfg] = useState<DesktopConfig>({ modDirs: [], modMpqs: false });
   /** Desktop app: the folder dialog is open over a loaded workspace. */
@@ -201,6 +251,8 @@ export function App() {
         setPasting(false);
         setSelectedObject(null);
         setPlacing(null);
+        setSuggested(null);
+        setMarks(undefined);
         setTool((t) => (t === 'paint' ? 'select' : t));
       } catch (e) {
         notify(`${path}: ${(e as Error).message}`, true);
@@ -350,7 +402,19 @@ export function App() {
       if (pasting) {
         if (phase === 'start' && cells[0] && clipboard) {
           const [x, y] = cells[0];
-          if (doc.apply(pasteEdits(doc, clipboard, x, y))) bump();
+          const edits = pasteEdits(doc, clipboard, x, y);
+          const objects = pasteObjects(doc, clipboard, x, y);
+          if (objects.length) {
+            // Cells and objects together, as one undo step.
+            doc.mutate((d) => {
+              for (const e of edits) {
+                const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
+                (layers[e.layer.index] as typeof e.cell[])[e.y * d.width + e.x] = e.cell;
+              }
+              d.objects = [...d.objects, ...objects];
+            });
+            bump();
+          } else if (doc.apply(edits)) bump();
           setSelection(clampRect({ x0: x, y0: y, x1: x + clipboard.width - 1, y1: y + clipboard.height - 1 }, doc.ds1.width, doc.ds1.height));
           setPasting(false);
         }
@@ -519,6 +583,169 @@ export function App() {
     [doc],
   );
 
+  /** Writes files into the mod (via the save target) and makes the app see them right away. */
+  const writeFiles = useCallback(
+    async (files: { path: string; bytes: Uint8Array }[]) => {
+      if (!gd || data.status !== 'ready' || !data.saveTarget) throw new Error('No writable mod folder is configured.');
+      for (const f of files) {
+        await data.saveTarget.save(f.path, f.bytes);
+        gd.fs.remember(f.path, f.bytes, data.saveTarget.label);
+      }
+    },
+    [gd, data],
+  );
+
+  /** After table edits: reload the game tables and re-resolve the open map (keeping its edits). */
+  const reloadTables = useCallback(async () => {
+    if (!gd || data.status !== 'ready') return;
+    const next = await GameData.load(gd.fs);
+    const files = gd.fs.list((p) => p.endsWith('.ds1') && p.startsWith('data/global/tiles/'));
+    setData({ ...data, gd: next, files });
+    if (map) setMap(await openMap(next, map.path, undefined, map.ds1));
+  }, [gd, data, map]);
+
+  const applyTableWrites = useCallback(
+    async (writes: TableWrite[]) => {
+      try {
+        await writeFiles(writes);
+        await reloadTables();
+        setDialog(null);
+        notify(`Updated ${writes.map((w) => w.table).join(', ')}`);
+      } catch (e) {
+        notify((e as Error).message, true);
+      }
+    },
+    [writeFiles, reloadTables, notify],
+  );
+
+  /** DT1s the placed tiles come from, with counts (for the DT1 manager and checks). */
+  const dt1Usage = useMemo(() => {
+    const usage = new Map<string, number>();
+    for (const it of scene?.items ?? []) {
+      const src = map?.lib.sourceOf(it.tile);
+      if (src) usage.set(normalizePath(src.path), (usage.get(normalizePath(src.path)) ?? 0) + 1);
+    }
+    return usage;
+  }, [scene, map]);
+
+  const applyDt1s = useCallback(
+    async (paths: string[]) => {
+      if (!gd || !map || !doc) return;
+      // The DS1's embedded list mirrors the libraries (WinDS1 keeps its own DS1EDIT_* notes in there too).
+      mutate((d) => {
+        const notes = d.files.filter((f) => !/data[\\/]/i.test(f));
+        d.files = [...paths.map(embeddedFileName), ...notes];
+      });
+      setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths }, map.ds1));
+      setDialog(null);
+      notify(`Tile libraries: ${paths.length}`);
+    },
+    [gd, map, doc, mutate, notify],
+  );
+
+  // Presets: saved ones come from the mod folder.
+  useEffect(() => {
+    if (gd) void loadPresets(gd).then(setPresets);
+  }, [gd]);
+  const savePreset = useCallback(
+    async (p: Preset) => {
+      if (!gd) return;
+      try {
+        const stored = { ...p, id: Math.random().toString(36).slice(2, 10) };
+        await writeFiles([{ path: presetPath(stored), bytes: serializePreset(stored) }]);
+        setPresets(await loadPresets(gd));
+        notify(`Saved preset "${p.name}"`);
+      } catch (e) {
+        notify((e as Error).message, true);
+      }
+    },
+    [gd, writeFiles, notify],
+  );
+  const saveSelectionPreset = useCallback(async () => {
+    if (!doc || !map || !selection) return;
+    const name = window.prompt('Preset name', `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${rectSize(selection).join('×')}`);
+    if (!name) return;
+    const category = window.prompt('Category', 'My presets') || 'My presets';
+    await savePreset(presetFromSelection(doc, map.lib, selection, name, category));
+  }, [doc, map, selection, savePreset]);
+  const placePreset = useCallback(
+    (p: Preset) => {
+      setClipboard(presetToClipboard(p));
+      setPasting(true);
+      notify(`Placing "${p.name}" · click the map · Esc to cancel`);
+    },
+    [notify],
+  );
+  const suggest = useCallback(async () => {
+    if (!gd || !map) return;
+    setSuggesting({ phase: 'scan', done: 0, total: 1 });
+    try {
+      setSuggested(await suggestPresets(gd, { path: map.path, lib: map.lib, dt1Paths: map.lib.loaded.filter((l) => l.found).map((l) => l.path) }, setSuggesting));
+    } finally {
+      setSuggesting(null);
+    }
+  }, [gd, map]);
+
+  const runCheck = useCallback(async () => {
+    if (!gd || !map || !scene) return;
+    setCheckResults(null);
+    setDialog('check');
+    setCheckResults(await checkMap(gd, map, scene));
+  }, [gd, map, scene]);
+
+  const exportPackage = useCallback(
+    async (notes: string, includeBaseGame: boolean) => {
+      if (!gd || !map || !doc) return;
+      setExportState({ building: true, result: null });
+      try {
+        const objectSpecs = [...new Set(doc.ds1.objects.map((o) => `${o.type}:${o.id}`))]
+          .map((k) => {
+            const [t, id] = k.split(':').map(Number);
+            return gd.objectSpec(doc.ds1.act, t, id);
+          })
+          .filter((x): x is NonNullable<typeof x> => !!x);
+        const built = await buildMapPackage(
+          gd.fs,
+          { path: doc.path, ds1: doc.ds1, dt1Paths: map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path) },
+          { ds1Bytes: writeDs1(doc.ds1), objectSpecs, txtRows: await collectMapTxtRows(gd.fs, doc.path), notes, includeBaseGameDt1s: includeBaseGame },
+        );
+        setExportState({ building: false, result: { files: built.manifest.files, missing: built.missing } });
+        const where = await exportBytes(`${doc.path.split('/').pop()!.replace(/\.ds1$/i, '')}.zip`, built.zip);
+        if (where) notify(`Exported ${where}`);
+      } catch (e) {
+        setExportState({ building: false, result: null });
+        notify(`Export failed: ${(e as Error).message}`, true);
+      }
+    },
+    [gd, map, doc, notify],
+  );
+
+  const startImport = useCallback(async () => {
+    if (!gd) return;
+    try {
+      const bytes = await importBytes('zip');
+      if (!bytes) return;
+      const pkg = readMapPackage(bytes);
+      setImportState({ pkg, plan: await planImport(pkg, gd.fs) });
+      setDialog('import');
+    } catch (e) {
+      notify(`Import failed: ${(e as Error).message}`, true);
+    }
+  }, [gd, notify]);
+  const finishImport = useCallback(async () => {
+    if (!importState) return;
+    try {
+      const files = importState.plan.writes.filter((w) => w.action !== 'identical');
+      await writeFiles([...files, ...importState.plan.txtWrites]);
+      await reloadTables();
+      setDialog(null);
+      notify(`Imported ${files.length} files${importState.plan.txtWrites.length ? ` and ${importState.plan.txtWrites.length} tables` : ''}`);
+      setImportState(null);
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
+  }, [importState, writeFiles, reloadTables, notify]);
+
   const undo = useCallback(() => {
     if (doc?.undo()) bump();
   }, [doc]);
@@ -548,9 +775,11 @@ export function App() {
     }
   }, [doc, gd, data, notify]);
 
-  const exportFile = useCallback(() => {
-    if (doc) downloadFile(doc.path.split('/').pop()!, writeDs1(doc.ds1));
-  }, [doc]);
+  const exportFile = useCallback(async () => {
+    if (!doc) return;
+    const where = await exportBytes(doc.path.split('/').pop()!, writeDs1(doc.ds1));
+    if (where) notify(`Exported ${where}`);
+  }, [doc, notify]);
 
   // Keyboard shortcuts.
   const handlers = useRef({ undo, redo, save, copy, startPaste, clearSelection, deleteSelectedObject, doc, tool });
@@ -585,6 +814,8 @@ export function App() {
       } else if (k === 'escape') {
         setPasting(false);
         setPlacing(null);
+        setResizeMode(false);
+        setMarks(undefined);
         if (handlers.current.tool === 'object') setSelectedObject(null);
         else setSelection(null);
       } else if (k === 'delete' || k === 'backspace') {
@@ -632,15 +863,162 @@ export function App() {
 
   const layers = doc?.layers() ?? [];
   const title = map?.path.split('/').pop();
+  const noMap = !doc || !map;
+  const canWrite = !!data.saveTarget;
+  const openTable = (table: string, key?: string) => {
+    setTableTarget({ table, key });
+    setDialog('tables');
+  };
+  const TOOL_ICONS = { select: <MousePointer2 />, paint: <Paintbrush />, erase: <Eraser />, pick: <Pipette />, object: <Box /> };
+  const ribbonTabs: RibbonTab[] = [
+    {
+      id: 'home',
+      label: 'Home',
+      groups: [
+        {
+          label: 'File',
+          items: [
+            { label: 'Save', icon: <Save />, onClick: () => void save(), disabled: noMap, active: !!doc?.dirty, shortcut: 'Ctrl+S', title: data.saveTarget ? `Save into ${data.saveTarget.label}` : 'Save (downloads: no mod folder)' },
+            { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
+            { label: 'Export .ds1', icon: <FileOutput />, onClick: () => void exportFile(), disabled: noMap, size: 'sm' },
+            ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const }] : []),
+          ],
+        },
+        {
+          label: 'Edit',
+          items: [
+            { label: 'Paste', icon: <ClipboardPaste />, onClick: startPaste, disabled: noMap || !clipboard, shortcut: 'Ctrl+V' },
+            { label: 'Cut', icon: <Scissors />, onClick: () => copy(true), disabled: !selection, size: 'sm', shortcut: 'Ctrl+X' },
+            { label: 'Copy', icon: <Copy />, onClick: () => copy(false), disabled: !selection, size: 'sm', shortcut: 'Ctrl+C' },
+            { label: 'Delete', icon: <Trash2 />, onClick: () => clearSelection(false), disabled: !selection, size: 'sm', shortcut: 'Del' },
+            { label: 'Undo', icon: <Undo2 />, onClick: undo, disabled: !doc?.canUndo, size: 'sm', shortcut: 'Ctrl+Z' },
+            { label: 'Redo', icon: <Redo2 />, onClick: redo, disabled: !doc?.canRedo, size: 'sm', shortcut: 'Ctrl+Y' },
+          ],
+        },
+        {
+          label: 'Tools',
+          items: TOOLS.map((t) => ({ label: t.label, icon: TOOL_ICONS[t.id], onClick: () => setTool(t.id), active: tool === t.id, disabled: noMap, title: t.hint, shortcut: t.key.toUpperCase() })),
+        },
+        {
+          label: 'Layer',
+          items: [
+            {
+              custom: (
+                <>
+                  <span className="muted small">Active layer</span>
+                  <select value={layerKey(activeLayer)} disabled={noMap} onChange={(e) => setActiveLayer(layers.find((l) => layerKey(l) === e.target.value)!)}>
+                    {layers.map((l) => (
+                      <option key={layerKey(l)} value={layerKey(l)}>
+                        {layerLabel(l)}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ),
+            },
+          ],
+        },
+        {
+          label: 'View',
+          items: [
+            { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: 'F' },
+            { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: 'G' },
+            { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: 'W' },
+            { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: 'N' },
+          ],
+        },
+        { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' }] },
+      ],
+    },
+    {
+      id: 'map',
+      label: 'Map',
+      groups: [
+        {
+          label: 'Map',
+          items: [
+            { label: 'New map', icon: <FilePlus2 />, onClick: () => setDialog('new') },
+            { label: 'Resize', icon: <Expand />, onClick: () => setResizeMode((m) => !m), active: resizeMode, disabled: noMap, title: 'Drag the handles on the map edges to add or remove cells' },
+            { label: 'Resize…', icon: <Expand />, onClick: () => setDialog('resize'), disabled: noMap, size: 'sm', title: 'Resize by numbers' },
+          ],
+        },
+        {
+          label: 'Palette',
+          items: [
+            {
+              custom: (
+                <>
+                  <span className="muted small">Colours</span>
+                  <select value={map?.paletteAct ?? 0} disabled={noMap} onChange={(e) => map && void withPalette(data.gd, map, Number(e.target.value)).then(setMap)}>
+                    {PALETTE_NAMES.map((n, i) => (
+                      <option key={i} value={i}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ),
+            },
+          ],
+        },
+        { label: 'Tiles', items: [{ label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' }] },
+        {
+          label: 'Presets',
+          items: [
+            { label: 'Presets', icon: <Stamp />, onClick: () => setSidePanel((p) => (p === 'presets' ? 'tiles' : 'presets')), active: sidePanel === 'presets', disabled: noMap },
+            { label: 'Save selection', icon: <Save />, onClick: () => void saveSelectionPreset(), disabled: !selection || !canWrite, size: 'sm' },
+            { label: 'Suggest', icon: <Sparkles />, onClick: () => { setSidePanel('presets'); void suggest(); }, disabled: noMap || !!suggesting, size: 'sm' },
+          ],
+        },
+        {
+          label: 'Share',
+          items: [
+            { label: 'Export package', icon: <PackagePlus />, onClick: () => { setExportState({ building: false, result: null }); setDialog('export'); }, disabled: noMap, title: 'Zip the map with everything it needs' },
+            { label: 'Import package', icon: <PackageOpen />, onClick: () => void startImport(), disabled: !canWrite, title: canWrite ? 'Import a map package into your mod' : 'No writable mod folder' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'data',
+      label: 'Data',
+      groups: [
+        {
+          label: 'Tables',
+          items: [
+            { label: 'Data tables', icon: <Table2 />, onClick: () => openTable('LvlPrest'), title: 'Edit the game\u2019s .txt tables' },
+            { label: 'LvlPrest', icon: <Table2 />, onClick: () => openTable('LvlPrest', map?.resolution.preset?.name), size: 'sm' },
+            { label: 'LvlTypes', icon: <Table2 />, onClick: () => openTable('LvlTypes', map?.resolution.lvlType?.name), size: 'sm' },
+            { label: 'Levels', icon: <Table2 />, onClick: () => openTable('Levels'), size: 'sm' },
+            { label: 'Objects', icon: <Table2 />, onClick: () => openTable('Objects'), size: 'sm' },
+            { label: 'MonPreset', icon: <Table2 />, onClick: () => openTable('MonPreset'), size: 'sm' },
+            { label: 'CubeMain', icon: <Table2 />, onClick: () => openTable('CubeMain'), size: 'sm' },
+          ],
+        },
+        {
+          label: 'Game',
+          items: [
+            { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
+            { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
+          ],
+        },
+        { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap }] },
+        { label: 'Share', items: [{ label: 'Export .ds1', icon: <Download />, onClick: () => void exportFile(), disabled: noMap }] },
+      ],
+    },
+  ];
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">◆</span> DS1 Studio
-        </div>
-        <div className="topbar-file">
-          {map ? (
+      <Ribbon
+        tabs={ribbonTabs}
+        brand={
+          <>
+            <span className="brand-mark">◆</span> DS1 Studio
+          </>
+        }
+        right={
+          map ? (
             <>
               <span className="topbar-title">
                 {title}
@@ -650,73 +1028,9 @@ export function App() {
             </>
           ) : (
             <span className="muted">No map open</span>
-          )}
-        </div>
-        <div className="menu">
-          <button className="btn ghost" onClick={() => setMenuOpen((o) => !o)} onBlur={() => setTimeout(() => setMenuOpen(false), 150)}>
-            Map ▾
-          </button>
-          {menuOpen && (
-            <div className="menu-list">
-              <button onMouseDown={() => setDialog('new')}>New map…</button>
-              <button disabled={!doc} onMouseDown={() => setDialog('saveAs')}>
-                Save as…
-              </button>
-              <button disabled={!doc} onMouseDown={() => setDialog('resize')}>
-                Resize…
-              </button>
-              <button disabled={!doc} onMouseDown={exportFile}>
-                Export .ds1 <span className="kbd">download</span>
-              </button>
-              {isTauri && <button onMouseDown={() => confirmDiscard() && setChangingFolders(true)}>Folders…</button>}
-            </div>
-          )}
-        </div>
-        {doc && (
-          <div className="toolbar">
-            <div className="segmented">
-              {TOOLS.map((t) => (
-                <button key={t.id} className={tool === t.id ? 'active' : ''} onClick={() => setTool(t.id)} title={`${t.hint} (${t.key.toUpperCase()})`}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <select
-              className="layer-select"
-              value={layerKey(activeLayer)}
-              onChange={(e) => setActiveLayer(layers.find((l) => layerKey(l) === e.target.value)!)}
-              title="Active layer"
-            >
-              {layers.map((l) => (
-                <option key={layerKey(l)} value={layerKey(l)}>
-                  {layerLabel(l)}
-                </option>
-              ))}
-            </select>
-            <div className="segmented">
-              <button disabled={!doc.canUndo} onClick={undo} title="Undo (Ctrl+Z)">
-                Undo
-              </button>
-              <button disabled={!doc.canRedo} onClick={redo} title="Redo (Ctrl+Y)">
-                Redo
-              </button>
-            </div>
-            <button className="btn ghost" onClick={() => setFitSignal((n) => n + 1)} title="Fit map (F)">
-              Fit
-            </button>
-            <button className="btn ghost" onClick={exportFile} title="Download the current map as a .ds1 file">
-              Export
-            </button>
-            <button
-              className={`btn${doc.dirty ? ' primary' : ''}`}
-              onClick={save}
-              title={data.saveTarget ? `Save into ${data.saveTarget.label} (Ctrl+S)` : 'No writable mod folder: saving downloads the file (Ctrl+S)'}
-            >
-              Save
-            </button>
-          </div>
-        )}
-      </header>
+          )
+        }
+      />
 
       <aside className="sidebar left">
         <FileBrowser files={data.files} current={map?.path ?? null} loading={loadingPath} onOpen={open} />
@@ -736,6 +1050,12 @@ export function App() {
             objectLabel={objectLabel}
             selectedObject={selectedObject}
             sprites={sprites}
+            marks={marks}
+            resizeMode={resizeMode}
+            onResize={(d) => {
+              resize(d);
+              notify(`Resized to ${doc!.ds1.width}×${doc!.ds1.height}`);
+            }}
             onHover={setHover}
             onZoom={setZoom}
             onStroke={onStroke}
@@ -761,6 +1081,21 @@ export function App() {
         {map && scene && doc && (
           <>
             {tool === 'object' && (
+              <section className="panel object-preview-panel">
+                <div className="panel-header static">
+                  <span>Preview</span>
+                </div>
+                <div className="panel-body">
+                  <ObjectPreview
+                    fs={data.gd.fs}
+                    palette={map.palette}
+                    spec={selectedObject !== null && map.ds1.objects[selectedObject] ? data.gd.objectSpec(map.ds1.act, map.ds1.objects[selectedObject].type, map.ds1.objects[selectedObject].id) : null}
+                    name={selectedObject !== null && map.ds1.objects[selectedObject] ? nameOf(map.ds1.objects[selectedObject].type, map.ds1.objects[selectedObject].id) : ''}
+                  />
+                </div>
+              </section>
+            )}
+            {tool === 'object' && (
               <ObjectPanel
                 objects={map.ds1.objects}
                 selected={selectedObject}
@@ -772,7 +1107,34 @@ export function App() {
                 onStartPlacing={setPlacing}
               />
             )}
-            <section className="panel" hidden={tool === 'object'}>
+            {tool !== 'object' && (
+              <div className="side-tabs">
+                <button className={sidePanel === 'tiles' ? 'active' : ''} onClick={() => setSidePanel('tiles')}>
+                  Tiles
+                </button>
+                <button className={sidePanel === 'presets' ? 'active' : ''} onClick={() => setSidePanel('presets')}>
+                  Presets
+                </button>
+              </div>
+            )}
+            {tool !== 'object' && sidePanel === 'presets' && (
+              <PresetsPanel
+                saved={presets}
+                suggested={suggested}
+                suggesting={suggesting}
+                lib={map.lib}
+                palette={map.palette}
+                dt1Paths={map.lib.loaded.filter((l) => l.found).map((l) => l.path)}
+                hasSelection={!!selection}
+                canSave={canWrite}
+                onPlace={placePreset}
+                onSaveSelection={() => void saveSelectionPreset()}
+                onSavePreset={(p) => void savePreset(p)}
+                onSuggest={() => void suggest()}
+                onAddDt1s={(paths) => void applyDt1s([...map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path), ...paths])}
+              />
+            )}
+            <section className="panel" hidden={tool === 'object' || sidePanel !== 'tiles'}>
               <div className="panel-header static">
                 <span>Tiles · {layerLabel(activeLayer)}</span>
                 {brush && (
@@ -827,6 +1189,55 @@ export function App() {
       {dialog === 'new' && <NewMapDialog gd={data.gd} onCreate={createMap} onClose={() => setDialog(null)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
+      {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
+      {dialog === 'tables' && (
+        <DataTables
+          fs={data.gd.fs}
+          initial={tableTarget}
+          canSave={canWrite}
+          onSave={async (path, bytes) => {
+            await writeFiles([{ path, bytes }]);
+            await reloadTables();
+            return `Saved ${path.split('/').pop()} into ${data.saveTarget?.label}`;
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'register' && doc && (
+        <RegisterMapDialog
+          fs={data.gd.fs}
+          mapPath={doc.path}
+          width={doc.ds1.width}
+          height={doc.ds1.height}
+          usedDt1s={[...dt1Usage.keys()].filter((p) => !p.startsWith('winds1/'))}
+          onApply={applyTableWrites}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'cube' && doc && <CubeRecipeDialog fs={data.gd.fs} mapName={doc.path.split('/').pop()!.replace(/\.ds1$/i, '')} onApply={applyTableWrites} onClose={() => setDialog(null)} />}
+      {dialog === 'check' && (
+        <CompatDialog
+          results={checkResults}
+          onRerun={() => void runCheck()}
+          onShowCells={(cells) => {
+            setMarks(cells);
+            setDialog(null);
+            notify(`${cells.length} cells marked · Esc to clear`);
+          }}
+          onFix={(fix) => {
+            if (fix.kind === 'open-table') openTable(fix.table.replace(/\.txt$/i, ''), fix.key);
+            else void applyDt1s([...(map?.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path) ?? []), ...fix.paths]);
+          }}
+          onRegister={() => setDialog('register')}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'export' && doc && (
+        <ExportPackageDialog mapPath={doc.path} building={exportState.building} result={exportState.result} onBuild={(n, b) => void exportPackage(n, b)} onClose={() => setDialog(null)} />
+      )}
+      {dialog === 'import' && importState && (
+        <ImportPackageDialog pkg={importState.pkg} plan={importState.plan} canWrite={canWrite} onImport={finishImport} onClose={() => setDialog(null)} />
+      )}
 
       <footer className="statusbar">
         <span>{data.gd.fs.baseSources.map((s) => s.label.split(/[\\/]/).slice(-2).join('/')).join('  ›  ')}</span>

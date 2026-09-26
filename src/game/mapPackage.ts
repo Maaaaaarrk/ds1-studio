@@ -1,0 +1,443 @@
+import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
+import type { Ds1 } from '../formats/ds1';
+import { COMPONENTS, parseCof } from '../formats/cof';
+import { parseTxt } from '../formats/txt';
+import { CLASSIC_MPQS, normalizePath, type LayeredFs } from '../vfs/vfs';
+import { cofPath, layerPath, type SpriteSpec } from './sprites';
+
+/**
+ * Map packages: one zip holding a DS1 plus everything it needs (DT1s, modded object sprites, txt rows), so a map can
+ * be handed to someone else and imported into their DS1 Studio. Everything here is pure or read-only; the caller
+ * performs the actual writes.
+ */
+
+export const PACKAGE_FORMAT = 'ds1studio-package';
+export const PACKAGE_VERSION = 1;
+export const MANIFEST_NAME = 'ds1studio-package.json';
+
+/** What the packager needs from a sprite spec (a `SpriteSpec` fits). */
+export type SpriteSpecLike = Pick<SpriteSpec, 'base' | 'token' | 'mode' | 'cls' | 'parts'>;
+
+export type FileOrigin = 'mod' | 'base-game';
+
+export interface PackageFile {
+  /** Game path, '/'-separated, as stored in the zip. */
+  path: string;
+  size: number;
+  /** Hex SHA-1 of the bytes (omitted when no WebCrypto is available). */
+  sha1?: string;
+  /** 'base-game' files came from the classic MPQs; every player has them, so importing them is optional. */
+  from: FileOrigin;
+  /** True when the file is listed for reference only and was left out of the zip. */
+  omitted?: boolean;
+}
+
+/** A txt row the map needs, with its column header so it can be merged by column name. */
+export interface TxtRowEntry {
+  /** Table name, e.g. `LvlPrest` or `LvlPrest.txt` (a full game path is accepted too). */
+  table: string;
+  /** Name of the column identifying the row, e.g. `Name` (LvlPrest) or `Id` (Levels, LvlTypes). */
+  key: string;
+  columns: string[];
+  row: string[];
+}
+
+export interface PackageManifest {
+  format: typeof PACKAGE_FORMAT;
+  version: typeof PACKAGE_VERSION;
+  /** ISO timestamp. */
+  created: string;
+  /** Game path of the DS1. */
+  map: string;
+  files: PackageFile[];
+  txtRows: TxtRowEntry[];
+  notes?: string;
+}
+
+export interface MapPackage {
+  manifest: PackageManifest;
+  files: { path: string; bytes: Uint8Array }[];
+}
+
+export interface BuildOptions {
+  /** The DS1 as it should be shipped (usually `writeDs1(map.ds1)`, or the file's bytes). */
+  ds1Bytes: Uint8Array;
+  objectSpecs?: SpriteSpecLike[];
+  txtRows?: TxtRowEntry[];
+  notes?: string;
+  /** Put DT1s from the base-game MPQs into the zip too (default true: they may be modded on the maker's side). */
+  includeBaseGameDt1s?: boolean;
+  /** Override for the manifest's `created` (tests). */
+  created?: Date;
+}
+
+export interface BuildResult {
+  zip: Uint8Array;
+  manifest: PackageManifest;
+  /** Referenced files that could not be found. */
+  missing: string[];
+}
+
+/** Game path as stored in a package: forward slashes, no leading slash, original case kept. */
+export function packagePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+/** True for paths that are absolute, drive-qualified, empty, or step outside the package root. */
+export function isUnsafePath(p: string): boolean {
+  if (!p || p.includes('\0')) return true;
+  const s = p.replace(/\\/g, '/');
+  if (s.startsWith('/') || /^[a-zA-Z]:/.test(s)) return true;
+  return s.split('/').some((seg) => seg === '..' || seg === '.');
+}
+
+/** Whether a source label (from `LayeredFs.locate`) is one of the classic base-game archives. */
+export function isBaseGameLabel(label: string): boolean {
+  const name = label.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
+  return CLASSIC_MPQS.includes(name);
+}
+
+async function sha1Hex(bytes: Uint8Array): Promise<string | undefined> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return undefined;
+  const digest = new Uint8Array(await subtle.digest('SHA-1', bytes.slice()));
+  return [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Sprite files an object needs, in the same layout `sprites.ts` loads them from: the COF and, per COF layer with an
+ * armour type in the spec, its DCC (else DC6). Without a readable COF, every part is tried with the spec's class.
+ */
+async function spriteFiles(fs: LayeredFs, spec: SpriteSpecLike): Promise<{ found: string[]; missing: string[] }> {
+  const found: string[] = [];
+  const missing: string[] = [];
+  const cof = cofPath(spec as SpriteSpec);
+  const cofBytes = await fs.read(cof);
+  if (!cofBytes) return { found, missing: [cof] };
+  found.push(cof);
+  let layers: { code: string; weaponClass: string }[];
+  try {
+    layers = parseCof(cofBytes).layers.map((l) => ({ code: COMPONENTS[l.component] ?? '', weaponClass: l.weaponClass }));
+  } catch {
+    layers = Object.keys(spec.parts).map((code) => ({ code, weaponClass: spec.cls }));
+  }
+  for (const { code, weaponClass } of layers) {
+    const armor = code && spec.parts[code];
+    if (!armor) continue;
+    const stem = layerPath(spec as SpriteSpec, code, armor, weaponClass || spec.cls);
+    const hit = [`${stem}.dcc`, `${stem}.dc6`].find((p) => fs.locate(p));
+    if (hit) found.push(hit);
+    else missing.push(`${stem}.dcc`);
+  }
+  return { found, missing };
+}
+
+/**
+ * Zips a map with everything it needs. DT1s are included wherever they live (base-game ones marked as such);
+ * object sprite files only when they come from a loose/mod source, since every player has the base-game ones.
+ */
+export async function buildMapPackage(
+  fs: LayeredFs,
+  map: { path: string; ds1: Ds1; dt1Paths: string[] },
+  opts: BuildOptions,
+): Promise<BuildResult> {
+  const includeBaseDt1s = opts.includeBaseGameDt1s ?? true;
+  const entries = new Map<string, { path: string; bytes: Uint8Array; from: FileOrigin; omit?: boolean }>();
+  const missing: string[] = [];
+  const miss = (p: string) => {
+    if (!missing.some((m) => normalizePath(m) === normalizePath(p))) missing.push(p);
+  };
+  const originOf = (p: string): FileOrigin => {
+    const label = fs.locate(p);
+    return label && isBaseGameLabel(label) ? 'base-game' : 'mod';
+  };
+
+  const mapPath = packagePath(map.path);
+  if (isUnsafePath(mapPath)) throw new Error(`bad map path: ${map.path}`);
+  entries.set(normalizePath(mapPath), { path: mapPath, bytes: opts.ds1Bytes, from: 'mod' });
+
+  for (const raw of map.dt1Paths) {
+    const path = packagePath(raw);
+    const key = normalizePath(path);
+    if (entries.has(key)) continue;
+    const bytes = await fs.read(path);
+    if (!bytes) {
+      miss(path);
+      continue;
+    }
+    const from = originOf(path);
+    entries.set(key, { path, bytes, from, omit: from === 'base-game' && !includeBaseDt1s });
+  }
+
+  for (const spec of opts.objectSpecs ?? []) {
+    const { found, missing: gone } = await spriteFiles(fs, spec);
+    gone.forEach(miss);
+    for (const raw of found) {
+      const path = packagePath(raw);
+      const key = normalizePath(path);
+      if (entries.has(key) || originOf(path) === 'base-game') continue;
+      const bytes = await fs.read(path);
+      if (bytes) entries.set(key, { path, bytes, from: 'mod' });
+      else miss(path);
+    }
+  }
+
+  const files: PackageFile[] = [];
+  const zipInput: Zippable = {};
+  for (const e of entries.values()) {
+    const file: PackageFile = { path: e.path, size: e.bytes.length, from: e.from };
+    const sha1 = await sha1Hex(e.bytes);
+    if (sha1) file.sha1 = sha1;
+    if (e.omit) file.omitted = true;
+    else zipInput[e.path] = e.bytes;
+    files.push(file);
+  }
+
+  const manifest: PackageManifest = {
+    format: PACKAGE_FORMAT,
+    version: PACKAGE_VERSION,
+    created: (opts.created ?? new Date()).toISOString(),
+    map: mapPath,
+    files,
+    txtRows: (opts.txtRows ?? []).map((r) => ({ table: r.table, key: r.key, columns: [...r.columns], row: [...r.row] })),
+  };
+  if (opts.notes) manifest.notes = opts.notes;
+  validateTxtRows(manifest.txtRows);
+  zipInput[MANIFEST_NAME] = strToU8(JSON.stringify(manifest, null, 2));
+  return { zip: zipSync(zipInput, { level: 6 }), manifest, missing };
+}
+
+
+function validateTxtRows(rows: unknown): asserts rows is TxtRowEntry[] {
+  if (!Array.isArray(rows)) throw new Error('manifest: txtRows must be an array');
+  for (const r of rows as Partial<TxtRowEntry>[]) {
+    const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
+    if (!r || typeof r.table !== 'string' || typeof r.key !== 'string' || !strings(r.columns) || !strings(r.row))
+      throw new Error('manifest: malformed txt row');
+    if (isUnsafePath(txtTablePath(r.table))) throw new Error(`manifest: bad table name ${r.table}`);
+    if (!r.columns.includes(r.key)) throw new Error(`manifest: ${r.table} row has no "${r.key}" column`);
+    if ([...r.columns, ...r.row].some((s) => /[\t\r\n]/.test(s))) throw new Error(`manifest: ${r.table} row contains tabs or line breaks`);
+  }
+}
+
+/** Game path of a txt table: `LvlPrest` -> `data/global/excel/LvlPrest.txt`. */
+export function txtTablePath(table: string): string {
+  const t = packagePath(table);
+  if (t.includes('/')) return t;
+  return `data/global/excel/${/\.txt$/i.test(t) ? t : `${t}.txt`}`;
+}
+
+/** Unzips and validates a package. Throws on a missing/invalid manifest or any unsafe path. */
+export function readMapPackage(zip: Uint8Array): MapPackage {
+  const entries = unzipSync(zip);
+  const files: { path: string; bytes: Uint8Array }[] = [];
+  let manifestBytes: Uint8Array | null = null;
+  const seen = new Set<string>();
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (name.endsWith('/') && !bytes.length) continue; // directory entry
+    if (isUnsafePath(name)) throw new Error(`package: unsafe path ${JSON.stringify(name)}`);
+    if (name === MANIFEST_NAME) {
+      manifestBytes = bytes;
+      continue;
+    }
+    const key = normalizePath(name);
+    if (seen.has(key)) throw new Error(`package: duplicate file ${name}`);
+    seen.add(key);
+    files.push({ path: packagePath(name), bytes });
+  }
+  if (!manifestBytes) throw new Error(`package: no ${MANIFEST_NAME}`);
+  let m: Partial<PackageManifest>;
+  try {
+    m = JSON.parse(strFromU8(manifestBytes));
+  } catch {
+    throw new Error('package: manifest is not valid JSON');
+  }
+  if (!m || typeof m !== 'object') throw new Error('package: manifest is not an object');
+  if (m.format !== PACKAGE_FORMAT) throw new Error(`package: unknown format ${JSON.stringify(m.format)}`);
+  if (m.version !== PACKAGE_VERSION) throw new Error(`package: unsupported version ${JSON.stringify(m.version)}`);
+  if (typeof m.created !== 'string' || typeof m.map !== 'string') throw new Error('package: manifest lacks created/map');
+  if (isUnsafePath(m.map) || !/\.ds1$/i.test(m.map)) throw new Error(`package: bad map path ${JSON.stringify(m.map)}`);
+  if (!Array.isArray(m.files)) throw new Error('package: manifest files must be an array');
+  const byPath = new Map(files.map((f) => [normalizePath(f.path), f]));
+  for (const f of m.files as Partial<PackageFile>[]) {
+    if (!f || typeof f.path !== 'string' || typeof f.size !== 'number' || (f.from !== 'mod' && f.from !== 'base-game'))
+      throw new Error('package: malformed file entry');
+    if (isUnsafePath(f.path)) throw new Error(`package: unsafe path ${JSON.stringify(f.path)}`);
+    if (f.omitted) continue;
+    const actual = byPath.get(normalizePath(f.path));
+    if (!actual) throw new Error(`package: ${f.path} is listed but not in the zip`);
+    if (actual.bytes.length !== f.size) throw new Error(`package: ${f.path} size mismatch`);
+  }
+  if (!byPath.has(normalizePath(m.map))) throw new Error(`package: map ${m.map} is not in the zip`);
+  validateTxtRows(m.txtRows ?? []);
+  if (m.notes !== undefined && typeof m.notes !== 'string') throw new Error('package: notes must be a string');
+  const manifest: PackageManifest = { ...(m as PackageManifest), txtRows: m.txtRows ?? [] };
+  return { manifest, files };
+}
+
+export type WriteAction = 'new' | 'overwrite' | 'identical';
+
+export interface TxtMergePlan {
+  table: string;
+  /** Game path of the table. */
+  path: string;
+  /** Key column name. */
+  key: string;
+  keyValue: string;
+  /** Whether a row with that key already exists (false also when the table itself is missing). */
+  exists: boolean;
+  action: TxtMergeAction | 'missing-table';
+}
+
+export interface ImportPlan {
+  writes: { path: string; bytes: Uint8Array; action: WriteAction }[];
+  txtMerges: TxtMergePlan[];
+  /** Resulting table contents for every table that changes (all of a table's rows applied in order). */
+  txtWrites: { path: string; bytes: Uint8Array }[];
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * Decides what importing a package would change, comparing byte-wise against the current fs. Writes nothing.
+ * (Async because `LayeredFs.read` is.)
+ */
+export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<ImportPlan> {
+  const writes: ImportPlan['writes'] = [];
+  for (const f of pkg.files) {
+    const current = await fs.read(f.path);
+    writes.push({ path: f.path, bytes: f.bytes, action: !current ? 'new' : sameBytes(current, f.bytes) ? 'identical' : 'overwrite' });
+  }
+  const txtMerges: TxtMergePlan[] = [];
+  const tables = new Map<string, { path: string; original: Uint8Array; bytes: Uint8Array }>();
+  for (const r of pkg.manifest.txtRows) {
+    const path = txtTablePath(r.table);
+    const keyValue = r.row[r.columns.indexOf(r.key)] ?? '';
+    const key = normalizePath(path);
+    let t = tables.get(key);
+    if (!t) {
+      const bytes = await fs.read(path);
+      if (bytes) tables.set(key, (t = { path, original: bytes, bytes }));
+    }
+    if (!t) {
+      txtMerges.push({ table: r.table, path, key: r.key, keyValue, exists: false, action: 'missing-table' });
+      continue;
+    }
+    const merged = mergeTxtRow(t.bytes, r.columns, r.row, r.key);
+    txtMerges.push({ table: r.table, path, key: r.key, keyValue, exists: merged.action !== 'appended', action: merged.action });
+    t.bytes = merged.bytes;
+  }
+  const txtWrites = [...tables.values()].filter((t) => !sameBytes(t.original, t.bytes)).map((t) => ({ path: t.path, bytes: t.bytes }));
+  return { writes, txtMerges, txtWrites };
+}
+
+export type TxtMergeAction = 'appended' | 'replaced' | 'unchanged';
+
+function latin1(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return s;
+}
+
+function toLatin1(s: string): Uint8Array {
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 0xff) throw new Error(`character ${JSON.stringify(s[i])} cannot be stored in a txt table`);
+    out[i] = c;
+  }
+  return out;
+}
+
+/**
+ * Merges one row into a tab-separated D2 txt table by column name. The row whose `keyColumn` matches is replaced
+ * (cells for columns the package doesn't know keep their values); otherwise the row is appended after the last
+ * non-blank line. Never adds columns: unknown ones are ignored. Every other byte, line endings included, is kept.
+ */
+export function mergeTxtRow(
+  tableBytes: Uint8Array,
+  columns: string[],
+  row: string[],
+  keyColumn: string,
+): { bytes: Uint8Array; action: TxtMergeAction } {
+  const text = latin1(tableBytes);
+  // Lines with their terminators, so untouched lines are copied verbatim.
+  const lines: { body: string; eol: string }[] = [];
+  const re = /([^\r\n]*)(\r\n|\n|\r|$)/g;
+  for (let m = re.exec(text); m && m.index < text.length; m = re.exec(text)) lines.push({ body: m[1], eol: m[2] });
+  if (!lines.length) throw new Error('txt table is empty');
+  const header = lines[0].body.split('\t');
+  const eol = lines[0].eol || '\r\n';
+
+  const keyIdx = header.indexOf(keyColumn);
+  if (keyIdx < 0) throw new Error(`table has no "${keyColumn}" column`);
+  const srcKeyIdx = columns.indexOf(keyColumn);
+  const keyValue = srcKeyIdx >= 0 ? (row[srcKeyIdx] ?? '') : '';
+  if (!keyValue.trim()) throw new Error(`row has no value for key column "${keyColumn}"`);
+  const valueOf = (col: string): string | undefined => {
+    const i = columns.indexOf(col);
+    return i < 0 ? undefined : (row[i] ?? '');
+  };
+  for (const col of header) if (/[\t\r\n]/.test(valueOf(col) ?? '')) throw new Error(`value for "${col}" contains tabs or line breaks`);
+
+  const target = lines.findIndex((l, i) => i > 0 && (l.body.split('\t')[keyIdx] ?? '').trim() === keyValue.trim());
+  if (target >= 0) {
+    const old = lines[target].body.split('\t');
+    const cells = header.map((col, i) => valueOf(col) ?? old[i] ?? '');
+    // Keep any cells beyond the header (some tables carry stray trailing tabs).
+    const merged = [...cells, ...old.slice(header.length)];
+    const same = header.every((_, i) => (old[i] ?? '') === merged[i]);
+    if (same) return { bytes: tableBytes, action: 'unchanged' };
+    lines[target] = { body: merged.join('\t'), eol: lines[target].eol };
+    return { bytes: toLatin1(lines.map((l) => l.body + l.eol).join('')), action: 'replaced' };
+  }
+
+  const line = header.map((col) => valueOf(col) ?? '').join('\t');
+  let last = lines.length - 1;
+  while (last > 0 && !lines[last].body.trim()) last--;
+  const before = lines.slice(0, last + 1);
+  const after = lines.slice(last + 1);
+  let out: string;
+  if (before[last].eol) out = before.map((l) => l.body + l.eol).join('') + line + eol;
+  else out = before.map((l) => l.body + l.eol).join('') + eol + line; // file had no final line break; keep it that way
+  out += after.map((l) => l.body + l.eol).join('');
+  // Only the appended text differs, so the original bytes form a prefix (plus any trailing blank lines after it).
+  return { bytes: toLatin1(out), action: 'appended' };
+}
+
+/**
+ * The txt rows a map needs: LvlPrest rows naming its file, their Levels rows (by LevelId), and those levels'
+ * LvlTypes rows. Rows are read from the current fs with their table headers.
+ */
+export async function collectMapTxtRows(fs: LayeredFs, mapPath: string): Promise<TxtRowEntry[]> {
+  const out: TxtRowEntry[] = [];
+  const load = async (name: string) => {
+    const bytes = await fs.read(`data/global/excel/${name}.txt`);
+    return bytes ? parseTxt(bytes) : null;
+  };
+  const [prest, levels, types] = await Promise.all([load('LvlPrest'), load('Levels'), load('LvlTypes')]);
+  if (!prest) return out;
+  const rel = normalizePath(mapPath).replace(/^data\/global\/tiles\//, '');
+  const levelIds = new Set<string>();
+  for (const r of prest.rows) {
+    const files = [1, 2, 3, 4, 5, 6].map((i) => normalizePath(r[`File${i}`] ?? ''));
+    if (!files.includes(rel) || !r['Name']) continue;
+    out.push({ table: 'LvlPrest', key: 'Name', columns: prest.columns, row: prest.columns.map((c) => r[c] ?? '') });
+    if (Number(r['LevelId']) > 0) levelIds.add(String(Number(r['LevelId'])));
+  }
+  const typeIds = new Set<string>();
+  for (const r of levels?.rows ?? []) {
+    if (!levelIds.has(r['Id']?.trim())) continue;
+    out.push({ table: 'Levels', key: 'Id', columns: levels!.columns, row: levels!.columns.map((c) => r[c] ?? '') });
+    if (r['LevelType']?.trim()) typeIds.add(r['LevelType'].trim());
+  }
+  for (const r of types?.rows ?? []) {
+    if (!typeIds.has(r['Id']?.trim()) || r['Name'] === 'Expansion') continue;
+    out.push({ table: 'LvlTypes', key: 'Id', columns: types!.columns, row: types!.columns.map((c) => r[c] ?? '') });
+  }
+  return out;
+}

@@ -1,7 +1,8 @@
 //! Native side of DS1 Studio: folder configuration and file access for the webview.
 //!
 //! Reads are only allowed inside the configured folders (game, mods, WinDS1); writes only go to the save folder
-//! (the first mod folder unless `saveDir` is set), and only `.ds1` files, keeping the original as `<name>.bak`.
+//! (the first mod folder unless `saveDir` is set), only for the file kinds `writable` allows, keeping the original
+//! as `<name>.bak`.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -76,7 +77,7 @@ fn set_config(app: AppHandle, state: State<AppState>, config: Config) -> Result<
 
 fn is_relevant(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    [".ds1", ".dt1", ".dat", ".txt"].iter().any(|ext| lower.ends_with(ext))
+    [".ds1", ".dt1", ".dat", ".txt", ".json", ".bin"].iter().any(|ext| lower.ends_with(ext))
 }
 
 fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
@@ -143,6 +144,16 @@ fn read_file(state: State<AppState>, path: String) -> Result<Response, String> {
     fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 
+/// What the editor may write, and where: maps, tiles and sprites under data/global, tables under data/global/excel,
+/// and the studio's own files (presets) under data/ds1studio.
+fn writable(rel: &str) -> bool {
+    let p = rel.replace('\\', "/").to_ascii_lowercase();
+    let ext = |exts: &[&str]| exts.iter().any(|e| p.ends_with(e));
+    (p.starts_with("data/global/") && ext(&[".ds1", ".dt1", ".cof", ".dcc", ".dc6"]))
+        || (p.starts_with("data/global/excel/") && ext(&[".txt"]))
+        || (p.starts_with("data/ds1studio/") && ext(&[".json"]))
+}
+
 #[derive(Serialize)]
 struct SaveResult {
     written: String,
@@ -167,7 +178,7 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Writes a .ds1 under the save folder. The body is the file; header `x-path` is the percent-encoded game path.
+/// Writes a file (see `writable`) under the save folder. The body is the file; header `x-path` is the percent-encoded game path.
 #[tauri::command]
 fn save_file(state: State<AppState>, request: Request) -> Result<SaveResult, String> {
     let InvokeBody::Raw(bytes) = request.body() else {
@@ -181,7 +192,7 @@ fn save_file(state: State<AppState>, request: Request) -> Result<SaveResult, Str
         .ok_or("missing x-path header")?;
     let rel_path = Path::new(&rel);
     let safe = rel_path.components().all(|c| matches!(c, Component::Normal(_)));
-    if !safe || !rel.to_ascii_lowercase().ends_with(".ds1") {
+    if !safe || !writable(&rel) {
         return Err(format!("refusing to write {rel}"));
     }
     let root = state
@@ -202,6 +213,34 @@ fn save_file(state: State<AppState>, request: Request) -> Result<SaveResult, Str
     }
     fs::write(&file, bytes).map_err(|e| e.to_string())?;
     Ok(SaveResult { written: file.display().to_string(), backup })
+}
+
+/// Saves bytes to a location the user picks in a native "Save as" dialog (exports: zips, .ds1 copies).
+/// Header `x-name` suggests a file name. Returns the chosen path, or null if cancelled.
+#[tauri::command]
+async fn export_file(app: AppHandle, request: Request<'_>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected a binary body".into());
+    };
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).map(percent_decode).unwrap_or_else(|| "export.bin".into());
+    let Some(path) = app.dialog().file().set_file_name(&name).blocking_save_file() else {
+        return Ok(None);
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Reads a file the user picks in a native "Open" dialog (imports). An empty response means cancelled.
+#[tauri::command]
+async fn import_file(app: AppHandle, extension: String) -> Result<Response, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(path) = app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_file() else {
+        return Ok(Response::new(Vec::new()));
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -225,7 +264,9 @@ pub fn run() {
             file_size,
             read_range,
             read_file,
-            save_file
+            save_file,
+            export_file,
+            import_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running DS1 Studio");
