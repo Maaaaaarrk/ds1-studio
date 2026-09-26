@@ -7,6 +7,7 @@ import { Thumb } from './TilePalette';
 import { loadAct0Palette } from '../game/act0Palette';
 import type { Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
+import { isBuiltinPath } from '../game/specialTiles';
 
 interface Props {
   map: OpenMap;
@@ -21,7 +22,7 @@ const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
 /** Add or remove whole tile libraries (DT1 files) for the open map. */
 export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
-  const [paths, setPaths] = useState<string[]>(() => map.lib.loaded.filter((l) => !l.path.startsWith('winds1/')).map((l) => l.path));
+  const [paths, setPaths] = useState<string[]>(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path));
   const [query, setQuery] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [previewDt1, setPreviewDt1] = useState<Dt1 | null>(null);
@@ -52,7 +53,7 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
-  const original = map.lib.loaded.filter((l) => !l.path.startsWith('winds1/')).map((l) => normalizePath(l.path));
+  const original = map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => normalizePath(l.path));
   const changed = paths.length !== original.length || paths.some((p, i) => normalizePath(p) !== original[i]);
   const removeUsed = original.filter((p) => !inMap.has(p) && (usage.get(p) ?? 0) > 0);
 

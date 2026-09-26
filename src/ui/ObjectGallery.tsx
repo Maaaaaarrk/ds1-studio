@@ -184,7 +184,7 @@ export function ObjectGallery({ gd, act, palette, placing, onPlace }: ObjectGall
         })}
         {items.length === 0 && (
           <div className="muted small pad">
-            {all.length === 0 ? 'No object list for this act (needs WinDS1 obj.txt or MonPreset.txt).' : 'No matching objects.'}
+            {all.length === 0 ? 'No object list for this act (needs the game’s D2Common.dll / Game.exe, or MonPreset.txt).' : 'No matching objects.'}
           </div>
         )}
       </div>

@@ -12,6 +12,7 @@ import { AUTOMAP_SCALE, automapCellOrigin, type AutomapPiece } from '../game/aut
 import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
+import { specialTileInfo } from '../game/specialTiles';
 
 export interface HoverInfo {
   cellX: number;
@@ -769,19 +770,18 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.setLineDash([]);
   }
 
-  // Special tiles without a graphic (no WinDS1 ds1edit.dt1 configured, or an unknown code).
-  if (v.specials && scene.unmarkedSpecials.length) {
+  // Special tiles (warps, entry points…): invisible in game, so marked and labelled here (at any zoom).
+  if (v.specials && scene.specials.length) {
     ctx.lineWidth = 2 * px;
-    ctx.fillStyle = 'rgba(180, 110, 255, 0.25)';
     ctx.strokeStyle = 'rgba(200, 140, 255, 0.9)';
-    for (const sp of scene.unmarkedSpecials) {
+    for (const sp of scene.specials) {
+      ctx.fillStyle = sp.drawn ? 'rgba(180, 110, 255, 0.1)' : 'rgba(180, 110, 255, 0.25)';
       ctx.beginPath();
       diamond(ctx, sp.cellX + 0.1, sp.cellY + 0.1, 0.8, 0.8);
       ctx.fill();
       ctx.stroke();
-      // Always labelled (at any zoom): which special code this is, since there's no graphic to show it.
       const [x, y] = cellToWorld(sp.cellX + 0.5, sp.cellY + 0.5);
-      const text = `? ${sp.main}/${sp.sub}`;
+      const text = specialTileInfo(sp.main, sp.sub).label;
       const size = Math.max(11 * px, 14);
       ctx.font = `600 ${size}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';

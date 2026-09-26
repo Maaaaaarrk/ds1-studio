@@ -35,8 +35,9 @@ export interface MissingTile {
 export interface Scene {
   items: DrawItem[];
   missing: MissingTile[];
-  /** Special tiles (orientation 10/11) with no graphic available, drawn as markers. */
-  unmarkedSpecials: { cellX: number; cellY: number; main: number; sub: number }[];
+  /** Special tiles (orientation 10/11), invisible in game: the map draws labelled markers for them. `drawn` = a DT1 has
+   *  a picture for it (drawn too); else only the marker shows. */
+  specials: { cellX: number; cellY: number; orientation: number; main: number; sub: number; drawn: boolean }[];
   animated: boolean;
   /** World-space bounds of the map's diamond grid. */
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -85,16 +86,16 @@ type WallBucket = 'lowerWall' | 'wall' | 'roof' | 'special';
 export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
   const items: DrawItem[] = [];
   const missing: MissingTile[] = [];
-  const unmarkedSpecials: Scene['unmarkedSpecials'] = [];
+  const specials: Scene['specials'] = [];
   const { width, height } = ds1;
   let animated = false;
 
   const add = (kind: DrawKind, layer: number, cx: number, cy: number, orientation: number, main: number, sub: number, seed: number) => {
     const tile = lib.pick(orientation, main, sub, seed);
+    if (kind === 'special') specials.push({ cellX: cx, cellY: cy, orientation, main, sub, drawn: !!tile?.blocks.length });
     if (!tile) {
-      if (kind === 'special') unmarkedSpecials.push({ cellX: cx, cellY: cy, main, sub });
       // Main index 30/31 floors are the game's "blank" void filler (act1/outdoors/blank.dt1); absent = draw nothing.
-      else if (!(orientation === Orientation.Floor && main >= 30)) missing.push({ kind, layer, cellX: cx, cellY: cy, orientation, main, sub });
+      if (kind !== 'special' && !(orientation === Orientation.Floor && main >= 30)) missing.push({ kind, layer, cellX: cx, cellY: cy, orientation, main, sub });
       return;
     }
     const [x, y] = placeTile(tile, cx, cy);
@@ -107,10 +108,6 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
       }
     }
     items.push(item);
-    if (kind === 'special') {
-      const label = lib.label(orientation, main, sub);
-      if (label && label !== tile) items.push({ tile: label, kind, layer, cellX: cx, cellY: cy, x: placeTile(label, cx, cy)[0], y: placeTile(label, cx, cy)[1] });
-    }
     // A north-corner wall is drawn as two tiles: orientation 3 plus its orientation-4 partner.
     if (orientation === Orientation.RightPartOfNorthCornerWall) {
       const partner = lib.pick(Orientation.LeftPartOfNorthCornerWall, main, sub, seed);
@@ -163,7 +160,7 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
   const [lx] = cellToWorld(0, height);
   const [rx] = cellToWorld(width, 0);
   const [, by] = cellToWorld(width, height);
-  return { items, missing, unmarkedSpecials, animated, bounds: { minX: lx, minY: 0, maxX: rx, maxY: by } };
+  return { items, missing, specials, animated, bounds: { minX: lx, minY: 0, maxX: rx, maxY: by } };
 }
 
 /** Sub-tile flag bits (DT1). */

@@ -87,6 +87,7 @@ import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type Des
 import { DesktopSetup } from './DesktopSetup';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
+import { isBuiltinPath } from '../game/specialTiles';
 
 type DataState =
   | { status: 'connecting' }
@@ -906,7 +907,7 @@ export function App() {
       const notes: string[] = [`Saved ${r.path.split('/').pop()}`];
       if (r.switchMap) {
         const paths = map.lib.loaded
-          .filter((l) => l.found && !l.path.startsWith('winds1/'))
+          .filter((l) => l.found && !isBuiltinPath(l.path))
           .map((l) => (normalizePath(l.path) === normalizePath(r.original) ? r.path : l.path));
         mutate((d) => {
           const others = d.files.filter((f) => !/data[\\/]/i.test(f));
@@ -1016,7 +1017,7 @@ export function App() {
   const applyFix = useCallback(
     async (fix: Fix) => {
       if (!gd || !map || !doc) return;
-      const libs = map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path);
+      const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
       const recheck = () => {
         setTimeout(() => void runCheckRef.current(), 300);
       };
@@ -1100,7 +1101,7 @@ export function App() {
           .filter((x): x is NonNullable<typeof x> => !!x);
         const built = await buildMapPackage(
           gd.fs,
-          { path: doc.path, ds1: doc.ds1, dt1Paths: map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path) },
+          { path: doc.path, ds1: doc.ds1, dt1Paths: map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path) },
           { ds1Bytes: writeDs1(doc.ds1), objectSpecs, txtRows: await collectMapTxtRows(gd.fs, doc.path), notes, includeBaseGameDt1s: includeBaseGame },
         );
         setExportState({ building: false, result: { files: built.manifest.files, missing: built.missing } });
@@ -1628,7 +1629,7 @@ export function App() {
                 onSaveSelection={() => void saveSelectionPreset()}
                 onSavePreset={(p) => void savePreset(p)}
                 onSuggest={() => void suggest()}
-                onAddDt1s={(paths) => void applyDt1s([...map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path), ...paths])}
+                onAddDt1s={(paths) => void applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...paths])}
               />
             )}
             <section className="panel" hidden={tool === 'object' || sidePanel !== 'tiles'}>
@@ -1746,7 +1747,7 @@ export function App() {
               <p className="muted small">Adding them loads them for this map (and updates LvlTypes.txt / Dt1Mask when the map is in LvlPrest.txt).</p>
             </>
           ) : (
-            <p className="muted small">The DT1s they came from aren&apos;t known (copied before this version, or from WinDS1 graphics).</p>
+            <p className="muted small">The DT1s they came from aren&apos;t known (copied before this version, or built-in special tiles).</p>
           )}
           <div className="modal-actions">
             <button className="btn" onClick={() => setPasteOffer(null)}>
@@ -1768,7 +1769,7 @@ export function App() {
                 onClick={async () => {
                   const o = pasteOffer;
                   setPasteOffer(null);
-                  await applyDt1s([...map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path), ...o.dt1s]);
+                  await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...o.dt1s]);
                   beginPaste(o.clip, o.label, true);
                 }}
               >
@@ -1828,7 +1829,7 @@ export function App() {
           mapPath={doc.path}
           width={doc.ds1.width}
           height={doc.ds1.height}
-          usedDt1s={[...dt1Usage.keys()].filter((p) => !p.startsWith('winds1/'))}
+          usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p))}
           onApply={applyTableWrites}
           onClose={() => setDialog(null)}
         />

@@ -4,7 +4,8 @@ import { parseDt1, type Dt1, type Dt1Tile } from '../formats/dt1';
 import { OLD_ACT5_PALETTE, parsePalette, palettePath, type Palette } from '../formats/palette';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { normalizePath, type LayeredFs } from '../vfs/vfs';
-import { loadObjectSprite, parseObjTxt, type Sprite, type SpriteSpec } from './sprites';
+import { loadObjectSprite, type Sprite, type SpriteSpec } from './sprites';
+import { buildCatalog, findObjectPresets, GAME_BINARIES } from './objectCatalog';
 
 export interface LvlTypeInfo {
   id: number;
@@ -38,13 +39,11 @@ export class GameData {
   private levelTypeById = new Map<number, number>();
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
-  /** "act:type:id" -> name and sprite recipe, from WinDS1's obj.txt (acts 1-based). */
+  /** "act:type:id" -> name and sprite recipe, from the game's own tables (acts 1-based; see objectCatalog). */
   private objRows = new Map<string, { name: string; spec: SpriteSpec | null }>();
   private sprites = new Map<string, Promise<Sprite | null>>();
   /** MonPreset.txt "Place" per act (1-based), indexed by NPC id. */
   private monPresets = new Map<number, string[]>();
-  /** WinDS1's special-tile graphics, when available. */
-  specialTiles: Dt1 | null = null;
 
   private constructor(readonly fs: LayeredFs) {}
 
@@ -55,27 +54,33 @@ export class GameData {
       if (!bytes) gd.warnings.push(`${name} not found; DT1s will come from each DS1's embedded file list.`);
       return bytes ? parseTxt(bytes) : null;
     };
-    const [prest, types, levels, monPreset] = await Promise.all([
+    const optional = (name: string) => fs.read(`data/global/excel/${name}`).then((b) => (b ? parseTxt(b) : null));
+    const [prest, types, levels, monPreset, objects, monStats, monStats2, superUniques] = await Promise.all([
       table('LvlPrest.txt'),
       table('LvlTypes.txt'),
       table('Levels.txt'),
-      fs.read('data/global/excel/MonPreset.txt').then((b) => (b ? parseTxt(b) : null)),
+      optional('MonPreset.txt'),
+      optional('objects.txt'),
+      optional('MonStats.txt'),
+      optional('MonStats2.txt'),
+      optional('SuperUniques.txt'),
     ]);
     for (const row of monPreset?.rows ?? []) {
       const act = Number(row['Act']);
       if (!gd.monPresets.has(act)) gd.monPresets.set(act, []);
       gd.monPresets.get(act)!.push(row['Place']);
     }
-    const [objTxt, specials] = await Promise.all([fs.read('winds1/obj.txt'), fs.read('winds1/ds1edit.dt1')]);
-    for (const row of objTxt ? parseObjTxt(new TextDecoder('latin1').decode(objTxt)) : []) {
-      gd.objRows.set(`${row.act}:${row.type}:${row.id}`, { name: row.description.replace(/^#\s*/, ''), spec: row.spec });
+    // The object id table is in the game's program file (mod's first); without it objects are listed by number only.
+    let presets: Int32Array[] | null = null;
+    for (const bin of GAME_BINARIES) {
+      const bytes = await fs.read(bin);
+      presets = bytes ? findObjectPresets(bytes) : null;
+      if (presets) break;
     }
-    if (specials) {
-      try {
-        gd.specialTiles = parseDt1(specials);
-      } catch (e) {
-        gd.warnings.push(`ds1edit.dt1: ${(e as Error).message}`);
-      }
+    gd.objectTable = !!presets;
+    if (!presets) gd.warnings.push('The object table wasn’t found in D2Common.dll or Game.exe; objects are shown by number.');
+    for (const e of buildCatalog(presets, { objects, monPreset, monStats, monStats2, superUniques })) {
+      gd.objRows.set(`${e.act}:${e.type}:${e.id}`, { name: e.name, spec: e.spec });
     }
 
     for (const row of types?.rows ?? []) {
@@ -137,8 +142,8 @@ export class GameData {
   }
 
   /**
-   * Display name of a DS1 object. Uses WinDS1's obj.txt when available (normalising ids that spill into the next act
-   * the way WinDS1 does: 60 NPC / 150 object ids per act), then MonPreset.txt for NPCs, else "type,id".
+   * Display name of a DS1 object, from the object catalogue (normalising ids that spill into the next act the way
+   * WinDS1 does: 60 NPC / 150 object ids per act), then MonPreset.txt for NPCs, else "type,id".
    */
   objectName(act0: number, type: number, id: number): string {
     const name = this.objRow(act0, type, id)?.name;
@@ -164,7 +169,7 @@ export class GameData {
     return this.objRows.get(`${act}:${type}:${n}`) ?? null;
   }
 
-  /** WinDS1 obj.txt sprite recipe of an object, if any. */
+  /** Sprite recipe of an object, if any. */
   objectSpec(act0: number, type: number, id: number): SpriteSpec | null {
     return this.objRow(act0, type, id)?.spec ?? null;
   }
@@ -188,8 +193,8 @@ export class GameData {
   }
 
   /**
-   * Every placeable object/NPC known for an act (0-based): WinDS1 obj.txt rows of that act, plus MonPreset.txt NPC
-   * ids obj.txt doesn't cover. Sorted by type, then id.
+   * Every placeable object/NPC known for an act (0-based): the catalogue's rows for that act, plus MonPreset.txt NPC
+   * ids it doesn't cover. Sorted by type, then id.
    */
   objectList(act0: number): { type: number; id: number; name: string; hasSprite: boolean }[] {
     const act = act0 + 1;
@@ -208,9 +213,11 @@ export class GameData {
     return out.sort((a, b) => a.type - b.type || a.id - b.id);
   }
 
+  /** True when the object id table was found (object names and sprites available). */
   get hasObjectNames(): boolean {
-    return this.objRows.size > 0;
+    return this.objectTable;
   }
+  private objectTable = false;
 
   lvlType(id: number): LvlTypeInfo | null {
     return this.lvlTypes.find((t) => t.id === id) ?? null;
@@ -308,20 +315,12 @@ export class TileLibrary {
       .map(([k, tiles]) => ({ orientation: k >>> 16, main: (k >>> 8) & 0xff, sub: k & 0xff, tiles }));
   }
 
-  /** Adds tiles only for keys no loaded DT1 provides (WinDS1's special-tile graphics yield to game tiles). */
+  /** Adds tiles only for keys no loaded DT1 provides (the built-in special tiles yield to game tiles). */
   addFallback(path: string, dt1: Dt1): void {
     const fresh = dt1.tiles.filter((t) => !this.byKey.has(TileLibrary.key(t.orientation, t.mainIndex, t.subIndex)));
     this.add(path, { ...dt1, tiles: fresh });
     for (const t of fresh) this.sources.set(t, { path, index: dt1.tiles.indexOf(t) });
-    for (const t of dt1.tiles) this.labels.set(TileLibrary.key(t.orientation, t.mainIndex, t.subIndex), t);
   }
-
-  /** WinDS1's labelled graphic for a special tile, drawn over the game's own (in-game invisible) graphic. */
-  label(orientation: number, main: number, sub: number): Dt1Tile | null {
-    return this.labels.get(TileLibrary.key(orientation, main, sub)) ?? null;
-  }
-
-  private labels = new Map<number, Dt1Tile>();
 
   variants(orientation: number, main: number, sub: number): Dt1Tile[] {
     return this.byKey.get(TileLibrary.key(orientation, main, sub)) ?? [];

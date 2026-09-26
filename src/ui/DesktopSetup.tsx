@@ -33,7 +33,7 @@ function FolderRow({ label, hint, value, onPick, onClear }: { label: string; hin
   );
 }
 
-/** Desktop app: choose the game, mod and WinDS1 folders (remembered between runs). */
+/** Desktop app: choose the game and mod folders (remembered between runs). */
 export function DesktopSetup({ initial, error, busy, onOpen, onCancel }: Props) {
   const [cfg, setCfg] = useState<DesktopConfig>(initial);
   const mod = cfg.modDirs[0] ?? null;
@@ -67,13 +67,6 @@ export function DesktopSetup({ initial, error, busy, onOpen, onCancel }: Props) 
             Also read the mod folder&apos;s own .mpq files
           </label>
         )}
-        <FolderRow
-          label="WinDS1"
-          hint="optional: object names, sprites, special-tile labels"
-          value={cfg.winds1Dir}
-          onPick={() => choose('WinDS1 folder (contains Data\\obj.txt)', (d) => ({ ...cfg, winds1Dir: d }))}
-          onClear={() => setCfg({ ...cfg, winds1Dir: null })}
-        />
         {error && <p className="error-text small">{error}</p>}
         <div className="modal-actions">
           {onCancel && (

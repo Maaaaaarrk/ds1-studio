@@ -5,6 +5,7 @@ import { SubTileFlag, walkability, type Scene } from '../render/scene';
 import { normalizePath } from '../vfs/vfs';
 import { GameData } from './GameData';
 import type { OpenMap } from './openMap';
+import { isBuiltinPath } from './specialTiles';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
@@ -88,7 +89,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   const { ds1, lib } = map;
 
   // --- Tiles -------------------------------------------------------------------------------------------------------
-  const notFound = lib.loaded.filter((l) => !l.found && !l.path.startsWith('winds1/'));
+  const notFound = lib.loaded.filter((l) => !l.found && !isBuiltinPath(l.path));
   if (notFound.length)
     out.push({
       severity: 'error',
@@ -128,7 +129,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   const used = new Map<string, number>();
   for (const it of scene.items) {
     const src = lib.sourceOf(it.tile);
-    if (src && !src.path.startsWith('winds1/')) used.set(normalizePath(src.path), (used.get(normalizePath(src.path)) ?? 0) + 1);
+    if (src && !isBuiltinPath(src.path)) used.set(normalizePath(src.path), (used.get(normalizePath(src.path)) ?? 0) + 1);
   }
 
   // --- Tables: is the map part of a level? --------------------------------------------------------------------------

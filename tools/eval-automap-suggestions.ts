@@ -1,6 +1,5 @@
 // Evaluates automap suggestions against vanilla AutoMap.txt: hide rows, suggest, compare with what Blizzard wrote.
 //   npx tsx tools/eval-automap-suggestions.ts [act3/jungle] [style|level]
-import { readFileSync } from 'node:fs';
 import { parseTxtTable } from '../src/formats/txtTable';
 import {
   AUTOMAP_CODES,
@@ -17,14 +16,12 @@ import {
 } from '../src/game/automap';
 import { GameData } from '../src/game/GameData';
 import { openMap } from '../src/game/openMap';
-import { LayeredFs, LooseSource, MpqSource, type FileSource } from '../src/vfs/vfs';
+import { LayeredFs, MpqSource, type FileSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from './nodeAccess';
-import { WINDS1_OBJ_TXT } from './testdata';
 
 const [folder = 'act3/jungle', mode = 'style'] = process.argv.slice(2);
 const D2 = 'C:/Program Files/Diablo II';
-const winds1 = WINDS1_OBJ_TXT.replace(/obj\.txt$/, 'ds1edit.dt1');
-const srcs: FileSource[] = [new LooseSource('winds1', new Map([['winds1/ds1edit.dt1', async () => new Uint8Array(readFileSync(winds1))]]))];
+const srcs: FileSource[] = [];
 for (const m of ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq']) srcs.push(await MpqSource.open(m, new NodeFileAccess(`${D2}/${m}`)));
 const fs = new LayeredFs(srcs);
 const gd = await GameData.load(fs);

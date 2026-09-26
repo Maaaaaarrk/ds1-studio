@@ -4,6 +4,7 @@ import { normalizePath } from '../vfs/vfs';
 import type { CellRect, Clipboard } from './clipboard';
 import type { GameData, TileLibrary } from './GameData';
 import type { LayerKind, LayerRef, MapDocument } from './MapDocument';
+import { isBuiltinPath } from './specialTiles';
 
 /** Where presets live: inside the mod, so they travel with it (and with exported map packages). */
 export const PRESET_DIR = 'data/ds1studio/presets/';
@@ -48,7 +49,7 @@ function dt1sOf(lib: TileLibrary, layers: Preset['layers']): string[] {
       const o = l.kind === 'wall' ? (l.orientations?.[i] ?? 0) : l.kind === 'floor' ? Orientation.Floor : Orientation.Shadow;
       const t = lib.pick(o, c.mainIndex, c.subIndex, 0);
       const src = t && lib.sourceOf(t);
-      if (src && !src.path.startsWith('winds1/')) out.add(normalizePath(src.path));
+      if (src && !isBuiltinPath(src.path)) out.add(normalizePath(src.path));
     });
   return [...out].sort();
 }

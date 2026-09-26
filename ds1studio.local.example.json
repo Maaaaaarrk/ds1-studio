@@ -1,6 +1,5 @@
 {
   "gameDir": "C:/Program Files/Diablo II",
   "modDirs": ["C:/Program Files/Diablo II/MyMod"],
-  "modMpqs": false,
-  "winds1Dir": "C:/path/to/win_ds1edit"
+  "modMpqs": false
 }

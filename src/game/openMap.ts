@@ -1,6 +1,9 @@
 import { parseDs1, type Ds1 } from '../formats/ds1';
 import { decodeTile, type Dt1Tile } from '../formats/dt1';
 import { OLD_ACT5_PALETTE, type Palette } from '../formats/palette';
+import { BUILTIN_SPECIALS_PATH, builtinSpecialTiles } from './specialTiles';
+
+const SPECIALS = builtinSpecialTiles();
 import { TileLibrary, type Dt1Resolution, type GameData } from './GameData';
 
 export type PaletteSource = 'level' | 'tiles' | 'ds1' | 'manual';
@@ -27,7 +30,7 @@ export async function openMap(gd: GameData, path: string, override?: MapOverride
   const lib = new TileLibrary();
   const dt1s = await Promise.all(resolution.paths.map((p) => gd.dt1(p).catch(() => null)));
   resolution.paths.forEach((p, i) => lib.add(p, dt1s[i]));
-  if (gd.specialTiles) lib.addFallback('winds1/ds1edit.dt1 (special tiles)', gd.specialTiles);
+  lib.addFallback(BUILTIN_SPECIALS_PATH, SPECIALS);
   const [paletteAct, paletteSource] = await choosePaletteAct(gd, ds1, resolution, lib);
   const palette = await gd.palette(paletteAct);
   return { path, ds1, resolution, lib, palette, paletteAct, paletteSource };

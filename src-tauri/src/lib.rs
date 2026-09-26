@@ -1,6 +1,6 @@
 //! Native side of DS1 Studio: folder configuration and file access for the webview.
 //!
-//! Reads are only allowed inside the configured folders (game, mods, WinDS1); writes only go to the save folder
+//! Reads are only allowed inside the configured folders (game, mods); writes only go to the save folder
 //! (the first mod folder unless `saveDir` is set), only for the file kinds `writable` allows, keeping the original
 //! as `<name>.bak`.
 
@@ -20,7 +20,6 @@ struct Config {
     mod_dirs: Vec<String>,
     #[serde(default)]
     mod_mpqs: bool,
-    winds1_dir: Option<String>,
     save_dir: Option<String>,
 }
 
@@ -28,7 +27,6 @@ impl Config {
     fn read_roots(&self) -> Vec<PathBuf> {
         let mut roots: Vec<PathBuf> = self.mod_dirs.iter().map(PathBuf::from).collect();
         roots.extend(self.game_dir.iter().map(PathBuf::from));
-        roots.extend(self.winds1_dir.iter().map(PathBuf::from));
         roots.extend(self.save_dir.iter().map(PathBuf::from));
         roots
     }

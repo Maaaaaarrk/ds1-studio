@@ -1,32 +1,32 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { zlibSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { parseCof } from '../src/formats/cof';
 import { parseDc6 } from '../src/formats/dc6';
 import { decodeDccDirection, parseDcc } from '../src/formats/dcc';
 import { parsePalette, type Palette } from '../src/formats/palette';
-import { loadObjectSprite, loadSpriteDetailed, parseObjTxt, type Sprite, type SpriteSpec } from '../src/game/sprites';
+import { GameData } from '../src/game/GameData';
+import { loadObjectSprite, loadSpriteDetailed, type Sprite, type SpriteSpec } from '../src/game/sprites';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
-import { D2_DIR, hasD2, WINDS1_OBJ_TXT } from '../tools/testdata';
+import { binarySource, D2_DIR, hasD2 } from '../tools/testdata';
 
-/** WinDS1's object table (read-only). Override with D2_OBJ_TXT. */
-const OBJ_TXT = WINDS1_OBJ_TXT;
 /** Where to drop PNGs for eyeballing; set SPRITE_PNG_DIR to enable. */
 const PNG_DIR = process.env.SPRITE_PNG_DIR;
-const hasObjTxt = existsSync(OBJ_TXT);
 
 describe.runIf(hasD2)('sprites', async () => {
   const fs = hasD2
-    ? new LayeredFs(
-        await Promise.all(['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'].map((m) => MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`)))),
-      )
+    ? new LayeredFs([
+        binarySource(),
+        ...(await Promise.all(['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'].map((m) => MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`))))),
+      ])
     : null!;
-  const rows = hasObjTxt ? parseObjTxt(readFileSync(OBJ_TXT, 'latin1')) : [];
+  // The object catalogue built from the game's own tables (see objectCatalog).
+  const gd = hasD2 ? await GameData.load(fs) : null!;
   const spec = (act: number, type: number, id: number): SpriteSpec => {
-    const row = rows.find((r) => r.act === act && r.type === type && r.id === id);
-    if (!row?.spec) throw new Error(`obj.txt has no sprite for ${act}/${type}/${id}`);
-    return row.spec;
+    const s = gd.objectSpec(act - 1, type, id);
+    if (!s) throw new Error(`no sprite for ${act}/${type}/${id}`);
+    return s;
   };
 
   it('decodes a DCC', async () => {
@@ -70,7 +70,7 @@ describe.runIf(hasD2)('sprites', async () => {
     ['torch', 1, 2, 1],
     ['stash', 1, 2, 102],
   ];
-  it.runIf(hasObjTxt).each(named)('composes %s', async (name, act, type, id) => {
+  it.each(named)('composes %s', async (name, act, type, id) => {
     const { sprite, missing } = await loadSpriteDetailed(fs, spec(act, type, id));
     expect(missing).toEqual([]);
     expect(sprite).not.toBeNull();
@@ -99,14 +99,15 @@ describe.runIf(hasD2)('sprites', async () => {
     expect(await loadObjectSprite(fs, { base: 'Data\\Global\\Objects', token: 'ZZ', mode: 'NU', cls: 'HTH', parts: { TR: 'LIT' } })).toBeNull();
   });
 
-  it.runIf(hasObjTxt)('composes every obj.txt row without parse errors', async () => {
+  it('composes every catalogue entry without parse errors', async () => {
     let ok = 0;
     let empty = 0;
     const errors: string[] = [];
     const missingRows: string[] = [];
+    const rows = [0, 1, 2, 3, 4].flatMap((a) => gd.objectList(a).map((o) => ({ ...o, act: a + 1, spec: gd.objectSpec(a, o.type, o.id) })));
     const withSpec = rows.filter((r) => r.spec);
     for (const r of withSpec) {
-      const label = `${r.act}/${r.type}/${r.id} ${r.description}`;
+      const label = `${r.act}/${r.type}/${r.id} ${r.name}`;
       try {
         const { sprite, missing } = await loadSpriteDetailed(fs, r.spec!);
         if (missing.length) missingRows.push(`${label}: ${missing.join(', ')}`);
@@ -117,7 +118,7 @@ describe.runIf(hasD2)('sprites', async () => {
       }
     }
     const placeholders = rows.filter((r) => !r.spec).length;
-    console.log(`obj.txt: ${withSpec.length} sprite rows, ${ok} composed, ${errors.length} errors, ${missingRows.length} with missing files, ${empty} empty; ${placeholders} rows without Token/Mode/Class`);
+    console.log(`catalogue: ${withSpec.length} sprite rows, ${ok} composed, ${errors.length} errors, ${missingRows.length} with missing files, ${empty} empty; ${placeholders} rows without a sprite`);
     console.log(missingRows.join('\n'));
     expect(errors).toEqual([]);
     expect(ok / withSpec.length).toBeGreaterThan(0.95);

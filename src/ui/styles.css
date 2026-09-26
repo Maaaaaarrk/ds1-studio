@@ -133,11 +133,12 @@ details summary { cursor: pointer; margin-top: 8px; }
 .chip.active { border-color: var(--accent); color: #f1d9a6; background: var(--accent-dim); }
 .small-input { margin: 0; padding: 5px 8px; font-size: 12px; }
 .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 4px; max-height: 340px; resize: vertical; overflow-y: auto; padding-right: 2px; }
-.thumb { display: flex; flex-direction: column; align-items: stretch; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 3px; cursor: pointer; }
+.thumb { display: flex; flex-direction: column; align-items: stretch; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 3px; cursor: pointer; position: relative; }
 .thumb:hover { border-color: #3a404c; }
 .thumb.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .thumb-img { height: var(--thumb-h, 52px); background: center / contain no-repeat; image-rendering: auto; }
 .thumb-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.thumb-special { position: absolute; left: 3px; right: 3px; top: 30%; text-align: center; font-size: 10.5px; font-weight: 600; line-height: 1.2; color: #ebd7ff; text-shadow: 0 0 3px #140028, 0 0 3px #140028; pointer-events: none; }
 .thumb-o { color: #6f7785; }
 
 /* Cell editor & selection */

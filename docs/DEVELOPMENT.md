@@ -26,16 +26,18 @@ The dev server reads your game install directly (read-only) through `tools/vite-
   "gameDir": "C:/Program Files/Diablo II",
   "modDirs": ["C:/Program Files/Diablo II/MyMod"],
   "modMpqs": false,
-  "winds1Dir": "C:/path/to/win_ds1edit",
   "saveDir": "C:/somewhere/to/write/test/saves"
 }
 ```
 
 - `modDirs`: mod folders (with a `data/` inside) layered over the game's MPQs. Saves go into the first one, or
   `saveDir` when set (handy for trying saves without touching a real mod).
-- `winds1Dir` (optional): WinDS1's folder. Its `Data/obj.txt` gives object/NPC names and sprites and
-  `Data/ds1edit.dt1` the graphics for special tiles (warps, entries…). WinDS1's files are only read at run time and are
-  never copied into this repository.
+- Objects and NPCs: the list of what each DS1 object id is comes from the game itself. NPCs from `MonPreset.txt`
+  (+ `MonStats`/`MonStats2`/`SuperUniques`); objects through the game's fixed act/id → `objects.txt` table, which is
+  only in the program code (`D2Common.dll` up to 1.13, `Game.exe` in 1.14). The mod's and the game's program files are
+  mounted read-only as `bin/d2common.dll` / `bin/game.exe` and the table is found by its first entries
+  (`src/game/objectCatalog.ts`). Special tiles are drawn as DS1 Studio's own labelled markers
+  (`src/game/specialTiles.ts`).
 
 File priority: mod `data/` folders → mod MPQs (if `modMpqs`) → `patch_d2.mpq` → `d2exp.mpq` → `d2data.mpq` →
 `d2char.mpq`.
@@ -53,7 +55,7 @@ npm run app:build   # installers in src-tauri/target/release/bundle/
 TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/ds1-studio.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" npm run app:build
 ```
 
-The native side (`src-tauri/src/lib.rs`) only reads inside the configured game/mod/WinDS1 folders and only writes these
+The native side (`src-tauri/src/lib.rs`) only reads inside the configured game/mod folders and only writes these
 into the mod folder (keeping a `.bak` of anything it replaces): `.ds1/.dt1/.cof/.dcc/.dc6` under `data/global/`, `.txt`
 under `data/global/excel/`, and presets under `data/ds1studio/`. On Linux, saves reuse existing folders/files whatever
 their letter case.

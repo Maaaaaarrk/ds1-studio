@@ -1,5 +1,5 @@
 import { BlobAccess, HttpRangeAccess } from '../util/RandomAccess';
-import { CLASSIC_MPQS, LayeredFs, LooseSource, MpqSource, RELEVANT_EXT, type FileSource } from './vfs';
+import { CLASSIC_MPQS, GAME_BINARY_FILES, LayeredFs, LooseSource, MpqSource, RELEVANT_EXT, type FileSource } from './vfs';
 
 interface ManifestSource {
   id: string;
@@ -75,10 +75,17 @@ export async function sourcesFromDirectory(dir: FileSystemDirectoryHandle, inclu
   }
 
   const mpqs = new Map<string, FileSystemFileHandle>();
+  const binaries = new Map<string, () => Promise<Uint8Array>>();
+  const binaryNames = GAME_BINARY_FILES.map((f) => f.toLowerCase());
   // @ts-expect-error: see above
   for await (const [name, handle] of dir.entries() as AsyncIterable<[string, FileSystemHandle]>) {
-    if (handle.kind === 'file' && /\.mpq$/i.test(name)) mpqs.set(name.toLowerCase(), handle as FileSystemFileHandle);
+    if (handle.kind !== 'file') continue;
+    const fh = handle as FileSystemFileHandle;
+    if (/\.mpq$/i.test(name)) mpqs.set(name.toLowerCase(), fh);
+    else if (binaryNames.includes(name.toLowerCase())) binaries.set(`bin/${name.toLowerCase()}`, async () => new Uint8Array(await (await fh.getFile()).arrayBuffer()));
   }
+  // The game's program files: only read for the object table inside them (see objectCatalog).
+  if (binaries.size) sources.push(new LooseSource(`${dir.name} (program files)`, binaries));
   const base = CLASSIC_MPQS.filter((m) => mpqs.has(m));
   const isGameDir = mpqs.has('d2data.mpq');
   const extra = [...mpqs.keys()].filter((m) => !CLASSIC_MPQS.includes(m) && !/^d2(char|music|sfx|speech|video|xmusic|xtalk|xvideo)\.mpq$/.test(m));

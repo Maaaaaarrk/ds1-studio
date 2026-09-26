@@ -1,13 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { animationFps, loadSpriteAnimation } from '../src/game/spriteAnim';
-import { parseObjTxt, type SpriteSpec } from '../src/game/sprites';
+import { GameData } from '../src/game/GameData';
+import type { SpriteSpec } from '../src/game/sprites';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
-import { D2_DIR, hasD2, WINDS1_OBJ_TXT } from '../tools/testdata';
-
-const OBJ_TXT = WINDS1_OBJ_TXT;
-const hasObjTxt = existsSync(OBJ_TXT);
+import { binarySource, D2_DIR, hasD2 } from '../tools/testdata';
 
 describe('animationFps', () => {
   it('maps D2 animation rates to 1..25 fps', () => {
@@ -21,24 +18,20 @@ describe('animationFps', () => {
   });
 });
 
-describe.runIf(hasD2 && hasObjTxt)('sprite animations', async () => {
+describe.runIf(hasD2)('sprite animations', async () => {
   const fs = hasD2
-    ? new LayeredFs(
-        await Promise.all(['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'].map((m) => MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`)))),
-      )
+    ? new LayeredFs([
+        binarySource(),
+        ...(await Promise.all(['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'].map((m) => MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`))))),
+      ])
     : null!;
-  const rows = hasObjTxt ? parseObjTxt(readFileSync(OBJ_TXT, 'latin1')) : [];
-  /** Looks up a spec by act/type and either the row Id or the Objects.txt id in the description. */
+  const gd = hasD2 ? await GameData.load(fs) : null!;
   const spec = (act: number, type: number, id: number): SpriteSpec => {
-    const row = rows.find((r) => r.act === act && r.type === type && r.id === id);
-    if (!row?.spec) throw new Error(`obj.txt has no sprite for ${act}/${type}/${id}`);
-    return row.spec;
+    const s = gd.objectSpec(act - 1, type, id);
+    if (!s) throw new Error(`no sprite for ${act}/${type}/${id}`);
+    return s;
   };
-  const campfire = (): SpriteSpec => {
-    const row = rows.find((r) => r.act === 1 && r.type === 2 && /^Fire, rogue camp \(39\)/.test(r.description));
-    if (!row?.spec) throw new Error('no rogue camp fire in obj.txt');
-    return row.spec;
-  };
+  const campfire = () => spec(1, 2, 2); // Act 1 object 2 = objects.txt row 39, the rogue camp fire
 
   const cases: [string, () => SpriteSpec, number][] = [
     ['warriv', () => spec(1, 1, 7), 2],

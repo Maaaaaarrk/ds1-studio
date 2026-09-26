@@ -4,6 +4,7 @@ import type { Palette } from '../formats/palette';
 import type { TileLibrary } from '../game/GameData';
 import type { Brush, LayerKind } from '../game/MapDocument';
 import { Splitter, usePersistentSize } from './Splitter';
+import { specialTileInfo } from '../game/specialTiles';
 import { ORIENTATION_NAMES } from './state';
 
 interface Props {
@@ -213,14 +214,18 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
           const src = e.index === undefined ? null : `${shortPath(dt1)} #${e.index}`;
           const variants = e.tiles.length > 1 ? ` · ${e.tiles.length} variants` : '';
           const rarity = e.index !== undefined ? ` · ${e.tiles[0].animated ? 'frame' : 'rarity'} ${e.tiles[0].rarity}` : '';
+          // Special tiles are invisible in game (and often have no picture): name what they do.
+          const special = e.orientation === Orientation.SpecialTile1 || e.orientation === Orientation.SpecialTile2 ? specialTileInfo(e.main, e.sub) : null;
           return (
             <button
               key={e.index !== undefined ? `i${e.index}` : `${e.orientation}:${e.main}:${e.sub}`}
               className={`thumb${active ? ' active' : ''}${isFocused(e) ? ' focused' : ''}`}
-              title={`${src ? `${src} · ` : ''}${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}${variants}${rarity}`}
+              title={`${src ? `${src} · ` : ''}${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}${variants}${rarity}${special ? `
+${special.label}: ${special.help}` : ''}`}
               onClick={() => onPick({ orientation: e.orientation, main: e.main, sub: e.sub })}
             >
               <Thumb tile={e.tiles[0]} palette={palette} />
+              {special && <span className="thumb-special">{special.label}</span>}
               <span className="thumb-label">
                 {e.index !== undefined && <span className="thumb-o">#{e.index}</span>}
                 {e.main}/{e.sub}

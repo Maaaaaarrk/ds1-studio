@@ -150,7 +150,8 @@ export function ObjectPanel({ objects, selected, nameOf, hasNames, placing, onSe
         {placing && <p className="muted small">Click the map to place it (Esc to cancel).</p>}
         {!hasNames && (
           <p className="muted small">
-            Object names need WinDS1&apos;s obj.txt: set <code>winds1Dir</code> in ds1studio.local.json. NPC names come from MonPreset.txt.
+            Object names couldn&apos;t be read: the object table comes from the game&apos;s D2Common.dll (1.13 and older) or
+            Game.exe (1.14) in the Diablo II or mod folder. NPC names come from MonPreset.txt.
           </p>
         )}
       </div>

@@ -6,7 +6,7 @@ import { openMap } from '../src/game/openMap';
 import { buildScene } from '../src/render/scene';
 import { LayeredFs, LooseSource, MpqSource, type FileSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from './nodeAccess';
-import { MOD_DATA, D2_DIR, WINDS1_OBJ_TXT } from './testdata';
+import { binarySource, MOD_DATA, D2_DIR } from './testdata';
 
 const files = new Map<string, () => Promise<Uint8Array>>();
 const MOD = MOD_DATA.replace(/[\\/]data$/i, '');
@@ -18,12 +18,7 @@ const walk = (d: string) => {
   }
 };
 walk(MOD_DATA);
-const winds1 = WINDS1_OBJ_TXT.replace(/obj\.txt$/, '');
-const w = new Map<string, () => Promise<Uint8Array>>([
-  ['winds1/obj.txt', async () => new Uint8Array(readFileSync(`${winds1}obj.txt`))],
-  ['winds1/ds1edit.dt1', async () => new Uint8Array(readFileSync(`${winds1}ds1edit.dt1`))],
-]);
-const srcs: FileSource[] = [new LooseSource('mod', files), new LooseSource('winds1', w)];
+const srcs: FileSource[] = [new LooseSource('mod', files), binarySource()];
 for (const m of ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq']) srcs.push(await MpqSource.open(m, new NodeFileAccess(`${D2_DIR}/${m}`)));
 const gd = await GameData.load(new LayeredFs(srcs));
 const map = await openMap(gd, process.argv[2]);
@@ -32,7 +27,7 @@ console.log('size', map.ds1.width, 'x', map.ds1.height, 'v', map.ds1.version, 'a
 console.log('resolution', map.resolution.source, 'type', map.resolution.lvlType?.id, map.resolution.lvlType?.name, 'preset', map.resolution.preset?.name, 'mask', map.resolution.preset?.dt1Mask);
 console.log('embedded files:', map.ds1.files.join(' | '));
 console.log('loaded:', map.lib.loaded.map((l) => `${l.path.replace('data/global/tiles/', '')}${l.found ? '' : ' (NOT FOUND)'}`).join(' | '));
-console.log('items', scene.items.length, 'missing', scene.missing.length, 'unmarked specials', scene.unmarkedSpecials.length);
+console.log('items', scene.items.length, 'missing', scene.missing.length, 'specials', scene.specials.length);
 const byKey = new Map<string, number>();
 for (const m of scene.missing) {
   const k = `${m.kind} L${m.layer} o${m.orientation} ${m.main}/${m.sub}`;

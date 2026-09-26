@@ -5,10 +5,10 @@ import type { LayeredFs } from '../vfs/vfs';
 
 /**
  * Composes still frames of objects and monsters from their COF + per-component DCC/DC6
- * files, driven by WinDS1's obj.txt rows (Base/Token/Mode/Class + armour type per component).
+ * files, driven by a sprite recipe (Base/Token/Mode/Class + armour type per component; see objectCatalog).
  */
 
-/** What to draw for one obj.txt row. */
+/** What to draw for one object or NPC. */
 export interface SpriteSpec {
   /** Folder holding the token, e.g. `Data\Global\Monsters`. */
   base: string;
@@ -20,7 +20,7 @@ export interface SpriteSpec {
   cls: string;
   /** Armour type per component code (HD, TR, ... S8); missing/empty = no layer. */
   parts: Partial<Record<string, string>>;
-  /** Default facing from obj.txt, if given. */
+  /** Default facing, if given. */
   direction?: number;
 }
 
@@ -30,31 +30,6 @@ export interface SpriteLoad {
   sprite: Sprite | null;
   /** Files that were looked for but not found (COF or layer images). */
   missing: string[];
-}
-
-/** Parses obj.txt (tab-separated, header row) into rows keyed by (Act, Id) with a spec when the row has a Token. */
-export function parseObjTxt(text: string): { act: number; type: number; id: number; description: string; spec: SpriteSpec | null }[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.length);
-  if (!lines.length) return [];
-  const cols = lines[0].split('\t');
-  const col = (name: string) => cols.indexOf(name);
-  const rows = [];
-  for (const line of lines.slice(1)) {
-    const f = line.split('\t');
-    const get = (name: string) => (f[col(name)] ?? '').trim();
-    rows.push({ act: Number(get('Act')), type: Number(get('Type')), id: Number(get('Id')), description: get('Description'), spec: specFromRow(get) });
-  }
-  return rows;
-}
-
-/** Builds a spec from a column getter (obj.txt column names). Null when the row has no Token/Mode/Class (placeholders). */
-export function specFromRow(get: (column: string) => string): SpriteSpec | null {
-  const token = get('Token');
-  if (!token || !get('Base') || !get('Mode') || !get('Class')) return null;
-  const parts: Record<string, string> = {};
-  for (const c of COMPONENTS) if (get(c)) parts[c] = get(c);
-  const dir = get('Direction');
-  return { base: get('Base'), token, mode: get('Mode'), cls: get('Class'), parts, direction: dir === '' ? undefined : Number(dir) };
 }
 
 function joinPath(...parts: string[]): string {

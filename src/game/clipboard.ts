@@ -2,6 +2,7 @@ import { isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../fo
 import { normalizePath } from '../vfs/vfs';
 import type { TileLibrary } from './GameData';
 import { layerKey, MapDocument, type Brush, type CellEdit, type LayerRef } from './MapDocument';
+import { isBuiltinPath } from './specialTiles';
 
 /** Inclusive cell rectangle. */
 export interface CellRect {
@@ -172,10 +173,10 @@ export function clipboardSources(clip: Clipboard, lib: TileLibrary): { dt1s: str
     for (const c of cells) {
       if (isEmptyCell(c)) continue;
       const o = orientationOf(layer, c);
-      if (o === 10 || o === 11) continue; // specials come from WinDS1's own graphics
+      if (o === 10 || o === 11) continue; // special tiles need no DT1 (built-in markers)
       const t = lib.pick(o, c.mainIndex, c.subIndex, 0);
       const src = t && lib.sourceOf(t);
-      if (src && !src.path.startsWith('winds1/')) {
+      if (src && !isBuiltinPath(src.path)) {
         out.add(normalizePath(src.path));
         tileSources[`${o}|${c.mainIndex}|${c.subIndex}`] = normalizePath(src.path);
       }

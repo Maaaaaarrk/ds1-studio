@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { RandomAccess } from '../util/RandomAccess';
 import type { SaveTarget } from './save';
-import { CLASSIC_MPQS, LayeredFs, LooseSource, MpqSource, type FileSource } from './vfs';
+import { CLASSIC_MPQS, GAME_BINARY_FILES, LayeredFs, LooseSource, MpqSource, type FileSource } from './vfs';
 
 /** True when running inside the Tauri desktop shell. */
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -11,7 +11,6 @@ export interface DesktopConfig {
   gameDir?: string | null;
   modDirs: string[];
   modMpqs: boolean;
-  winds1Dir?: string | null;
   saveDir?: string | null;
 }
 
@@ -57,8 +56,23 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
+ * The game's program files, mounted as `bin/…`: only read to find the object table inside them (see objectCatalog).
+ * Linux installs may have them in lower case.
+ */
+async function binaries(dir: string): Promise<LooseSource | null> {
+  const files = new Map<string, () => Promise<Uint8Array>>();
+  for (const name of GAME_BINARY_FILES) {
+    for (const variant of [name, name.toLowerCase()]) {
+      const path = join(dir, variant);
+      if (!files.has(`bin/${name.toLowerCase()}`) && (await exists(path))) files.set(`bin/${name.toLowerCase()}`, () => readFile(path));
+    }
+  }
+  return files.size ? new LooseSource(`${dir} (program files)`, files) : null;
+}
+
+/**
  * Mounts the configured folders in priority order, like the dev server: mod data folders (and their MPQs if enabled),
- * WinDS1 data, the game's loose data folder, then patch_d2 > d2exp > d2data > d2char.
+ * the game's loose data folder, then patch_d2 > d2exp > d2data > d2char; the program files of the mod, then the game.
  */
 export async function loadFromTauri(config: DesktopConfig): Promise<LayeredFs> {
   const sources: FileSource[] = [];
@@ -70,14 +84,6 @@ export async function loadFromTauri(config: DesktopConfig): Promise<LayeredFs> {
       for (const m of mpqs) sources.push(await MpqSource.open(`${mod}/${m}`, await NativeFileAccess.open(join(mod, m))));
     }
   }
-  if (config.winds1Dir) {
-    const files = new Map<string, () => Promise<Uint8Array>>();
-    for (const name of ['obj.txt', 'ds1edit.dt1']) {
-      const path = join(config.winds1Dir, `Data/${name}`);
-      if (await exists(path)) files.set(`winds1/${name}`, () => readFile(path));
-    }
-    if (files.size) sources.push(new LooseSource(`${config.winds1Dir}/Data`, files));
-  }
   if (config.gameDir) {
     const loose = await looseData(`${config.gameDir}/data`, config.gameDir);
     if (loose) sources.push(loose);
@@ -85,6 +91,10 @@ export async function loadFromTauri(config: DesktopConfig): Promise<LayeredFs> {
     for (const m of CLASSIC_MPQS) {
       if (present.has(m)) sources.push(await MpqSource.open(m, await NativeFileAccess.open(join(config.gameDir, m))));
     }
+  }
+  for (const dir of [...config.modDirs, ...(config.gameDir ? [config.gameDir] : [])]) {
+    const bin = await binaries(dir);
+    if (bin) sources.push(bin);
   }
   return new LayeredFs(sources);
 }

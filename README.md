@@ -46,8 +46,9 @@ Get the latest version from the [**Releases page**](https://github.com/RoofooEva
 > publisher. Click **More info → Run anyway**. The source and the build that produced every release are public in this
 > repository.
 
-**First start:** DS1 Studio asks for your Diablo II folder, your mod folder(s), and optionally your WinDS1 folder
-(used for object names and special-tile graphics). On Linux, point it at the Diablo II folder inside your Wine prefix
+**First start:** DS1 Studio asks for your Diablo II folder and, optionally, your mod folder. Nothing else is needed:
+object and NPC names and sprites come from the game's own files, and special tiles (warps, entry points…) get
+DS1 Studio's own labelled markers. On Linux, point it at the Diablo II folder inside your Wine prefix
 (e.g. `~/.wine/drive_c/Program Files (x86)/Diablo II`). You can change these later.
 
 **Updates:** the app checks GitHub once a day and tells you when a new version is out. **Help → Check for updates**
@@ -303,6 +304,6 @@ signing.
 ## Credits
 
 - Diablo II and its data are © Blizzard Entertainment. DS1 Studio reads your own game files and never ships them.
-- WinDS1 by Paul Siramy, whose data files (object names, special-tile graphics) DS1 Studio can read from your own
-  WinDS1 folder.
+- WinDS1 by Paul Siramy, the editor DS1 Studio grew out of: its behaviour is the reference for how maps are drawn
+  and edited.
 - The Phrozen Keep community's documentation of the DS1, DT1 and .txt formats.

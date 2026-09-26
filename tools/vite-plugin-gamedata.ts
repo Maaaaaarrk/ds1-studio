@@ -12,8 +12,8 @@ import type { Plugin } from 'vite';
  * Saving (POST /__d2/save/<game path>) writes .ds1 files under `saveDir`, which defaults to the first mod dir.
  * The first time an existing file is overwritten, the original is copied to `<name>.bak`.
  *
- * Optional `winds1Dir` (a WinDS1 install) exposes Data/obj.txt (object names) and Data/ds1edit.dt1 (special-tile
- * graphics) as the virtual files winds1/obj.txt and winds1/ds1edit.dt1.
+ * The game's program files (D2Common.dll, Game.exe) of each mod dir and the game dir are exposed read-only as
+ * bin/d2common.dll and bin/game.exe: the object id table is read from them (see src/game/objectCatalog.ts).
  */
 
 interface Config {
@@ -23,11 +23,14 @@ interface Config {
   modMpqs?: boolean;
   /** Where edited files are written (default: first mod dir). */
   saveDir?: string;
-  /** A WinDS1 install, for object names and special-tile graphics. */
-  winds1Dir?: string;
 }
 
-const WINDS1_FILES = ['obj.txt', 'ds1edit.dt1'];
+const BINARY_FILES = ['D2Common.dll', 'Game.exe'];
+/** The program files present in a folder, as [virtual path, file on disk]. */
+const binariesIn = (dir: string): [string, string][] => {
+  const names = new Map(readdirSync(dir).map((f) => [f.toLowerCase(), f]));
+  return BINARY_FILES.flatMap((f) => (names.has(f.toLowerCase()) ? [[`bin/${f.toLowerCase()}`, join(dir, names.get(f.toLowerCase())!)] as [string, string]] : []));
+};
 
 export interface ManifestSource {
   id: string;
@@ -84,15 +87,15 @@ export function gameDataPlugin(): Plugin {
           }
         }
       }
-      if (conf.winds1Dir && existsSync(join(conf.winds1Dir, 'Data'))) {
-        sources.push({ id: 'winds1', kind: 'loose', label: `${conf.winds1Dir}${sep}Data`, path: join(conf.winds1Dir, 'Data') });
-      }
       if (conf.gameDir) {
         if (existsSync(join(conf.gameDir, 'data'))) sources.push({ id: 'game-data', kind: 'loose', label: `${conf.gameDir}${sep}data`, path: conf.gameDir });
         for (const f of BASE_MPQS) {
           const p = join(conf.gameDir, f);
           if (existsSync(p)) sources.push({ id: f, kind: 'mpq', label: f, path: p });
         }
+      }
+      for (const [i, dir] of [...(conf.modDirs ?? []), ...(conf.gameDir ? [conf.gameDir] : [])].entries()) {
+        if (existsSync(dir) && binariesIn(dir).length) sources.push({ id: `bin${i}`, kind: 'loose', label: `${dir} (program files)`, path: dir });
       }
     },
     configureServer(server) {
@@ -143,11 +146,11 @@ export function gameDataPlugin(): Plugin {
         const src = sources.find((s) => s.id === parts[1]);
         if (!src) return next();
 
-        if (src.id === 'winds1') {
-          const name = parts.slice(2).join('/').replace(/^winds1\//, '');
-          if (parts[0] === 'list') return json(200, WINDS1_FILES.filter((f) => existsSync(join(src.path, f))).map((f) => `winds1/${f}`));
-          if (parts[0] !== 'file' || !WINDS1_FILES.includes(name)) return json(404, { error: 'not found' });
-          const file = join(src.path, name);
+        if (/^bin\d+$/.test(src.id)) {
+          const files = new Map(binariesIn(src.path));
+          if (parts[0] === 'list') return json(200, [...files.keys()]);
+          const file = parts[0] === 'file' ? files.get(parts.slice(2).join('/').toLowerCase()) : undefined;
+          if (!file) return json(404, { error: 'not found' });
           res.setHeader('content-length', String(statSync(file).size));
           createReadStream(file).pipe(res);
           return;

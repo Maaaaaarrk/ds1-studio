@@ -20,6 +20,7 @@ import { presetToClipboard, type Preset } from '../game/presets';
 import type { CellRect } from '../game/clipboard';
 import { ORIENTATION_NAMES } from './state';
 import { Thumb } from './TilePalette';
+import { isBuiltinPath } from '../game/specialTiles';
 
 const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
@@ -76,7 +77,7 @@ function remappedPalette(palette: Palette, remap: Uint8Array): Palette {
  * the act palette, since DT1s store palette indices).
  */
 export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClose }: Props) {
-  const libs = useMemo(() => map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path), [map]);
+  const libs = useMemo(() => map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), [map]);
   const [path, setPath] = useState(libs[0] ?? '');
   /** Every DT1 in the game and mods, for the library tree. */
   const allDt1s = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
