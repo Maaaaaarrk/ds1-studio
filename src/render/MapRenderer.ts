@@ -12,6 +12,8 @@ export const enum InstanceFlag {
   Highlight = 2,
   Dim = 4,
   Ghost = 8,
+  /** Floor tile: solid-edged when zoomed out (see the fragment shader). */
+  Floor = 256,
 }
 
 /** Instance flag bits for a sprite layer's blend (a COF draw effect, or -1 for solid). */
@@ -103,14 +105,20 @@ void main() {
       }
     }
     coverage = hits / float(n * n);
-    if (coverage < 0.5) discard;
+    if (hits == 0.0) discard;
+    // Floors are drawn solid where at least half covered, so neighbouring floor tiles meet without seams. Everything
+    // else fades with its coverage, so thin details (railings, posts) thin out instead of vanishing when zoomed out.
+    if ((vFlags & 256) != 0) {
+      if (coverage < 0.5) discard;
+      coverage = 1.0;
+    }
     rgb = toSrgb(sum / hits);
   }
   // Output is premultiplied (blendFunc ONE, ONE_MINUS_SRC_ALPHA), so alpha 0 with colour means "add".
-  if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45); return; }
+  if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45 * coverage); return; }
   if ((vFlags & 2) != 0) rgb = mix(rgb, vec3(1.0, 0.78, 0.3), 0.35);
   if ((vFlags & 4) != 0) rgb *= 0.35;
-  float a = (vFlags & 8) != 0 ? 0.6 : 1.0;
+  float a = ((vFlags & 8) != 0 ? 0.6 : 1.0) * coverage;
   // Sprite layer blend (bits 4-7): 0 solid, else Diablo II's draw effect + 1.
   int mode = (vFlags >> 4) & 15;
   if (mode == 1) a *= 0.75;

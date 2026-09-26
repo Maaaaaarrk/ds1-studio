@@ -237,6 +237,39 @@ export function hitTestAll(scene: Scene, wx: number, wy: number, visible: (it: D
   return out;
 }
 
+/**
+ * Everything stacked at a point, front to back: tiles with a visible pixel right there first, then tiles whose image
+ * covers the point where it happens to be transparent, then the rest of that cell's layers (its shadow included). This
+ * is what Shift+wheel steps through, so nothing that overlaps the spot is out of reach.
+ */
+export function stackAt(scene: Scene, wx: number, wy: number, visible: (it: DrawItem) => boolean): DrawItem[] {
+  const out = hitTestAll(scene, wx, wy, visible);
+  const add = (it: DrawItem) => {
+    if (!out.some((o) => sameItem(o, it))) out.push(it);
+  };
+  for (let i = scene.items.length - 1; i >= 0; i--) {
+    const it = scene.items[i];
+    if (it.kind === 'shadow' || !visible(it)) continue;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const b of it.tile.blocks) {
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + 32);
+      maxY = Math.max(maxY, b.y + (b.format === 1 ? 15 : 32));
+    }
+    const lx = wx - it.x;
+    const ly = wy - it.y;
+    if (lx >= minX && ly >= minY && lx < maxX && ly < maxY) add(it);
+  }
+  const [cx, cy] = worldToCell(wx, wy).map(Math.floor);
+  const home = out[0] ?? { cellX: cx, cellY: cy };
+  for (let i = scene.items.length - 1; i >= 0; i--) {
+    const it = scene.items[i];
+    if (it.cellX === home.cellX && it.cellY === home.cellY && visible(it)) add(it);
+  }
+  return out;
+}
+
 /** The tile(s) drawn for one cell (a north-corner wall is two tiles), positioned in world space. */
 export function tilesAt(
   lib: TileLibrary,

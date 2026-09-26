@@ -286,7 +286,7 @@ export function MapView(props: Props) {
       if (it.kind === 'wall') flushObjects(it.cellX + it.cellY - 1);
       else if (it.kind === 'roof' || it.kind === 'special') flushObjects(Infinity);
       if (!isVisible(it, visibility)) continue;
-      let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : 0;
+      let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
       if (focus) {
         if (sameItem(it, focus.item)) flags |= InstanceFlag.Highlight;
       } else if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;

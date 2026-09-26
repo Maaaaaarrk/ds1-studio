@@ -50,7 +50,7 @@ import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type Im
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
@@ -160,7 +160,7 @@ export function App() {
    * Tiles stacked under the last Shift+wheel / click point, frontmost first, and which one is chosen (-1 = none:
    * the selection covers every layer). While one is chosen, copy/cut/delete only touch its layer.
    */
-  const [stack, setStack] = useState<{ items: DrawItem[]; index: number } | null>(null);
+  const [stack, setStack] = useState<{ items: DrawItem[]; index: number; anchor?: [number, number] } | null>(null);
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
@@ -359,17 +359,19 @@ export function App() {
   const cycleStack = useCallback(
     (dir: 1 | -1, world: [number, number]) => {
       if (!doc || !scene || tool === 'object' || pasting) return;
-      const items = hitTestAll(scene, world[0], world[1], (it) => isVisible(it, visibility));
+      // Keep stepping through the same stack while the cursor stays near where it started (a pixel of mouse drift
+      // would otherwise land on a different set of tiles and start over); farther away, stack up the new spot.
+      const near = stack?.anchor && Math.hypot(world[0] - stack.anchor[0], world[1] - stack.anchor[1]) * zoom < 24;
+      const items = near ? stack!.items : stackAt(scene, world[0], world[1], (it) => isVisible(it, visibility));
       if (!items.length) return;
-      const same = stack && stack.items.length === items.length && stack.items.every((it, i) => sameItem(it, items[i]));
-      const index = same && stack.index >= 0 ? (stack.index + dir + items.length) % items.length : dir > 0 ? 0 : items.length - 1;
+      const index = near && stack!.index >= 0 ? (stack!.index + dir + items.length) % items.length : dir > 0 ? 0 : items.length - 1;
       const item = items[index];
-      setStack({ items, index });
+      setStack({ items, index, anchor: near ? stack!.anchor : world });
       setSelection({ x0: item.cellX, y0: item.cellY, x1: item.cellX, y1: item.cellY });
       focusTile(item.tile, layerOfItem(item));
       if (tool !== 'select' && tool !== 'paint') setTool('select');
     },
-    [doc, scene, tool, pasting, visibility, stack, focusTile],
+    [doc, scene, tool, pasting, visibility, stack, focusTile, zoom],
   );
 
   const pickAt = useCallback(
@@ -501,9 +503,10 @@ export function App() {
           selectAnchor.current = cell;
           // Clicking a tile selects the cell it belongs to (tall walls and trees overlap the cells behind them)
           // and reveals the tile in its DT1 in the Tiles panel.
-          const hits = scene ? hitTestAll(scene, world[0], world[1], (it) => isVisible(it, visibility)) : [];
-          const hit = hits[0];
-          setStack(hits.length > 1 ? { items: hits, index: -1 } : null);
+          const opaque = scene ? hitTestAll(scene, world[0], world[1], (it) => isVisible(it, visibility)) : [];
+          const hit = opaque[0];
+          const hits = scene && hit ? stackAt(scene, world[0], world[1], (it) => isVisible(it, visibility)) : opaque;
+          setStack(hits.length > 1 ? { items: hits, index: -1, anchor: world } : null);
           if (hit) {
             selectAnchor.current = [hit.cellX, hit.cellY];
             focusTile(hit.tile, layerOfItem(hit));
