@@ -547,3 +547,4 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .ame-legend { display: flex; flex-direction: column; gap: 6px; color: var(--muted, #aaa); }
 .ame-foot { flex: 1; }
 .ame-open { width: 100%; margin: 6px 0; }
+.check-fixes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }

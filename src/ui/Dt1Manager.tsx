@@ -32,17 +32,15 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
     return all.filter((p) => !inMap.has(normalizePath(p)) && (!q || p.toLowerCase().includes(q)));
   }, [all, inMap, query]);
 
-  // Preview in the DT1's own act palette (from its folder), falling back to the map's.
+  // DT1s are previewed in Act 1's palette (the game's palette 0), like the DT1 editor.
   const [previewPal, setPreviewPal] = useState<{ act: number | null; palette: Palette } | null>(null);
   useEffect(() => {
+    void gd.palette(0).then((palette) => setPreviewPal({ act: 0, palette }));
+  }, [gd]);
+  useEffect(() => {
     setPreviewDt1(null);
-    if (!preview) return;
-    void gd.dt1(preview).then(setPreviewDt1);
-    const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(preview);
-    const act = m ? (m[1] ? Number(m[1]) - 1 : 4) : null;
-    if (act === null || act === map.ds1.act) setPreviewPal(null);
-    else void gd.palette(act).then((palette) => setPreviewPal({ act, palette }));
-  }, [preview, gd, map.ds1.act]);
+    if (preview) void gd.dt1(preview).then(setPreviewDt1);
+  }, [preview, gd]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

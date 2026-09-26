@@ -34,7 +34,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   shadows: true,
   roofs: true,
   lowerWalls: true,
-  specials: false,
+  specials: true,
   objects: true,
   paths: true,
   groups: false,

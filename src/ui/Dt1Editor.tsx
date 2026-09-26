@@ -73,18 +73,28 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   /** Every DT1 in the game and mods, for the library tree. */
   const allDt1s = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
   const inMapLib = libs.some((l) => normalizePath(l) === normalizePath(path));
-  // DT1s store palette indices: show (and recolour) each in its own act's palette, taken from its folder.
-  const [pal, setPal] = useState<{ palette: Palette; act: number | null }>({ palette: map.palette, act: null });
+  // DT1s are shown, recoloured and painted in one palette: Act 1's (the game's palette 0) unless another is chosen.
+  const [palAct, setPalAct] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem('ds1studio.dt1Palette'));
+      return v >= 0 && v <= 4 ? v : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [pal, setPal] = useState<{ palette: Palette; act: number }>({ palette: map.palette, act: -1 });
   useEffect(() => {
-    const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(path);
-    const act = m ? (m[1] ? Number(m[1]) - 1 : 4) : null;
-    if (inMapLib || act === null || act === map.ds1.act) return setPal({ palette: map.palette, act: null });
     let live = true;
-    void gd.palette(act).then((palette) => live && setPal({ palette, act }));
+    void gd.palette(palAct).then((palette) => live && setPal({ palette, act: palAct }));
+    try {
+      localStorage.setItem('ds1studio.dt1Palette', String(palAct));
+    } catch {
+      // per-viewer convenience only
+    }
     return () => {
       live = false;
     };
-  }, [path, inMapLib, gd, map]);
+  }, [palAct, gd]);
   const palette = pal.palette;
   const [dt1, setDt1] = useState<Dt1 | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -207,7 +217,17 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
         <div className="modal-title">DT1 editor</div>
         <div className="dte-top">
           <span className="mono small dte-current">{short(path)}</span>
-          {pal.act !== null && <span className="muted small">shown in its Act {pal.act + 1} palette</span>}
+          <label className="small" title="DT1s store palette indices: this palette is used to show, recolour and paint them">
+            Palette{' '}
+            <select value={palAct} onChange={(e) => setPalAct(Number(e.target.value))}>
+              {[0, 1, 2, 3, 4].map((a) => (
+                <option key={a} value={a}>
+                  Act {a + 1}
+                  {a === 0 ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
           <span className="muted small">{dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'none selected = whole DT1'}` : 'loading…'}</span>
           <button className="btn small" onClick={() => setPicked(new Set(dt1?.tiles.map((_, i) => i)))}>
             Select all

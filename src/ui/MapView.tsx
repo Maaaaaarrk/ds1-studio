@@ -776,17 +776,23 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.strokeStyle = 'rgba(200, 140, 255, 0.9)';
     for (const sp of scene.unmarkedSpecials) {
       ctx.beginPath();
-      diamond(ctx, sp.cellX + 0.15, sp.cellY + 0.15, 0.7, 0.7);
+      diamond(ctx, sp.cellX + 0.1, sp.cellY + 0.1, 0.8, 0.8);
       ctx.fill();
       ctx.stroke();
-      if (cam.zoom > 0.5) {
-        const [x, y] = cellToWorld(sp.cellX + 0.5, sp.cellY + 0.5);
-        ctx.font = `${11 * px}px ui-sans-serif, system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(235, 215, 255, 0.95)';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${sp.main}/${sp.sub}`, x, y + 4 * px);
-        ctx.textAlign = 'start';
-      }
+      // Always labelled (at any zoom): which special code this is, since there's no graphic to show it.
+      const [x, y] = cellToWorld(sp.cellX + 0.5, sp.cellY + 0.5);
+      const text = `? ${sp.main}/${sp.sub}`;
+      const size = Math.max(11 * px, 14);
+      ctx.font = `600 ${size}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3 * px;
+      ctx.strokeStyle = 'rgba(20, 0, 40, 0.85)';
+      ctx.strokeText(text, x, y + size * 0.35);
+      ctx.fillStyle = 'rgba(235, 215, 255, 1)';
+      ctx.fillText(text, x, y + size * 0.35);
+      ctx.textAlign = 'start';
+      ctx.lineWidth = 2 * px;
+      ctx.strokeStyle = 'rgba(200, 140, 255, 0.9)';
     }
   }
 

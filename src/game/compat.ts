@@ -1,3 +1,4 @@
+import type { AutomapPiece } from './automap';
 import { Orientation } from '../formats/dt1';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { SubTileFlag, walkability, type Scene } from '../render/scene';
@@ -16,8 +17,58 @@ export interface CheckResult {
   cells?: { x: number; y: number }[];
   /** Table columns the result is about (the UI explains them). */
   columns?: { table: string; col: string }[];
-  /** Suggested fix the UI can offer (opens a table at a row, or adds DT1s). */
-  fix?: { kind: 'open-table'; table: string; key?: string } | { kind: 'add-dt1s'; paths: string[] };
+  /** One-click fixes the UI offers for this result, best first. */
+  fixes?: Fix[];
+}
+
+/** A fix the check can suggest; the app carries it out (and it can be undone like any edit). */
+export type Fix = { label: string } & (
+  | { kind: 'open-table'; table: string; key?: string }
+  | { kind: 'add-dt1s'; paths: string[] }
+  | { kind: 'remove-dt1s'; paths: string[] }
+  | { kind: 'clear-cells'; cells: { layer: 'floor' | 'wall' | 'shadow'; index: number; x: number; y: number }[] }
+  | { kind: 'sync-tables' }
+  | { kind: 'register' }
+  | { kind: 'move-objects'; moves: { index: number; x: number; y: number }[] }
+  | { kind: 'delete-objects'; indices: number[] }
+  | { kind: 'place-object'; type: number; id: number }
+  | { kind: 'set-act'; act: number }
+  | { kind: 'automap-editor' }
+);
+
+/**
+ * DT1s (other than the loaded ones) that contain the given tile keys ("orientation|main|sub"): the map's own folders
+ * first, then every DT1. Returns the fewest files that cover the most keys.
+ */
+async function dt1sContaining(gd: GameData, keys: Set<string>, loaded: Set<string>, preferred: string[]): Promise<{ paths: string[]; covered: number }> {
+  const all = gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')).filter((p) => !loaded.has(normalizePath(p)));
+  const folderOf = (p: string) => normalizePath(p).replace(/[^/]+$/, '');
+  const pref = new Set(preferred.map(folderOf));
+  const ordered = [...all.filter((p) => pref.has(folderOf(p))), ...all.filter((p) => !pref.has(folderOf(p)))];
+  const has = new Map<string, Set<string>>();
+  for (const p of ordered) {
+    const dt1 = await gd.dt1(p).catch(() => null);
+    if (!dt1) continue;
+    const hit = new Set(dt1.tiles.map((t) => `${t.orientation}|${t.mainIndex}|${t.subIndex}`).filter((k) => keys.has(k)));
+    if (hit.size) has.set(p, hit);
+    // The map's folders usually hold them; stop early once everything is found there.
+    if (pref.has(folderOf(p)) && [...keys].every((k) => [...has.values()].some((h) => h.has(k)))) break;
+  }
+  // Greedy cover: fewest DT1s for the most tiles.
+  const left = new Set(keys);
+  const paths: string[] = [];
+  while (left.size) {
+    let best: string | null = null;
+    let bestN = 0;
+    for (const [p, h] of has) {
+      const n = [...h].filter((k) => left.has(k)).length;
+      if (n > bestN) [best, bestN] = [p, n];
+    }
+    if (!best) break;
+    paths.push(best);
+    for (const k of has.get(best)!) left.delete(k);
+  }
+  return { paths, covered: keys.size - left.size };
 }
 
 const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
@@ -32,22 +83,45 @@ async function table(gd: GameData, name: string): Promise<TxtTable | null> {
  * the map is reachable through LvlPrest/Levels/LvlTypes, it has entry/warp markers, and objects stand on walkable
  * ground. Pure read-only analysis; results are ordered errors first.
  */
-export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promise<CheckResult[]> {
+export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap?: { pieces: AutomapPiece[] }): Promise<CheckResult[]> {
   const out: CheckResult[] = [];
   const { ds1, lib } = map;
 
   // --- Tiles -------------------------------------------------------------------------------------------------------
   const notFound = lib.loaded.filter((l) => !l.found && !l.path.startsWith('winds1/'));
   if (notFound.length)
-    out.push({ severity: 'error', area: 'Tiles', title: `${notFound.length} tile librar${notFound.length > 1 ? 'ies' : 'y'} not found`, detail: notFound.map((l) => short(l.path)).join(', ') });
-  if (scene.missing.length)
+    out.push({
+      severity: 'error',
+      area: 'Tiles',
+      title: `${notFound.length} tile librar${notFound.length > 1 ? 'ies' : 'y'} not found`,
+      detail: `${notFound.map((l) => short(l.path)).join(', ')}. The game cannot load ${notFound.length > 1 ? 'them' : 'it'} either.`,
+      fixes: [{ kind: 'remove-dt1s', label: `Remove ${notFound.length > 1 ? 'them' : 'it'} from the map's libraries`, paths: notFound.map((l) => l.path) }],
+    });
+  if (scene.missing.length) {
+    const keys = new Set(scene.missing.map((m) => `${m.orientation}|${m.main}|${m.sub}`));
+    const loadedSet = new Set(lib.loaded.map((l) => normalizePath(l.path)));
+    const found = await dt1sContaining(gd, keys, loadedSet, lib.loaded.map((l) => l.path));
+    const fixes: Fix[] = [];
+    if (found.paths.length)
+      fixes.push({
+        kind: 'add-dt1s',
+        label: `Add ${found.paths.map(short).join(', ')} (${found.covered === keys.size ? 'has all' : `has ${found.covered} of ${keys.size}`} of the missing tiles)`,
+        paths: found.paths,
+      });
+    fixes.push({
+      kind: 'clear-cells',
+      label: `Clear those ${scene.missing.length} tile${scene.missing.length === 1 ? '' : 's'}`,
+      cells: scene.missing.map((m) => ({ layer: m.kind === 'floor' ? 'floor' : m.kind === 'shadow' ? 'shadow' : 'wall', index: m.layer, x: m.cellX, y: m.cellY })),
+    });
     out.push({
       severity: 'error',
       area: 'Tiles',
       title: `${scene.missing.length} placed tiles have no graphic`,
-      detail: 'These cells reference tiles (orientation/main/sub) that no loaded DT1 contains. In game they are invisible and may break walkability.',
+      detail: `These cells use tiles (orientation/main/sub) that no loaded DT1 contains. In game they are invisible and may break walkability.${found.paths.length ? '' : ' No DT1 in the game or your mod has them.'}`,
       cells: scene.missing.map((m) => ({ x: m.cellX, y: m.cellY })),
+      fixes,
     });
+  }
   else out.push({ severity: 'ok', area: 'Tiles', title: 'Every placed tile has a graphic' });
 
   // DT1s the placed tiles actually come from.
@@ -69,7 +143,10 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
       title: 'Not referenced by LvlPrest.txt',
       detail: `No LvlPrest row lists "${rel}" in File1–File6, so the game never loads this map. Add a row (Name, Def, LevelId, File1, Dt1Mask).`,
       columns: [{ table: 'LvlPrest', col: 'File1' }, { table: 'LvlPrest', col: 'LevelId' }, { table: 'LvlPrest', col: 'Dt1Mask' }],
-      fix: { kind: 'open-table', table: 'LvlPrest.txt' },
+      fixes: [
+        { kind: 'register', label: 'Add to game... (creates the LvlPrest / Levels / LvlTypes rows)' },
+        { kind: 'open-table', label: 'Open LvlPrest.txt', table: 'LvlPrest.txt' },
+      ],
     });
   else {
     out.push({ severity: 'ok', area: 'Tables', title: `LvlPrest: "${prestRow['Name']}" (Def ${prestRow['Def']})` });
@@ -85,12 +162,21 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
       });
     } else {
       const level = levels?.rows.find((r) => Number(r['Id']) === levelId);
-      if (!level) out.push({ severity: 'error', area: 'Level', title: `Levels.txt has no level ${levelId}`, fix: { kind: 'open-table', table: 'Levels.txt' } });
+      if (!level)
+        out.push({
+          severity: 'error',
+          area: 'Level',
+          title: `Levels.txt has no level ${levelId}`,
+          fixes: [
+            { kind: 'open-table', label: 'Open Levels.txt', table: 'Levels.txt' },
+            { kind: 'register', label: 'Add to game... (pick or create the level)' },
+          ],
+        });
       else {
         const typeId = Number(level['LevelType']);
         const typeRow = types?.rows.find((r) => Number(r['Id']) === typeId);
         out.push({ severity: 'ok', area: 'Level', title: `Level ${levelId} "${level['LevelName'] || level['Name']}" (Act ${Number(level['Act']) + 1})` });
-        if (!typeRow) out.push({ severity: 'error', area: 'Level', title: `LvlTypes.txt has no type ${typeId}`, fix: { kind: 'open-table', table: 'LvlTypes.txt' } });
+        if (!typeRow) out.push({ severity: 'error', area: 'Level', title: `LvlTypes.txt has no type ${typeId}`, fixes: [{ kind: 'open-table', label: 'Open LvlTypes.txt', table: 'LvlTypes.txt' }] });
         else {
           // Libraries the game loads for this level vs the ones the map's tiles need.
           const info = gd.lvlType(typeId);
@@ -102,21 +188,47 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
               area: 'Level',
               title: `${notLoaded.length} tile librar${notLoaded.length > 1 ? 'ies are' : 'y is'} used but not loaded in game`,
               detail: `${notLoaded.map((p) => `${short(p)} (${used.get(p)} tiles)`).join(', ')}. Add ${notLoaded.length > 1 ? 'them' : 'it'} to LvlTypes "${typeRow['Name']}" (File 1–32) and set the matching bits in this preset's Dt1Mask (${mask}).`,
-              fix: { kind: 'open-table', table: 'LvlTypes.txt', key: typeRow['Name'] },
+              fixes: [
+                { kind: 'sync-tables', label: `Update LvlTypes "${typeRow['Name']}" and the Dt1Mask automatically` },
+                { kind: 'open-table', label: 'Open LvlTypes.txt', table: 'LvlTypes.txt', key: typeRow['Name'] },
+              ],
               columns: [{ table: 'LvlTypes', col: 'File 1' }, { table: 'LvlPrest', col: 'Dt1Mask' }],
             });
           else out.push({ severity: 'ok', area: 'Level', title: 'Every tile library the map uses is loaded by its level type' });
           for (const f of info?.files.filter(Boolean) ?? []) {
             const p = normalizePath(`data/global/tiles/${f}`);
-            if (loaded.has(p) && !gd.fs.locate(p)) out.push({ severity: 'error', area: 'Level', title: `LvlTypes file missing: ${f}` });
+            if (loaded.has(p) && !gd.fs.locate(p))
+              out.push({
+                severity: 'error',
+                area: 'Level',
+                title: `LvlTypes file missing: ${f}`,
+                detail: 'The game fails to load this level type. Fix the path or remove it from the row.',
+                fixes: [{ kind: 'open-table', label: 'Open LvlTypes.txt', table: 'LvlTypes.txt', key: typeRow['Name'] }],
+              });
           }
         }
         // Palette: the level's act decides it.
         const act = Number(level['Act']);
         if (act !== ds1.act)
-          out.push({ severity: 'info', area: 'Level', title: `Level is in Act ${act + 1}, DS1 header says Act ${ds1.act + 1}`, detail: 'The game uses the level’s act (palette, music, town). The header value is not used for that.', columns: [{ table: 'Levels', col: 'Act' }] });
-        if (Number(level['Waypoint']) && Number(level['Waypoint']) !== 255 && !ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, 2, o.id))))
-          out.push({ severity: 'warning', area: 'Level', title: 'Level has a waypoint slot but no waypoint object on this map', columns: [{ table: 'Levels', col: 'Waypoint' }] });
+          out.push({
+            severity: 'info',
+            area: 'Level',
+            title: `Level is in Act ${act + 1}, DS1 header says Act ${ds1.act + 1}`,
+            detail: 'The game uses the level’s act (palette, music, town). Matching the header keeps object names and other editors in step.',
+            columns: [{ table: 'Levels', col: 'Act' }],
+            fixes: [{ kind: 'set-act', label: `Set the DS1 header to Act ${act + 1}`, act }],
+          });
+        if (Number(level['Waypoint']) && Number(level['Waypoint']) !== 255 && !ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, 2, o.id)))) {
+          const wp = gd.objectList(ds1.act).find((o) => o.type === 2 && /waypoint/i.test(o.name));
+          out.push({
+            severity: 'warning',
+            area: 'Level',
+            title: 'Level has a waypoint slot but no waypoint object on this map',
+            detail: 'Players cannot use the waypoint unless one of the level’s presets has a waypoint object.',
+            columns: [{ table: 'Levels', col: 'Waypoint' }],
+            fixes: wp ? [{ kind: 'place-object', label: `Place a waypoint (${wp.name})`, type: 2, id: wp.id }] : undefined,
+          });
+        }
       }
     }
   }
@@ -139,27 +251,103 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
 
   // --- Objects -----------------------------------------------------------------------------------------------------
   const walk = walkability(ds1, scene);
+  const W = ds1.width * 5;
+  const H = ds1.height * 5;
+  const walkable = (sx: number, sy: number) =>
+    sx >= 0 && sy >= 0 && sx < W && sy < H && !(walk[(Math.floor(sy / 5) * ds1.width + Math.floor(sx / 5)) * 25 + (sy % 5) * 5 + (sx % 5)] & (SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk));
+  const taken = new Set(ds1.objects.map((o) => `${o.x},${o.y}`));
+  /** Nearest free walkable sub-tile (growing rings), not already used by another object. */
+  const nearestFree = (sx: number, sy: number): [number, number] | null => {
+    for (let r = 1; r <= 25; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = sx + dx;
+          const y = sy + dy;
+          if (walkable(x, y) && !taken.has(`${x},${y}`)) return [x, y];
+        }
+    return null;
+  };
   const blocked: { x: number; y: number }[] = [];
+  const blockedMoves: { index: number; x: number; y: number }[] = [];
   const offMap: string[] = [];
-  const spots = new Map<string, number>();
-  for (const o of ds1.objects) {
+  const offMapIdx: number[] = [];
+  const spots = new Map<string, number[]>();
+  ds1.objects.forEach((o, i) => {
     const cx = Math.floor(o.x / 5);
     const cy = Math.floor(o.y / 5);
     if (cx < 0 || cy < 0 || cx >= ds1.width || cy >= ds1.height) {
       offMap.push(gd.objectName(ds1.act, o.type, o.id));
-      continue;
+      offMapIdx.push(i);
+      return;
     }
-    const f = walk[(cy * ds1.width + cx) * 25 + (o.y % 5) * 5 + (o.x % 5)];
-    if (o.type === 1 && f & (SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk)) blocked.push({ x: cx, y: cy });
+    if (o.type === 1 && !walkable(o.x, o.y)) {
+      blocked.push({ x: cx, y: cy });
+      const to = nearestFree(o.x, o.y);
+      if (to) {
+        taken.add(`${to[0]},${to[1]}`);
+        blockedMoves.push({ index: i, x: to[0], y: to[1] });
+      }
+    }
     const k = `${o.x},${o.y}`;
-    spots.set(k, (spots.get(k) ?? 0) + 1);
-  }
-  if (offMap.length) out.push({ severity: 'error', area: 'Objects', title: `${offMap.length} objects outside the map`, detail: offMap.join(', ') });
+    spots.set(k, [...(spots.get(k) ?? []), i]);
+  });
+  if (offMap.length)
+    out.push({
+      severity: 'error',
+      area: 'Objects',
+      title: `${offMap.length} objects outside the map`,
+      detail: offMap.join(', '),
+      fixes: [{ kind: 'delete-objects', label: `Delete ${offMap.length > 1 ? 'them' : 'it'}`, indices: offMapIdx }],
+    });
   if (blocked.length)
-    out.push({ severity: 'warning', area: 'Objects', title: `${blocked.length} NPCs/monsters stand on unwalkable ground`, detail: 'They may be stuck or fail to spawn.', cells: blocked });
-  const stacked = [...spots.values()].filter((n) => n > 1).length;
-  if (stacked) out.push({ severity: 'warning', area: 'Objects', title: `${stacked} spots with several objects on the same sub-tile`, detail: 'NPC paths attached to such spots are dropped by the game and by WinDS1.' });
+    out.push({
+      severity: 'warning',
+      area: 'Objects',
+      title: `${blocked.length} NPCs/monsters stand on unwalkable ground`,
+      detail: 'They may be stuck or fail to spawn.',
+      cells: blocked,
+      fixes: blockedMoves.length
+        ? [{ kind: 'move-objects', label: `Move ${blockedMoves.length === blocked.length ? 'them' : `${blockedMoves.length} of them`} to the nearest walkable spot`, moves: blockedMoves }]
+        : undefined,
+    });
+  const stackedSpots = [...spots.values()].filter((list) => list.length > 1);
+  if (stackedSpots.length) {
+    const moves: { index: number; x: number; y: number }[] = [];
+    for (const list of stackedSpots)
+      for (const i of list.slice(1)) {
+        const o = ds1.objects[i];
+        const to = nearestFree(o.x, o.y);
+        if (to) {
+          taken.add(`${to[0]},${to[1]}`);
+          moves.push({ index: i, x: to[0], y: to[1] });
+        }
+      }
+    out.push({
+      severity: 'warning',
+      area: 'Objects',
+      title: `${stackedSpots.length} spots with several objects on the same sub-tile`,
+      detail: 'NPC paths attached to such spots are dropped by the game and by WinDS1.',
+      cells: stackedSpots.map((l) => ({ x: Math.floor(ds1.objects[l[0]].x / 5), y: Math.floor(ds1.objects[l[0]].y / 5) })),
+      fixes: moves.length ? [{ kind: 'move-objects', label: 'Spread them onto free neighbouring spots', moves }] : undefined,
+    });
+  }
+  const stacked = stackedSpots.length;
   if (!offMap.length && !blocked.length && !stacked) out.push({ severity: 'ok', area: 'Objects', title: `${ds1.objects.length} objects placed on valid ground` });
+
+  // --- Automap ------------------------------------------------------------------------------------------------------
+  if (automap) {
+    const missingWalls = automap.pieces.filter((p) => p.layer === 'wall' && !p.rule);
+    if (missingWalls.length)
+      out.push({
+        severity: 'info',
+        area: 'Map',
+        title: `${missingWalls.length} walls have no automap entry`,
+        detail: 'They will not show on the in-game automap. Give them pieces, or mark them hidden if they should not show.',
+        cells: missingWalls.map((p) => ({ x: p.cellX, y: p.cellY })),
+        fixes: [{ kind: 'automap-editor', label: 'Open the automap editor' }],
+      });
+  }
 
   // --- Compiled tables ---------------------------------------------------------------------------------------------
   const compiled = ['LvlPrest', 'Levels', 'LvlTypes'].filter((name) => {

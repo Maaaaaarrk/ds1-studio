@@ -1,3 +1,10 @@
+> [!WARNING]
+> ## ⚠️ Beta software — back up your game files first
+> DS1 Studio is **in beta** and still changing quickly. **Before you use or test it, make a copy of your Diablo II
+> folder** (or at least your mod folder: its `data` folder, `.txt` tables, `.ds1` and `.dt1` files). DS1 Studio never
+> writes to the game install itself and keeps a `.bak` of every file it replaces the first time, but that is **not a
+> substitute for your own backup**. Use it at your own risk, and please [report problems](https://github.com/RoofooEvazan/ds1-studio/issues/new/choose).
+
 <h1 align="center">DS1 Studio</h1>
 
 <p align="center">
@@ -110,7 +117,8 @@ tree groups.
   `LvlPrest.txt` is recomputed.
 - **DT1 editor**: duplicate and rename a DT1, **recolour** it (hue, saturation, brightness, tint, replace a colour) —
   the whole file, tiles you pick, the tiles a preset is built from, or the tiles used in your map selection — and
-  **paint tiles pixel by pixel** with the act palette. Clicking a tile opens it in a zoom window you can move, resize
+  **paint tiles pixel by pixel**. DT1s are shown, recoloured and painted in the **Act 1 palette** (the game's
+  palette 0), so the colours offered are exactly the ones a DT1 can hold; another act's palette can be picked if needed. Clicking a tile opens it in a zoom window you can move, resize
   from any edge and zoom right down to single pixels. The preview is exact, and the copy can replace the original in
   your map with the tables updated for you.
 
@@ -128,7 +136,9 @@ The **Automap editor** (Map → Automap editor) lists every kind of tile the map
 doors, columns, trees…), with the real tile image next to the automap piece it gets — or a **missing** / **hidden**
 badge. Select kinds in the list (Shift/Ctrl for several) or click spots on the live automap preview, then pick pieces
 from the gallery: set one, add up to four random variants, **hide** a kind on purpose (so it's no longer "missing"), or
-**Suggest** the piece your level or act normally uses. Nothing is written until **Save to AutoMap.txt**, and saving
+**Suggest**: each tile is compared with look-alike tiles that this level — or other levels loading the same DT1s,
+or the rest of the game — already puts on the automap (or deliberately leaves off), so water gets water pieces, ground
+gets ground pieces, and tiles the game shows nothing for are marked hidden. Nothing is written until **Save to AutoMap.txt**, and saving
 again replaces the editor's earlier rows instead of piling them up.
 
 ![Automap editor](docs/media/automap-editor.png)
@@ -145,7 +155,9 @@ again replaces the editor's earlier rows instead of piling them up.
 - **Cube recipe:** creates a map item and a Horadric Cube recipe for it (the item-to-level link needs a mod plugin,
   e.g. PD2's map system).
 - **Compatibility check:** missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry
-  markers, NPCs on unwalkable ground, stacked objects, compiled `.bin` reminders — with one-click fixes where possible.
+  markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled
+  `.bin` reminders — each with one-click fixes: add the DT1s that contain the missing tiles, update LvlTypes/Dt1Mask,
+  move NPCs to walkable ground, spread stacked objects, place a waypoint, and so on (map edits can be undone).
 
 | | |
 | :-: | :-: |

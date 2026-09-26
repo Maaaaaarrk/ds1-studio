@@ -11,6 +11,7 @@ import {
   editKey,
   findRule,
   suggestAutomap,
+  type AutomapColors,
   type AutomapEdit,
   type AutomapTable,
 } from '../game/automap';
@@ -28,6 +29,8 @@ interface Props {
   levelLabel: (level: string) => string;
   canSave: boolean;
   onSave: (edits: AutomapEdit[]) => Promise<void>;
+  /** Colours and look-alike references for suggestions (may take a moment the first time). */
+  makeColors: () => Promise<AutomapColors | undefined>;
   onClose: () => void;
 }
 
@@ -50,7 +53,7 @@ const statusOf = (cels: number[] | null): Status => (cels === null ? 'missing' :
  * The automap editor: every kind of tile the map uses, what the automap draws for it (from AutoMap.txt), a live
  * preview of the whole automap, and a piece gallery to change it. Nothing is written until "Save".
  */
-export function AutomapEditor({ map, table, cels, palette, level, onLevel, levelLabel, canSave, onSave, onClose }: Props) {
+export function AutomapEditor({ map, table, cels, palette, level, onLevel, levelLabel, canSave, onSave, makeColors, onClose }: Props) {
   const [edits, setEdits] = useState<Map<string, AutomapEdit>>(new Map());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<Filter>('all');
@@ -144,13 +147,25 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
       for (const g of targets) next.delete(g.key);
       return next;
     });
-  const suggestFor = (targets: Group[]) => {
+  const suggestFor = async (targets: Group[]) => {
+    setMessage('Analysing tiles: comparing them with tiles this level (and the rest of the game) already puts on the automap…');
+    const colors = await makeColors();
     const missing = pieces.filter((p) => targets.some((g) => g.orientation === p.orientation && g.style === p.main && g.sub === p.sub));
-    const s = suggestAutomap(table, level, missing.map((p) => ({ ...p, rule: null })), { floors: true });
-    const cel = new Map(s.map((x) => [`${x.orientation}|${x.style}`, x.cel]));
-    const hit = targets.filter((g) => cel.has(`${g.orientation}|${g.style}`));
-    for (const g of hit) setCels([g], [cel.get(`${g.orientation}|${g.style}`)!]);
-    setMessage(hit.length ? `Suggested pieces for ${hit.length} tile kind${hit.length === 1 ? '' : 's'}` : 'No suggestion: this act has no automap piece for these kinds of tile.');
+    const out: { leaveOff?: Set<string> } = {};
+    const s = suggestAutomap(table, level, missing.map((p) => ({ ...p, rule: null })), { floors: true, colors }, out);
+    const bySeq = new Map<string, number>();
+    for (const x of s) for (const q of x.seqs) bySeq.set(`${x.orientation}|${x.style}|${q}`, x.cel);
+    const pieceFor = targets.filter((g) => bySeq.has(g.key));
+    const off = targets.filter((g) => !bySeq.has(g.key) && out.leaveOff?.has(g.key));
+    for (const g of pieceFor) setCels([g], [bySeq.get(g.key)!]);
+    if (off.length) setCels(off, []);
+    const none = targets.length - pieceFor.length - off.length;
+    setMessage(
+      `Suggested: ${pieceFor.length} tile kind${pieceFor.length === 1 ? '' : 's'} get a piece` +
+        (off.length ? `, ${off.length} look like tiles the level leaves off the automap (marked hidden)` : '') +
+        (none ? `, ${none} without a confident match (left as they are)` : '') +
+        '. Review, then save.',
+    );
   };
 
   const save = async () => {
@@ -301,7 +316,7 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
             edited={(g) => edits.has(g.key)}
             onSet={(value) => setCels(sel, value)}
             onRevert={() => revert(sel)}
-            onSuggest={() => suggestFor(sel)}
+            onSuggest={() => void suggestFor(sel)}
           />
         </div>
         <div className="modal-actions">

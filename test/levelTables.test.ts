@@ -176,8 +176,9 @@ describe('automap suggestions', () => {
     const s = suggestAutomap(t, '1 Town', [piece(1, 5, 2, 'wall'), piece(1, 5, 3, 'wall'), piece(1, 5, 7, 'wall'), piece(0, 9, 0, 'floor')], { floors: true });
     // Act 1 never puts floors on the automap in this table, so none is borrowed from Act 2.
     expect(s).toEqual([{ code: 'wl', orientation: 1, style: 5, seqs: [2, 3, 7], count: 3, cel: 21 }]);
-    // A mod's numbered level type has no act: it may use any level's pieces.
-    expect(suggestAutomap(t, '47', [piece(0, 9, 0, 'floor')], { floors: true })).toEqual([{ code: 'fl', orientation: 0, style: 9, seqs: [0], count: 1, cel: 3 }]);
+    // A mod's numbered level type has no act: it may use any level's pieces (walls; floors are never guessed blind).
+    expect(suggestAutomap(t, '47', [piece(2, 0, 3, 'wall')], { floors: true })).toEqual([{ code: 'wr', orientation: 2, style: 0, seqs: [3], count: 1, cel: 20 }]);
+    expect(suggestAutomap(t, '47', [piece(0, 9, 0, 'floor')], { floors: true })).toEqual([]);
     expect(suggestAutomap(t, '1 Town', [piece(0, 9, 0, 'floor')], { floors: false })).toEqual([]);
   });
   it('writes one row per run of sequences, in front of the level', () => {
@@ -219,5 +220,31 @@ describe('automap edits', () => {
     ]);
     expect(second.doc.rows.length).toBe(doc.rows.length + 1);
     expect(findRule(parseAutomap(second.doc), '1 Town', 1, 3, 2)!.cels.map((c) => c.cel)).toEqual([9]);
+  });
+});
+
+describe('automap suggestions match look-alike tiles', () => {
+  // A jungle-like level: its floor rows only cover the river (piece 1); ordinary ground has no row (left off).
+  const doc = ptt(enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tType1\tCel1\tType2\tCel2\tType2\tCel3\tType4\tCel4\r\n' +
+    '3 Jungle\tfl\t4\t0\t1\tRiver\t1\t\t-1\t\t-1\t\t-1\r\n3 Jungle\twl\t0\t-1\t-1\tWall\t7\t\t-1\t\t-1\t\t-1\r\n'));
+  const t = parseAutomap(doc);
+  const piece = (main: number, sub: number): AutomapPiece => ({ cellX: 0, cellY: 0, orientation: 0, main, sub, rule: null, cel: null, layer: 'floor' });
+  const blue: [number, number, number] = [30, 60, 200];
+  const brown: [number, number, number] = [120, 90, 50];
+  // The map's library: river tiles 4/0 and 4/1 (blue), ground tiles 5/0..5/2 (brown, no row), plus the new tiles.
+  const looks: Record<string, [number, number, number]> = { '4|0': blue, '4|1': blue, '5|0': brown, '5|1': brown, '5|2': brown, '9|0': blue, '9|1': brown };
+  const colors = {
+    keys: (o: number) => (o === 0 ? Object.keys(looks).map((k) => k.split('|').map(Number) as [number, number]) : []),
+    tile: (_o: number, main: number, sub: number) => looks[`${main}|${sub}`] ?? null,
+    cel: () => null,
+  };
+  it('gives water the river piece and leaves ground off, like the level does', () => {
+    const out: { leaveOff?: Set<string> } = {};
+    const s = suggestAutomap(t, '3 Jungle', [piece(9, 0), piece(9, 1)], { floors: true, colors }, out);
+    expect(s).toEqual([{ code: 'fl', orientation: 0, style: 9, seqs: [0], count: 1, cel: 1 }]);
+    expect([...(out.leaveOff ?? [])]).toEqual(['0|9|1']);
+  });
+  it('never guesses a floor piece without look-alikes (that is how land got the river before)', () => {
+    expect(suggestAutomap(t, '3 Jungle', [piece(9, 1)], { floors: true })).toEqual([]);
   });
 });

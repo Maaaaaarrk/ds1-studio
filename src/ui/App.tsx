@@ -45,7 +45,7 @@ import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { clampRect, clearEdits, clipboardSources, copyRect, fillEdits, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
-import { checkMap, type CheckResult } from '../game/compat';
+import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
@@ -66,7 +66,7 @@ import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
 import { syncLevelTables } from '../game/levelTables';
-import { applyAutomapEdits, applyAutomapSuggestions, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
+import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
@@ -841,6 +841,27 @@ export function App() {
     [gd],
   );
 
+  // Colours and look-alike references for automap suggestions; game-wide references are built once per level.
+  const automapRefCache = useRef(new Map<string, Promise<ReferenceTile[]>>());
+  const makeAutomapColors = useCallback(async (): Promise<AutomapColors | undefined> => {
+    if (!gd || !map || !automapData || !automapLevel) return undefined;
+    const table = automapData.table;
+    const act = /^(\d)\s/.exec(automapLevel)?.[1];
+    const key = `${automapLevel}|${automapData.gd === gd}`;
+    let refs = automapRefCache.current.get(key);
+    if (!refs) {
+      refs = referenceTiles({
+        table,
+        types: gd.lvlTypes,
+        levels: (l) => l !== automapLevel && (act ? l.startsWith(`${act} `) : true),
+        loadDt1: (p) => gd.dt1(p),
+        palette: (a) => gd.palette(a),
+      });
+      automapRefCache.current.set(key, refs);
+    }
+    return { ...automapColors(map.lib, automapData.cels, map.palette, { table, types: gd.lvlTypes }), extraRefs: await refs };
+  }, [gd, map, automapData, automapLevel]);
+
   const applyAutomapSuggestionsNow = useCallback(async () => {
     if (!gd || !automapLevel || !automapSuggestions) return;
     try {
@@ -971,8 +992,96 @@ export function App() {
     if (!gd || !map || !scene) return;
     setCheckResults(null);
     setDialog('check');
-    setCheckResults(await checkMap(gd, map, scene));
-  }, [gd, map, scene]);
+    // The automap part needs AutoMap.txt (read here, so the automap view needn't be open).
+    let automap: { pieces: AutomapPiece[] } | undefined;
+    try {
+      const bytes = await gd.fs.read(AUTOMAP_TXT);
+      if (bytes) {
+        const table = automapData?.table ?? parseAutomap(parseTxtTable(bytes));
+        const level = automapLevel ?? automapLevelFor(table, map.resolution.lvlType?.name, map.ds1.act + 1, map.resolution.lvlType?.id);
+        if (level) automap = { pieces: automapPieces(map.ds1, table, level) };
+      }
+    } catch {
+      // the automap check is optional
+    }
+    setCheckResults(await checkMap(gd, map, scene, automap));
+  }, [gd, map, scene, automapData, automapLevel]);
+  const runCheckRef = useRef(runCheck);
+  runCheckRef.current = runCheck;
+  /** Carries out a compatibility-check fix, then checks again (fixes that edit the map can be undone). */
+  const applyFix = useCallback(
+    async (fix: Fix) => {
+      if (!gd || !map || !doc) return;
+      const libs = map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path);
+      const recheck = () => {
+        setTimeout(() => void runCheckRef.current(), 300);
+      };
+      try {
+        switch (fix.kind) {
+          case 'open-table':
+            setTableTarget({ table: fix.table.replace(/\.txt$/i, ''), key: fix.key });
+            return setDialog('tables');
+          case 'register':
+            return setDialog('register');
+          case 'automap-editor':
+            return setDialog('automap');
+          case 'place-object':
+            setDialog(null);
+            setTool('object');
+            setPlacing({ type: fix.type, id: fix.id });
+            return notify('Click the map to place it · Esc to stop');
+          case 'add-dt1s':
+            await applyDt1s([...libs, ...fix.paths]);
+            return recheck();
+          case 'remove-dt1s': {
+            const drop = new Set(fix.paths.map(normalizePath));
+            await applyDt1s(libs.filter((p) => !drop.has(normalizePath(p))));
+            return recheck();
+          }
+          case 'sync-tables': {
+            const writes = await syncLevelTables(gd.fs, map.path, libs, map.resolution.lvlType?.id);
+            if (writes.length) {
+              await writeFiles(writes);
+              await reloadTables();
+            }
+            notify(writes.length ? `Updated ${writes.flatMap((w) => w.summary).join('; ')}` : 'LvlTypes and Dt1Mask already match');
+            return recheck();
+          }
+          case 'clear-cells': {
+            const edits: CellEdit[] = fix.cells.map((c) => {
+              const layer: LayerRef = { kind: c.layer, index: c.index };
+              return { layer, x: c.x, y: c.y, cell: MapDocument.painted(layer, doc.cell(layer, c.x, c.y), null) };
+            });
+            if (doc.apply(edits)) bump();
+            notify(`Cleared ${edits.length} tiles (Ctrl+Z to undo)`);
+            return recheck();
+          }
+          case 'move-objects': {
+            const to = new Map(fix.moves.map((m) => [m.index, m]));
+            setObjects(doc.ds1.objects.map((o, i) => (to.has(i) ? { ...o, x: to.get(i)!.x, y: to.get(i)!.y } : o)));
+            notify(`Moved ${fix.moves.length} objects (Ctrl+Z to undo)`);
+            return recheck();
+          }
+          case 'delete-objects': {
+            const drop = new Set(fix.indices);
+            setObjects(doc.ds1.objects.filter((_, i) => !drop.has(i)));
+            notify(`Deleted ${drop.size} objects (Ctrl+Z to undo)`);
+            return recheck();
+          }
+          case 'set-act':
+            mutate((d) => {
+              d.act = fix.act;
+              d.actRaw = fix.act;
+            });
+            notify(`DS1 header set to Act ${fix.act + 1} (Ctrl+Z to undo)`);
+            return recheck();
+        }
+      } catch (e) {
+        notify((e as Error).message, true);
+      }
+    },
+    [gd, map, doc, applyDt1s, writeFiles, reloadTables, setObjects, mutate, notify],
+  );
 
   const exportPackage = useCallback(
     async (notes: string, includeBaseGame: boolean) => {
@@ -1569,7 +1678,11 @@ export function App() {
                 canSave={canWrite}
                 onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
                 suggestions={automapSuggestions}
-                onSuggest={(floors) => automapLevel && setAutomapSuggestions(suggestAutomap(automapData.table, automapLevel, automapPiecesNow ?? [], { floors }))}
+                onSuggest={(floors) => {
+                  if (!automapLevel) return;
+                  notify('Analysing tiles for automap suggestions…');
+                  void makeAutomapColors().then((colors) => setAutomapSuggestions(suggestAutomap(automapData.table, automapLevel, automapPiecesNow ?? [], { floors, colors })));
+                }}
                 onSuggestionCel={(code, cel) => setAutomapSuggestions((list) => list && list.map((sg) => (sg.code === code ? { ...sg, cel } : sg)))}
                 onSkipCode={(code) => setAutomapSuggestions((list) => list && list.filter((sg) => sg.code !== code))}
                 onApplySuggestions={() => void applyAutomapSuggestionsNow()}
@@ -1672,6 +1785,7 @@ export function App() {
           levelLabel={automapLevelLabel}
           canSave={canWrite}
           onSave={saveAutomapEdits}
+          makeColors={makeAutomapColors}
           onClose={() => setDialog(null)}
         />
       ) : (
@@ -1725,11 +1839,7 @@ export function App() {
             setDialog(null);
             notify(`${cells.length} cells marked · Esc to clear`);
           }}
-          onFix={(fix) => {
-            if (fix.kind === 'open-table') openTable(fix.table.replace(/\.txt$/i, ''), fix.key);
-            else void applyDt1s([...(map?.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path) ?? []), ...fix.paths]);
-          }}
-          onRegister={() => setDialog('register')}
+          onFix={applyFix}
           onClose={() => setDialog(null)}
         />
       )}

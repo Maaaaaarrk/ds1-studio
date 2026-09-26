@@ -1,3 +1,4 @@
+import { decodeTile } from '../formats/dt1';
 import type { Ds1, TileCell, WallCell } from '../formats/ds1';
 import { isEmptyCell } from '../formats/ds1';
 import { parseDc6, type SpriteFrame } from '../formats/dc6';
@@ -279,21 +280,194 @@ export function usualCels(t: AutomapTable, level: string, opts: { acrossActs?: b
   return own;
 }
 
-/** Suggestions for every tile of the map without an automap entry (walls always, floors when asked). */
-export function suggestAutomap(t: AutomapTable, level: string, pieces: AutomapPiece[], opts: { floors: boolean }): AutomapSuggestion[] {
-  const usual = usualCels(t, level);
+/** Colours for matching tiles to automap pieces (average RGB of their visible pixels), when available. */
+export interface AutomapColors {
+  tile: (orientation: number, main: number, sub: number) => [number, number, number] | null;
+  cel: (cel: number) => [number, number, number] | null;
+  /** Every tile (main, sub) of an orientation in the map's libraries: references for look-alike matching. */
+  keys?: (orientation: number) => [number, number][];
+  /**
+   * Whether another level's rules can describe this map's tile: its level type loads the DT1 the tile comes from.
+   * (Tile numbers repeat across DT1s, so a rule written for another level's DT1 may mean a different tile.)
+   */
+  appliesTo?: (level: string, orientation: number, main: number, sub: number) => boolean;
+  /** Look-alike references from elsewhere in the game (see `referenceTiles`), used after the map's own. */
+  extraRefs?: ReferenceTile[];
+  /** A tile's look as a 3×3 grid of average colours (null cells = transparent there), for look-alike matching. */
+  signature?: (orientation: number, main: number, sub: number) => ([number, number, number] | null)[] | null;
+}
+
+type CelCounts = Map<number, number>;
+
+/** Pieces used per tile code (and per code+style) by rules matching `filter`, with how often. */
+function celUse(t: AutomapTable, filter: (r: AutomapRule) => boolean) {
+  const byCode = new Map<string, CelCounts>();
+  const byStyle = new Map<string, CelCounts>();
+  const bump = (m: Map<string, CelCounts>, k: string, cel: number) => {
+    const c = m.get(k) ?? m.set(k, new Map()).get(k)!;
+    c.set(cel, (c.get(cel) ?? 0) + 1);
+  };
+  for (const rules of t.byKey.values())
+    for (const r of rules) {
+      if (!filter(r)) continue;
+      for (const c of r.cels) {
+        bump(byCode, r.code, c.cel);
+        bump(byStyle, `${r.code}|${r.style}`, c.cel);
+      }
+    }
+  return { byCode, byStyle };
+}
+
+/** How different two tiles look on average ("redmean" weighted RGB distance). */
+function colorDistance(a: [number, number, number], b: [number, number, number]): number {
+  const rm = (a[0] + b[0]) / 2;
+  const dr = a[0] - b[0];
+  const dg = a[1] - b[1];
+  const db = a[2] - b[2];
+  return Math.sqrt((2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db);
+}
+
+/**
+ * Suggestions for every tile of the map without an automap entry (walls always, floors when asked). Candidates come
+ * from the closest source that has any: pieces this level already uses for the same code and style, then for the
+ * same code, then the same act's levels (then, for mods' numbered level types, any level). Among the candidates the
+ * piece whose colours best match the tile wins (so water tiles get water pieces and ground gets ground), falling back
+ * to the most used one when colours aren't available.
+ */
+export function suggestAutomap(
+  t: AutomapTable,
+  level: string,
+  pieces: AutomapPiece[],
+  opts: { floors: boolean; colors?: AutomapColors },
+  /** Receives the tiles ("orientation|style|sub") that look like tiles the game leaves off the automap. */
+  out?: { leaveOff?: Set<string> },
+): AutomapSuggestion[] {
+  const act = /^(\d)\s/.exec(level)?.[1];
+  const own = celUse(t, (r) => r.level === level);
+  const sameAct = act ? celUse(t, (r) => r.level.startsWith(`${act} `)) : null;
+  const anyLevel = act ? null : celUse(t, () => true);
+  const candidates = (code: string, style: number): CelCounts | undefined =>
+    own.byStyle.get(`${code}|${style}`) ?? own.byCode.get(code) ?? sameAct?.byCode.get(code) ?? anyLevel?.byCode.get(code);
+
+  // Look-alike references: tiles of the same orientation in the map's libraries that this level's rules already
+  // give a piece. A missing tile borrows the piece of the one it looks most like (water looks like water).
+  type Sig = ([number, number, number] | null)[];
+  const refs = new Map<number, { color: [number, number, number]; sig: Sig | null; cel: number; style: number; sub: number; rank: number }[]>();
+  // Levels whose rules can describe this map's tiles: its own, then the same act's (or, for mods' numbered level
+  // types, every level): maps often reuse vanilla DT1s, whose tiles vanilla levels already give pieces.
+  const refLevels = [level, ...t.levels.filter((l) => l !== level && (act ? l.startsWith(`${act} `) : true))];
+  const unknown = new Set(pieces.filter((p) => !p.rule).map((p) => `${p.orientation}|${p.main}|${p.sub}`));
+  const hasCode = new Map<string, boolean>();
+  const levelHasCode = (l: string, code: string) => {
+    const k = `${l}|${code}`;
+    if (!hasCode.has(k)) hasCode.set(k, [...t.byKey.values()].some((rules) => rules.some((r) => r.level === l && r.code === code)));
+    return hasCode.get(k)!;
+  };
+  const sigDistance = (a: Sig, b: Sig) => {
+    let d = 0;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i];
+      const y = b[i];
+      d += x && y ? colorDistance(x, y) : x || y ? 120 : 0; // shape matters too: opaque where the other is empty
+    }
+    return d / a.length;
+  };
+  const refsFor = (orientation: number) => {
+    if (!opts.colors?.keys) return [];
+    let list = refs.get(orientation);
+    if (!list) {
+      list = [];
+      const code = AUTOMAP_CODES[orientation];
+      for (const [main, sub] of opts.colors.keys(orientation)) {
+        // Tiles still waiting for a piece are the unknowns, not evidence of what the level leaves off.
+        if (unknown.has(`${orientation}|${main}|${sub}`)) continue;
+        // The first level that describes this tile decides its piece — or that it's left off the automap (-1): a
+        // level with automap rows for this kind of tile that gives this one none shows nothing for it on purpose.
+        let found: { cel: number; rank: number } | null = null;
+        for (let i = 0; i < refLevels.length && !found; i++) {
+          const l = refLevels[i];
+          if (i > 0 && !opts.colors.appliesTo?.(l, orientation, main, sub)) continue;
+          if (!levelHasCode(l, code)) continue;
+          const rule = findRule(t, l, orientation, main, sub);
+          found = { cel: rule?.cels[0]?.cel ?? -1, rank: i === 0 ? 0 : 1 };
+        }
+        if (!found) continue;
+        const color = opts.colors.tile(orientation, main, sub);
+        if (color) list.push({ color, sig: opts.colors.signature?.(orientation, main, sub) ?? null, cel: found.cel, style: main, sub, rank: found.rank });
+      }
+      // Game-wide look-alikes: only colour and layout compare (their tile numbers mean nothing here).
+      for (const r of opts.colors.extraRefs ?? [])
+        if (r.orientation === orientation) list.push({ color: r.color, sig: r.sig, cel: r.cel, style: -1, sub: -1, rank: 2 });
+      refs.set(orientation, list);
+    }
+    return list;
+  };
+
+  const pick = (code: string, p: AutomapPiece): number | undefined => {
+    const tileColor = opts.colors?.tile(p.orientation, p.main, p.sub);
+    const references = tileColor ? refsFor(p.orientation) : [];
+    if (tileColor && references.length) {
+      const sig = opts.colors?.signature?.(p.orientation, p.main, p.sub) ?? null;
+      let best = references[0];
+      let bestD = Infinity;
+      for (const r of references) {
+        // Where colours sit on the tile (a 3×3 grid) when known, else its average; same style is a strong hint.
+        // The very same tile described by another level wins outright; the map's own level beats borrowed ones.
+        const same = r.style === p.main && r.sub === p.sub;
+        const d = (sig && r.sig ? sigDistance(sig, r.sig) : colorDistance(tileColor, r.color)) - (r.style === p.main ? 25 : 0) - (same ? 1000 : 0) + r.rank * 10;
+        if (d < bestD) [best, bestD] = [r, d];
+      }
+      return best.cel;
+    }
+    // Nothing to compare with. Walls: the level's usual piece for the kind. Floors: no guess — levels often show
+    // only a few kinds of floor (Act 3's jungle: rivers and bridges), so the usual piece would be wrong for most.
+    if (p.layer === 'floor') return undefined;
+    const c = candidates(code, p.main);
+    if (!c?.size) return undefined;
+    return [...c].sort((a, b) => b[1] - a[1])[0][0];
+  };
+
   const groups = new Map<string, AutomapSuggestion>();
+  const seen = new Set<string>();
+  const leaveOff = new Set<string>();
   for (const p of pieces) {
     if (p.rule || (p.layer === 'floor' && !opts.floors)) continue;
     const code = AUTOMAP_CODES[p.orientation];
-    const cel = code ? usual.get(code) : undefined;
+    if (!code) continue;
+    const tileKey = `${p.orientation}|${p.main}|${p.sub}`;
+    const cel = pick(code, p);
     if (cel === undefined) continue;
-    const k = `${p.orientation}|${p.main}`;
+    if (cel < 0) {
+      leaveOff.add(tileKey);
+      continue;
+    }
+    const k = `${p.orientation}|${p.main}|${cel}`;
     const g = groups.get(k) ?? groups.set(k, { code, orientation: p.orientation, style: p.main, seqs: [], count: 0, cel }).get(k)!;
-    if (!g.seqs.includes(p.sub)) g.seqs.push(p.sub);
+    if (!seen.has(tileKey)) {
+      seen.add(tileKey);
+      g.seqs.push(p.sub);
+    }
     g.count++;
   }
-  return [...groups.values()].map((g) => ({ ...g, seqs: g.seqs.sort((a, b) => a - b) })).sort((a, b) => a.orientation - b.orientation || a.style - b.style);
+  const suggestions = [...groups.values()].map((g) => ({ ...g, seqs: g.seqs.sort((a, b) => a - b) })).sort((a, b) => a.orientation - b.orientation || a.style - b.style || a.cel - b.cel);
+  if (out) out.leaveOff = leaveOff;
+  return suggestions;
+}
+
+/** Average colour of a palette-indexed image's visible pixels (for matching tiles to automap pieces). */
+export function averageColor(pixels: Uint8Array, palette: Uint8Array): [number, number, number] | null {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (const p of pixels) {
+    if (!p) continue;
+    r += palette[p * 4];
+    g += palette[p * 4 + 1];
+    b += palette[p * 4 + 2];
+    n++;
+  }
+  return n ? [r / n, g / n, b / n] : null;
 }
 
 /** Applies suggestions to AutoMap.txt: one row per run of consecutive sequences, in front of the level's other rows. */
@@ -416,3 +590,155 @@ export const AUTOMAP_KINDS: { label: string; codes: string[] }[] = [
   { label: 'Lower walls', codes: ['ld', 'lr', 'lf', 'ls'] },
   { label: 'Shadows', codes: ['sh'] },
 ];
+
+/** Colour lookups for a map: tile colours from its library, piece colours from MaxiMap, both in the map's palette. */
+export function automapColors(
+  lib: {
+    pick: (o: number, main: number, sub: number, seed: number) => import('../formats/dt1').Dt1Tile | null;
+    entries?: () => { orientation: number; main: number; sub: number }[];
+    sourceOf?: (tile: import('../formats/dt1').Dt1Tile) => { path: string } | null;
+  },
+  cels: SpriteFrame[],
+  palette: Uint8Array,
+  /** Level types (LvlTypes.txt), to know which AutoMap.txt levels load which DT1s. */
+  levelTypes?: { table: AutomapTable; types: { id: number; name: string; act: number; files: string[] }[] },
+): AutomapColors {
+  const tiles = new Map<string, [number, number, number] | null>();
+  // AutoMap.txt level → the DT1s its level type(s) load (normalised "act3/jungle/x.dt1").
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\/?data\/global\/tiles\//i, '').toLowerCase();
+  const levelFiles = new Map<string, Set<string>>();
+  if (levelTypes)
+    for (const lt of levelTypes.types) {
+      const l = automapLevelFor(levelTypes.table, lt.name, lt.act || undefined, lt.id);
+      if (!l) continue;
+      const set = levelFiles.get(l) ?? levelFiles.set(l, new Set()).get(l)!;
+      for (const f of lt.files) if (f) set.add(norm(f));
+    }
+  const sigs = new Map<string, ([number, number, number] | null)[] | null>();
+  const pieces = new Map<number, [number, number, number] | null>();
+  return {
+    appliesTo: (level, o, main, sub) => {
+      const files = levelFiles.get(level);
+      const t = files && lib.pick(o, main, sub, 0);
+      const src = t && lib.sourceOf?.(t);
+      return !!src && files!.has(norm(src.path));
+    },
+    keys: (o) => lib.entries?.().filter((e) => e.orientation === o).map((e) => [e.main, e.sub] as [number, number]) ?? [],
+    tile: (o, main, sub) => {
+      const k = `${o}|${main}|${sub}`;
+      if (!tiles.has(k)) {
+        const t = lib.pick(o, main, sub, 0);
+        const img = t ? decodeTile(t) : null;
+        tiles.set(k, img ? averageColor(img.pixels, palette) : null);
+      }
+      return tiles.get(k)!;
+    },
+    signature: (o, main, sub) => {
+      const k = `${o}|${main}|${sub}`;
+      if (!sigs.has(k)) {
+        const t = lib.pick(o, main, sub, 0);
+        const img = t ? decodeTile(t) : null;
+        if (!img) sigs.set(k, null);
+        else {
+          const out: ([number, number, number] | null)[] = [];
+          for (let gy = 0; gy < 3; gy++)
+            for (let gx = 0; gx < 3; gx++) {
+              const x0 = Math.floor((gx * img.width) / 3);
+              const x1 = Math.floor(((gx + 1) * img.width) / 3);
+              const y0 = Math.floor((gy * img.height) / 3);
+              const y1 = Math.floor(((gy + 1) * img.height) / 3);
+              const cell: number[] = [];
+              for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) cell.push(img.pixels[y * img.width + x]);
+              out.push(averageColor(Uint8Array.from(cell), palette));
+            }
+          sigs.set(k, out);
+        }
+      }
+      return sigs.get(k)!;
+    },
+    cel: (cel) => {
+      if (!pieces.has(cel)) pieces.set(cel, cels[cel] ? averageColor(cels[cel].pixels, palette) : null);
+      return pieces.get(cel)!;
+    },
+  };
+}
+
+/** A tile somewhere in the game with the automap piece its level gives it, described by its look. */
+export interface ReferenceTile {
+  orientation: number;
+  color: [number, number, number];
+  sig: ([number, number, number] | null)[];
+  cel: number;
+}
+
+/** A tile's look: 3×3 grid of average colours (null = transparent cell). */
+export function tileSignature(img: { width: number; height: number; pixels: Uint8Array }, palette: Uint8Array): ([number, number, number] | null)[] {
+  const out: ([number, number, number] | null)[] = [];
+  for (let gy = 0; gy < 3; gy++)
+    for (let gx = 0; gx < 3; gx++) {
+      const x0 = Math.floor((gx * img.width) / 3);
+      const x1 = Math.floor(((gx + 1) * img.width) / 3);
+      const y0 = Math.floor((gy * img.height) / 3);
+      const y1 = Math.floor(((gy + 1) * img.height) / 3);
+      const cell: number[] = [];
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) cell.push(img.pixels[y * img.width + x]);
+      out.push(averageColor(Uint8Array.from(cell), palette));
+    }
+  return out;
+}
+
+/**
+ * Look-alike references from the game's other levels: every tile of the DT1s their level types load, with the piece
+ * their AutoMap.txt rows give it (the DT1 is known, so the tile numbers are unambiguous). `levels` limits which
+ * levels are used (e.g. the same act). Tiles are seen in their own act's palette, as in game.
+ */
+export async function referenceTiles(opts: {
+  table: AutomapTable;
+  types: { id: number; name: string; act: number; files: string[] }[];
+  levels: (level: string) => boolean;
+  loadDt1: (path: string) => Promise<import('../formats/dt1').Dt1 | null>;
+  palette: (act: number) => Promise<Uint8Array>;
+  onProgress?: (done: number, total: number) => void;
+}): Promise<ReferenceTile[]> {
+  const jobs: { level: string; act: number; file: string }[] = [];
+  const seen = new Set<string>();
+  for (const lt of opts.types) {
+    const level = automapLevelFor(opts.table, lt.name, lt.act || undefined, lt.id);
+    if (!level || !opts.levels(level)) continue;
+    for (const f of lt.files) {
+      if (!f) continue;
+      const k = `${level}|${f.toLowerCase()}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      jobs.push({ level, act: Math.max(0, (lt.act || 1) - 1), file: `data/global/tiles/${f.replace(/\\/g, '/')}` });
+    }
+  }
+  const out: ReferenceTile[] = [];
+  let done = 0;
+  const codeSets = new Map<string, Set<string>>();
+  const codesOf = (level: string) => {
+    let set = codeSets.get(level);
+    if (!set) {
+      set = new Set();
+      for (const rules of opts.table.byKey.values()) for (const r of rules) if (r.level === level) set.add(r.code);
+      codeSets.set(level, set);
+    }
+    return set;
+  };
+  for (const j of jobs) {
+    const dt1 = await opts.loadDt1(j.file).catch(() => null);
+    const palette = await opts.palette(Math.min(4, j.act));
+    for (const t of dt1?.tiles ?? []) {
+      const code = AUTOMAP_CODES[t.orientation];
+      if (!code || !codesOf(j.level).has(code)) continue;
+      const rule = findRule(opts.table, j.level, t.orientation, t.mainIndex, t.subIndex);
+      const img = decodeTile(t);
+      if (!img) continue;
+      const color = averageColor(img.pixels, palette);
+      // -1: this level shows nothing for the tile (it has rows for this kind of tile, just not this one).
+      if (color) out.push({ orientation: t.orientation, color, sig: tileSignature(img, palette), cel: rule?.cels[0]?.cel ?? -1 });
+    }
+    opts.onProgress?.(++done, jobs.length);
+  }
+  return out;
+}

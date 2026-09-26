@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { CheckResult } from '../game/compat';
+import type { CheckResult, Fix } from '../game/compat';
 import type { ImportPlan, MapPackage } from '../game/mapPackage';
 import { Modal } from './Dialogs';
 import { ColHelp } from './HelpTip';
@@ -13,12 +13,21 @@ interface CheckProps {
   results: CheckResult[] | null;
   onRerun: () => void;
   onShowCells: (cells: { x: number; y: number }[]) => void;
-  onFix: (fix: NonNullable<CheckResult['fix']>) => void;
-  onRegister: () => void;
+  /** Carries out a fix; resolves when done (the check then re-runs). */
+  onFix: (fix: Fix) => Promise<void> | void;
   onClose: () => void;
 }
 
-export function CompatDialog({ results, onRerun, onShowCells, onFix, onRegister, onClose }: CheckProps) {
+export function CompatDialog({ results, onRerun, onShowCells, onFix, onClose }: CheckProps) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const run = async (key: string, fix: Fix) => {
+    setBusy(key);
+    try {
+      await onFix(fix);
+    } finally {
+      setBusy(null);
+    }
+  };
   const errors = results?.filter((r) => r.severity === 'error').length ?? 0;
   const warnings = results?.filter((r) => r.severity === 'warning').length ?? 0;
   return (
@@ -54,17 +63,20 @@ export function CompatDialog({ results, onRerun, onShowCells, onFix, onRegister,
                     Show on map ({r.cells.length})
                   </button>
                 )}
-                {r.fix && (
-                  <button className="link small" onClick={() => onFix(r.fix!)}>
-                    {r.fix.kind === 'open-table' ? `Open ${r.fix.table}` : 'Add the DT1s'}
-                  </button>
-                )}
-                {r.title.startsWith('Not referenced by LvlPrest') && (
-                  <button className="link small" onClick={onRegister}>
-                    Add map to game…
-                  </button>
-                )}
               </div>
+              {r.fixes && r.fixes.length > 0 && r.severity !== 'ok' && (
+                <div className="check-fixes">
+                  <span className="muted small">Fix:</span>
+                  {r.fixes.map((f, n) => {
+                    const key = `${i}.${n}`;
+                    return (
+                      <button key={key} className={`btn small${n === 0 ? ' primary' : ''}`} disabled={!!busy} onClick={() => void run(key, f)}>
+                        {busy === key ? 'Working…' : f.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </li>
         ))}
