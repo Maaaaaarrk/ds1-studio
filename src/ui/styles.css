@@ -466,3 +466,43 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .tz-view:active { cursor: grabbing; }
 .tz-view canvas { position: absolute; inset: 0; display: block; }
 .tz-bar select { width: auto; }
+
+/* Keyboard shortcuts window */
+.sc-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.sc-search { width: 260px; }
+.sc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; max-height: 64vh; overflow-y: auto; padding-right: 4px; align-items: start; }
+.sc-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 6px; }
+.sc-card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent, #d4a84f); padding: 2px 0 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; display: flex; gap: 8px; align-items: baseline; }
+.sc-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px 2px; border-radius: 4px; }
+.sc-row:hover { background: var(--panel-2, rgba(255, 255, 255, 0.04)); }
+.sc-label { flex: 1; font-size: 13px; }
+.sc-row.changed .sc-label::after { content: ' •'; color: var(--accent, #d4a84f); }
+.sc-keys { background: none; border: 1px solid transparent; border-radius: 5px; padding: 2px 4px; cursor: pointer; color: inherit; min-width: 64px; text-align: right; }
+.sc-keys:hover { border-color: var(--border); }
+.sc-keys.capturing { border-color: var(--accent, #d4a84f); background: rgba(212, 168, 79, 0.12); }
+.sc-press { font-size: 12px; color: var(--accent, #d4a84f); }
+.sc-undo { background: none; border: 0; color: var(--muted, #888); cursor: pointer; font-size: 14px; padding: 0 4px; }
+.sc-undo:hover { color: var(--accent, #d4a84f); }
+.sc-fixed { font-size: 12px; color: var(--muted, #9aa); text-align: right; max-width: 55%; }
+.sc-foot { flex: 1; }
+.kbd-combo { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.kbd-plus { color: var(--muted, #888); font-size: 11px; margin: 0 2px; }
+kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/16px ui-monospace, 'Cascadia Mono', Consolas, monospace; text-align: center; color: #e8e8ee; background: linear-gradient(#34363f, #2a2c33); border: 1px solid #4a4c57; border-bottom-width: 2px; border-radius: 5px; }
+
+/* DT1 library tree (DT1 editor) */
+.modal.dt1-editor { width: min(1480px, calc(100% - 24px)); }
+.dt1-editor .dte-body { grid-template-columns: 250px 1fr 300px; }
+.dte-current { padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); }
+.dtt { display: flex; flex-direction: column; gap: 6px; min-height: 0; max-height: 62vh; }
+.dtt-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 0; flex: 1; min-height: 0; }
+.dtt-section { display: flex; gap: 8px; align-items: baseline; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent, #d4a84f); padding: 8px 8px 4px; }
+.dtt-section .link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.dtt-folder-row, .dtt-file { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; font-size: 12px; padding: 3px 8px; border-radius: 4px; }
+.dtt-folder-row { font-weight: 600; }
+.dtt-folder-row:hover, .dtt-file:hover { background: var(--panel-2, rgba(255, 255, 255, 0.05)); }
+.dtt-file { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dtt-file.active { background: var(--accent-dim, rgba(212, 168, 79, 0.18)); color: #fff; }
+.dtt-caret { width: 10px; color: var(--muted, #888); }
+.dtt-count { margin-left: auto; font-size: 10.5px; font-weight: 400; color: var(--muted, #888); letter-spacing: 0; }
+.dtt-badge { margin-left: auto; font: 600 9.5px/14px system-ui, sans-serif; text-transform: uppercase; padding: 0 5px; border-radius: 3px; background: rgba(212, 168, 79, 0.2); color: var(--accent, #d4a84f); }
+.dte-grid, .dt1v-grid { align-content: start; }

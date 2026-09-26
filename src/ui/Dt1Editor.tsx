@@ -5,13 +5,14 @@ import { setManyTilePixels } from '../formats/dt1Paint';
 import { ImageThumb, PixelPainter } from './PixelPainter';
 import { FloatingWindow } from './FloatingWindow';
 import { TileZoom } from './TileZoom';
+import { Dt1Tree } from './Dt1Tree';
+import { normalizePath } from '../vfs/vfs';
 import type { Palette } from '../formats/palette';
 import { hueRemap, recolorDt1, swapRemap } from '../formats/dt1Edit';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { presetToClipboard, type Preset } from '../game/presets';
 import type { CellRect } from '../game/clipboard';
-import { normalizePath } from '../vfs/vfs';
 import { ORIENTATION_NAMES } from './state';
 import { Thumb } from './TilePalette';
 
@@ -69,6 +70,22 @@ function remappedPalette(palette: Palette, remap: Uint8Array): Palette {
 export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClose }: Props) {
   const libs = useMemo(() => map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path), [map]);
   const [path, setPath] = useState(libs[0] ?? '');
+  /** Every DT1 in the game and mods, for the library tree. */
+  const allDt1s = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
+  const inMapLib = libs.some((l) => normalizePath(l) === normalizePath(path));
+  // DT1s store palette indices: show (and recolour) each in its own act's palette, taken from its folder.
+  const [pal, setPal] = useState<{ palette: Palette; act: number | null }>({ palette: map.palette, act: null });
+  useEffect(() => {
+    const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(path);
+    const act = m ? (m[1] ? Number(m[1]) - 1 : 4) : null;
+    if (inMapLib || act === null || act === map.ds1.act) return setPal({ palette: map.palette, act: null });
+    let live = true;
+    void gd.palette(act).then((palette) => live && setPal({ palette, act }));
+    return () => {
+      live = false;
+    };
+  }, [path, inMapLib, gd, map]);
+  const palette = pal.palette;
   const [dt1, setDt1] = useState<Dt1 | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [adjust, setAdjust] = useState<Adjust>(NO_ADJUST);
@@ -95,7 +112,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   }, [path, gd]);
 
   const remap = useMemo(() => {
-    let r = hueRemap(map.palette, {
+    let r = hueRemap(palette, {
       hue: adjust.hue,
       saturation: adjust.saturation,
       brightness: adjust.brightness,
@@ -103,12 +120,12 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       tintAmount: adjust.tintAmount,
     });
     if (adjust.swapOn) {
-      const s = swapRemap(map.palette, rgb(adjust.swapFrom), rgb(adjust.swapTo), adjust.swapTolerance);
+      const s = swapRemap(palette, rgb(adjust.swapFrom), rgb(adjust.swapTo), adjust.swapTolerance);
       r = r.map((v) => s[v]);
     }
     return r;
-  }, [map.palette, adjust]);
-  const previewPal = useMemo(() => remappedPalette(map.palette, remap), [map.palette, remap]);
+  }, [palette, adjust]);
+  const previewPal = useMemo(() => remappedPalette(palette, remap), [palette, remap]);
   const changes = remap.some((v, i) => v !== i);
 
   // Tiles of this DT1 matching a set of (orientation, main, sub) keys.
@@ -175,7 +192,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       if (!bytes) throw new Error(`${path} not found`);
       const painted = edits.size ? setManyTilePixels(bytes, [...edits].map(([tileIndex, image]) => ({ tileIndex, image }))) : bytes;
       const out = changes ? recolorDt1(painted, remap, picked.size ? [...picked] : undefined) : painted;
-      await onSave({ path: newPath, bytes: out, switchMap: switchMap && !overwrite, original: path });
+      await onSave({ path: newPath, bytes: out, switchMap: switchMap && !overwrite && inMapLib, original: path });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -189,16 +206,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       <div className="modal dt1-editor" role="dialog" aria-label="DT1 editor" onKeyDown={(e) => e.stopPropagation()}>
         <div className="modal-title">DT1 editor</div>
         <div className="dte-top">
-          <label className="small">
-            Tile library{' '}
-            <select value={path} onChange={(e) => setPath(e.target.value)}>
-              {libs.map((p) => (
-                <option key={p} value={p}>
-                  {short(p)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <span className="mono small dte-current">{short(path)}</span>
+          {pal.act !== null && <span className="muted small">shown in its Act {pal.act + 1} palette</span>}
           <span className="muted small">{dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'none selected = whole DT1'}` : 'loading…'}</span>
           <button className="btn small" onClick={() => setPicked(new Set(dt1?.tiles.map((_, i) => i)))}>
             Select all
@@ -243,7 +252,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             tile={dt1.tiles[painting]}
             tileIndex={painting}
             image={edits.get(painting) ?? decodeTile(dt1.tiles[painting])!}
-            palette={map.palette}
+            palette={palette}
             onDone={(img) => {
               if (img) setEdits((m) => new Map(m).set(painting, img));
               setPainting(null);
@@ -251,6 +260,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           />
         )}
         <div className="dte-body" hidden={painting !== null}>
+          <Dt1Tree all={allDt1s} inMap={libs} selected={path} onSelect={setPath} />
           <div
             className="thumb-grid dte-grid"
             style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size + 14}px, 1fr))`, ['--thumb-h' as string]: `${size}px` }}
@@ -271,7 +281,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
                   }}
                   onDoubleClick={() => t.blocks.length && setPainting(i)}
                 >
-                  {edited ? <ImageThumb image={edited} palette={affected ? previewPal : map.palette} /> : <Thumb tile={t} palette={affected ? previewPal : map.palette} />}
+                  {edited ? <ImageThumb image={edited} palette={affected ? previewPal : palette} /> : <Thumb tile={t} palette={affected ? previewPal : palette} />}
                   <span className="thumb-label">
                     {t.mainIndex}/{t.subIndex}
                   </span>
@@ -322,7 +332,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             </div>
             {overwrite && <p className="small warn-text">Overwrites the original (kept as .bak).</p>}
             {exists && <p className="small warn-text">A DT1 with that name already exists and will be replaced.</p>}
-            {!overwrite && (
+            {!overwrite && inMapLib && (
               <label className="small">
                 <input type="checkbox" checked={switchMap} onChange={(e) => setSwitchMap(e.target.checked)} /> Use it in this map instead of {short(path).split('/').pop()}
               </label>
@@ -349,7 +359,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           >
             <TileZoom
               image={edits.get(zoomed) ?? decodeTile(dt1.tiles[zoomed]) ?? { width: 1, height: 1, offsetX: 0, offsetY: 0, pixels: new Uint8Array(1) }}
-              palette={changes && (picked.size === 0 || picked.has(zoomed)) ? previewPal : map.palette}
+              palette={changes && (picked.size === 0 || picked.has(zoomed)) ? previewPal : palette}
             />
           </FloatingWindow>
         )}

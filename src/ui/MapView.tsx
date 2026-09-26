@@ -385,6 +385,12 @@ export function MapView(props: Props) {
       }
       if (stroke) latest.current.onStroke('end', [], toWorld(ev));
       stroke = null;
+      if (pan && ev.button === 2) {
+        // The context menu for this right-click fires after pointerup, wherever the cursor ended up: swallow it.
+        const swallow = (e: Event) => e.preventDefault();
+        window.addEventListener('contextmenu', swallow, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener('contextmenu', swallow, { capture: true }), 400);
+      }
       pan = null;
       if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
       setCursor();

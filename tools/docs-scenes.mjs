@@ -31,6 +31,15 @@ export function makeScenes(h) {
     if (shown !== on) await press('a');
     await sleep(on ? 2500 : 300);
   };
+  /** Opens a tile library in the DT1 editor's tree by searching for it. */
+  const pickLibrary = async (search) => {
+    await js(`const i = document.querySelector('.dtt input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(search)});
+      i.dispatchEvent(new Event('input', { bubbles: true }));`);
+    await sleep(400);
+    await js(`document.querySelector('.dtt-file')?.click();`);
+    await sleep(1500);
+  };
   const town = async () => {
     await openMap('act1/town/town', 'townN1.ds1');
     await fit();
@@ -173,7 +182,7 @@ export function makeScenes(h) {
       await ribbonTab('Map');
       await button('DT1 editor');
       await sleep(1200);
-      await setSelect('.dt1-editor select', /treegroups\.dt1$/i);
+      await pickLibrary('outdoors/treegroups');
       await sleep(2000);
       await setRange('.dte-slider input[type=range]', 140);
       await sleep(1200);
@@ -195,7 +204,7 @@ export function makeScenes(h) {
       await ribbonTab('Map');
       await button('DT1 editor');
       await sleep(1200);
-      await setSelect('.dt1-editor select', /act1\/town\/fence\.dt1$/i);
+      await pickLibrary('town/fence');
       await sleep(1500);
       await js(`document.querySelectorAll('.dte-grid .thumb')[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));`);
       await sleep(800);
