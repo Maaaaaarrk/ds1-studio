@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isEmptyCell, writeDs1, WRITE_VERSION, type WallCell } from '../formats/ds1';
+import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1Object, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { GameData } from '../game/GameData';
 import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, hitTest, tilesAt } from '../render/scene';
+import { buildScene, hitTest, subTileToWorld, tilesAt, worldToSubTile } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, type SaveTarget } from '../vfs/save';
 import { LayeredFs, type FileSource } from '../vfs/vfs';
@@ -13,6 +13,7 @@ import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } from './MapView';
 import { CellPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
+import { ObjectPanel } from './ObjectPanel';
 import { TilePalette } from './TilePalette';
 
 type DataState =
@@ -52,9 +53,25 @@ export function App() {
   const [selection, setSelection] = useState<CellRect | null>(null);
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
+  const [selectedObject, setSelectedObject] = useState<number | null>(null);
+  const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
+  /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
+  const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
 
   const bump = () => setRevision((r) => r + 1);
+  const shiftHeld = useRef(false);
+  useEffect(() => {
+    const track = (e: KeyboardEvent | PointerEvent) => (shiftHeld.current = e.shiftKey);
+    window.addEventListener('keydown', track);
+    window.addEventListener('keyup', track);
+    window.addEventListener('pointerdown', track, true);
+    return () => {
+      window.removeEventListener('keydown', track);
+      window.removeEventListener('keyup', track);
+      window.removeEventListener('pointerdown', track, true);
+    };
+  }, []);
   const notify = useCallback((text: string, error = false) => setToast({ text, error }), []);
   useEffect(() => {
     if (!toast || toast.error) return;
@@ -118,6 +135,8 @@ export function App() {
         setBrush(null);
         setSelection(null);
         setPasting(false);
+        setSelectedObject(null);
+        setPlacing(null);
         setTool((t) => (t === 'paint' ? 'select' : t));
       } catch (e) {
         notify(`${path}: ${(e as Error).message}`, true);
@@ -205,6 +224,65 @@ export function App() {
   const onStroke = useCallback(
     (phase: StrokePhase, cells: [number, number][], world: [number, number]) => {
       if (!doc) return;
+      if (tool === 'object') {
+        const [fx, fy] = worldToSubTile(world[0], world[1]);
+        const sx = Math.round(fx);
+        const sy = Math.round(fy);
+        const objs = doc.ds1.objects;
+        if (phase === 'start') {
+          const near = (x: number, y: number) => {
+            const [wx, wy] = subTileToWorld(x, y);
+            return Math.hypot(wx - world[0], wy - world[1]) < 10;
+          };
+          if (placing) {
+            const next: Ds1Object[] = [...objs, { type: placing.type, id: placing.id, x: sx, y: sy, flags: 0, path: [] }];
+            doc.setObjects(next);
+            setSelectedObject(next.length - 1);
+            setPlacing(null);
+            bump();
+            return;
+          }
+          const sel = selectedObject !== null ? objs[selectedObject] : null;
+          const point = sel ? sel.path.findIndex((p) => near(p.x, p.y)) : -1;
+          if (sel && point >= 0) {
+            doc.beginObjectEdit();
+            objectDrag.current = { obj: selectedObject!, point };
+            return;
+          }
+          if (sel && shiftHeld.current) {
+            doc.setObjects(objs.map((o, i) => (i === selectedObject ? { ...o, path: [...o.path, { x: sx, y: sy, action: 1 }] } : o)));
+            bump();
+            return;
+          }
+          // Topmost (last drawn) object under the cursor.
+          let hit = -1;
+          for (let i = objs.length - 1; i >= 0 && hit < 0; i--) if (near(objs[i].x, objs[i].y)) hit = i;
+          setSelectedObject(hit >= 0 ? hit : null);
+          if (hit >= 0) {
+            doc.beginObjectEdit();
+            objectDrag.current = { obj: hit, point: null };
+          }
+          return;
+        }
+        const drag = objectDrag.current;
+        if (drag && phase === 'move') {
+          const next = objs.map((o, i) => {
+            if (i !== drag.obj) return o;
+            if (drag.point === null) return o.x === sx && o.y === sy ? o : { ...o, x: sx, y: sy };
+            return { ...o, path: o.path.map((p, n) => (n === drag.point ? { ...p, x: sx, y: sy } : p)) };
+          });
+          if (next[drag.obj] !== objs[drag.obj]) {
+            doc.liveObjects(next);
+            bump();
+          }
+        }
+        if (phase === 'end') {
+          doc.endObjectEdit();
+          objectDrag.current = null;
+          bump();
+        }
+        return;
+      }
       if (pasting) {
         if (phase === 'start' && cells[0] && clipboard) {
           const [x, y] = cells[0];
@@ -239,7 +317,7 @@ export function App() {
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, activeLayer, pickAt, notify, pasting, clipboard],
+    [doc, tool, brush, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject],
   );
 
   // Selection commands.
@@ -270,6 +348,24 @@ export function App() {
     if (!brush) return notify('Choose a tile in the Tiles panel first.', true);
     if (doc.apply(fillEdits(doc, selection, activeLayer, { ...brush, orientation: brushOrientation(activeLayer, brush) }))) bump();
   }, [doc, selection, brush, activeLayer, notify]);
+  const setObjects = useCallback(
+    (next: Ds1Object[]) => {
+      if (!doc) return;
+      doc.setObjects(next);
+      if (selectedObject !== null && selectedObject >= next.length) setSelectedObject(null);
+      bump();
+    },
+    [doc, selectedObject],
+  );
+  const deleteSelectedObject = useCallback(() => {
+    if (!doc || selectedObject === null) return false;
+    setObjects(doc.ds1.objects.filter((_, i) => i !== selectedObject));
+    setSelectedObject(null);
+    return true;
+  }, [doc, selectedObject, setObjects]);
+  const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
+  const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
+
   const applyEdits = useCallback(
     (edits: CellEdit[]) => {
       if (doc?.apply(edits)) bump();
@@ -309,8 +405,8 @@ export function App() {
   }, [doc]);
 
   // Keyboard shortcuts.
-  const handlers = useRef({ undo, redo, save, copy, startPaste, clearSelection, doc });
-  handlers.current = { undo, redo, save, copy, startPaste, clearSelection, doc };
+  const handlers = useRef({ undo, redo, save, copy, startPaste, clearSelection, deleteSelectedObject, doc, tool });
+  handlers.current = { undo, redo, save, copy, startPaste, clearSelection, deleteSelectedObject, doc, tool };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -340,16 +436,18 @@ export function App() {
         }
       } else if (k === 'escape') {
         setPasting(false);
-        setSelection(null);
+        setPlacing(null);
+        if (handlers.current.tool === 'object') setSelectedObject(null);
+        else setSelection(null);
       } else if (k === 'delete' || k === 'backspace') {
         e.preventDefault();
-        handlers.current.clearSelection(e.shiftKey);
+        if (handlers.current.tool !== 'object' || !handlers.current.deleteSelectedObject()) handlers.current.clearSelection(e.shiftKey);
       } else if (!mod && !e.altKey) {
         const t = TOOLS.find((t) => t.key === k);
         if (t) setTool(t.id);
         else if (k === 'f') setFitSignal((n) => n + 1);
         else if (k === 'g') setVisibility((v) => ({ ...v, grid: !v.grid }));
-        else if (k === 'o') setVisibility((v) => ({ ...v, objects: !v.objects }));
+        else if (k === 'w') setVisibility((v) => ({ ...v, walkable: !v.walkable }));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -452,6 +550,8 @@ export function App() {
             ghost={ghost}
             selection={selection}
             pasteRect={pasteRect}
+            objectLabel={objectLabel}
+            selectedObject={selectedObject}
             onHover={setHover}
             onZoom={setZoom}
             onStroke={onStroke}
@@ -476,7 +576,19 @@ export function App() {
       <aside className="sidebar right">
         {map && scene && doc && (
           <>
-            <section className="panel">
+            {tool === 'object' && (
+              <ObjectPanel
+                objects={map.ds1.objects}
+                selected={selectedObject}
+                nameOf={nameOf}
+                hasNames={data.gd.hasObjectNames}
+                placing={placing}
+                onSelect={setSelectedObject}
+                onChange={setObjects}
+                onStartPlacing={setPlacing}
+              />
+            )}
+            <section className="panel" hidden={tool === 'object'}>
               <div className="panel-header static">
                 <span>Tiles · {layerLabel(activeLayer)}</span>
                 {brush && (

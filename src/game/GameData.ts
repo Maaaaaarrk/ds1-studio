@@ -34,6 +34,12 @@ export class GameData {
   private levelTypeById = new Map<number, number>();
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
+  /** "act:type:id" -> name, from WinDS1's obj.txt (acts 1-based). */
+  private objNames = new Map<string, string>();
+  /** MonPreset.txt "Place" per act (1-based), indexed by NPC id. */
+  private monPresets = new Map<number, string[]>();
+  /** WinDS1's special-tile graphics, when available. */
+  specialTiles: Dt1 | null = null;
 
   private constructor(readonly fs: LayeredFs) {}
 
@@ -44,7 +50,28 @@ export class GameData {
       if (!bytes) gd.warnings.push(`${name} not found; DT1s will come from each DS1's embedded file list.`);
       return bytes ? parseTxt(bytes) : null;
     };
-    const [prest, types, levels] = await Promise.all([table('LvlPrest.txt'), table('LvlTypes.txt'), table('Levels.txt')]);
+    const [prest, types, levels, monPreset] = await Promise.all([
+      table('LvlPrest.txt'),
+      table('LvlTypes.txt'),
+      table('Levels.txt'),
+      fs.read('data/global/excel/MonPreset.txt').then((b) => (b ? parseTxt(b) : null)),
+    ]);
+    for (const row of monPreset?.rows ?? []) {
+      const act = Number(row['Act']);
+      if (!gd.monPresets.has(act)) gd.monPresets.set(act, []);
+      gd.monPresets.get(act)!.push(row['Place']);
+    }
+    const [objTxt, specials] = await Promise.all([fs.read('winds1/obj.txt'), fs.read('winds1/ds1edit.dt1')]);
+    for (const row of objTxt ? parseTxt(objTxt).rows : []) {
+      if (row['Description']) gd.objNames.set(`${row['Act']}:${row['Type']}:${row['Id']}`, row['Description'].replace(/^#\s*/, ''));
+    }
+    if (specials) {
+      try {
+        gd.specialTiles = parseDt1(specials);
+      } catch (e) {
+        gd.warnings.push(`ds1edit.dt1: ${(e as Error).message}`);
+      }
+    }
 
     for (const row of types?.rows ?? []) {
       const id = Number(row['Id']);
@@ -95,6 +122,34 @@ export class GameData {
       this.dt1s.set(key, p);
     }
     return p;
+  }
+
+  /**
+   * Display name of a DS1 object. Uses WinDS1's obj.txt when available (normalising ids that spill into the next act
+   * the way WinDS1 does: 60 NPC / 150 object ids per act), then MonPreset.txt for NPCs, else "type,id".
+   */
+  objectName(act0: number, type: number, id: number): string {
+    let act = act0 + 1;
+    const exact = this.objNames.get(`${act}:${type}:${id}`);
+    if (exact) return exact;
+    const per = type === 1 ? 60 : 150;
+    let n = id;
+    while (n < 0) {
+      act--;
+      n += per;
+    }
+    while (n >= per) {
+      act++;
+      n -= per;
+    }
+    const normalised = this.objNames.get(`${act}:${type}:${n}`);
+    if (normalised) return normalised;
+    const preset = type === 1 ? this.monPresets.get(act0 + 1)?.[id] : undefined;
+    return preset ?? `${type === 1 ? 'NPC' : 'Object'} ${id}`;
+  }
+
+  get hasObjectNames(): boolean {
+    return this.objNames.size > 0;
   }
 
   lvlType(id: number): LvlTypeInfo | null {
@@ -174,8 +229,27 @@ export class TileLibrary {
       .map(([k, tiles]) => ({ orientation: k >>> 16, main: (k >>> 8) & 0xff, sub: k & 0xff, tiles }));
   }
 
+  /** Adds tiles only for keys no loaded DT1 provides (WinDS1's special-tile graphics yield to game tiles). */
+  addFallback(path: string, dt1: Dt1): void {
+    const fresh = dt1.tiles.filter((t) => !this.byKey.has(TileLibrary.key(t.orientation, t.mainIndex, t.subIndex)));
+    this.add(path, { ...dt1, tiles: fresh });
+    for (const t of dt1.tiles) this.labels.set(TileLibrary.key(t.orientation, t.mainIndex, t.subIndex), t);
+  }
+
+  /** WinDS1's labelled graphic for a special tile, drawn over the game's own (in-game invisible) graphic. */
+  label(orientation: number, main: number, sub: number): Dt1Tile | null {
+    return this.labels.get(TileLibrary.key(orientation, main, sub)) ?? null;
+  }
+
+  private labels = new Map<number, Dt1Tile>();
+
   variants(orientation: number, main: number, sub: number): Dt1Tile[] {
     return this.byKey.get(TileLibrary.key(orientation, main, sub)) ?? [];
+  }
+
+  /** Animation frames for an animated tile: all variants ordered by frame index (the "rarity" field). */
+  frames(orientation: number, main: number, sub: number): Dt1Tile[] {
+    return [...this.variants(orientation, main, sub)].sort((a, b) => a.rarity - b.rarity);
   }
 
   /** Picks a variant deterministically from a per-cell seed, weighted by rarity (like the game's random pick). */

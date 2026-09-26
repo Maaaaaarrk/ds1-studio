@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
-import { Orientation, type Dt1Tile } from '../formats/dt1';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Ds1Object } from '../formats/ds1';
+import type { Dt1Tile } from '../formats/dt1';
 import type { CellRect } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
-import { cellToWorld, subTileToWorld, worldToCell, type DrawItem, type Scene } from '../render/scene';
+import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
 
 export interface HoverInfo {
@@ -28,6 +29,9 @@ interface Props {
   hover: HoverInfo | null;
   tool: Tool;
   ghost: GhostTile[];
+  /** Display name for an object marker. */
+  objectLabel: (o: Ds1Object) => string;
+  selectedObject: number | null;
   selection: CellRect | null;
   /** Footprint of a pending paste, drawn as an outline. */
   pasteRect: CellRect | null;
@@ -53,6 +57,8 @@ export function isVisible(it: DrawItem, v: Visibility): boolean {
       return v.walls[it.layer] ?? true;
     case 'roof':
       return v.roofs && (v.walls[it.layer] ?? true);
+    case 'special':
+      return v.specials;
   }
 }
 
@@ -79,15 +85,25 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
   }
 }
 
-export function MapView({ map, scene, visibility, hover, tool, ghost, selection, pasteRect, onHover, onZoom, onStroke, fitSignal }: Props) {
+export function MapView(props: Props) {
+  const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, fitSignal } = props;
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
   const atlas = useRef(new TileAtlas());
   const camera = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const dirty = useRef(true);
-  const latest = useRef({ map, scene, visibility, hover, tool, selection, pasteRect, onHover, onZoom, onStroke });
-  latest.current = { map, scene, visibility, hover, tool, selection, pasteRect, onHover, onZoom, onStroke };
+  const [frame, setFrame] = useState(0);
+  const walk = useMemo(() => (visibility.walkable ? walkability(map.ds1, scene) : null), [visibility.walkable, map, scene]);
+  const latest = useRef({ ...props, walk });
+  latest.current = { ...props, walk };
+
+  // Animated floors run at 10 fps, like the game.
+  useEffect(() => {
+    if (!scene.animated || !visibility.animate) return;
+    const t = setInterval(() => setFrame((f) => f + 1), 100);
+    return () => clearInterval(t);
+  }, [scene.animated, visibility.animate]);
 
   // One renderer per canvas; redraw on demand.
   useEffect(() => {
@@ -147,18 +163,19 @@ export function MapView({ map, scene, visibility, hover, tool, ghost, selection,
     for (const it of scene.items) {
       if (!isVisible(it, visibility)) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : 0;
-      if (hover && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
-      push(it.tile, it.x, it.y, flags);
+      if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
+      const tile = it.frames && visibility.animate ? it.frames[frame % it.frames.length] : it.tile;
+      push(tile, it.x, it.y, flags);
     }
     for (const g of ghost) push(g.tile, g.x, g.y, InstanceFlag.Ghost);
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost]);
+  }, [scene, visibility, hover, ghost, frame, tool]);
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk]);
 
   // Input.
   useEffect(() => {
@@ -295,18 +312,40 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
   ctx.closePath();
 }
 
-function drawOverlay(
-  canvas: HTMLCanvasElement,
-  cam: Camera,
-  s: { map: OpenMap; scene: Scene; visibility: Visibility; hover: HoverInfo | null; tool: Tool; selection: CellRect | null; pasteRect: CellRect | null },
-) {
+type OverlayState = Props & { walk: Uint8Array | null };
+
+function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   const ctx = canvas.getContext('2d')!;
-  const { map, scene, visibility: v, hover, tool, selection, pasteRect } = s;
+  const { map, scene, visibility: v, hover, tool, selection, pasteRect, walk, objectLabel, selectedObject } = s;
   const { ds1 } = map;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(cam.zoom, 0, 0, cam.zoom, canvas.width / 2 - cam.x * cam.zoom, canvas.height / 2 - cam.y * cam.zoom);
   const px = 1 / cam.zoom; // one device pixel in world units
+
+  if (walk) {
+    // Red = blocks jumping/teleport too; amber = blocks walking.
+    const noJump = new Path2D();
+    const noWalk = new Path2D();
+    for (let cy = 0; cy < ds1.height; cy++)
+      for (let cx = 0; cx < ds1.width; cx++)
+        for (let k = 0; k < 25; k++) {
+          const f = walk[(cy * ds1.width + cx) * 25 + k];
+          if (!f) continue;
+          const target = f & SubTileFlag.BlockJump ? noJump : f & (SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk) ? noWalk : null;
+          if (!target) continue;
+          const [x, y] = subTileToWorld(cx * 5 + (k % 5), cy * 5 + Math.floor(k / 5));
+          target.moveTo(x, y - 8);
+          target.lineTo(x + 16, y);
+          target.lineTo(x, y + 8);
+          target.lineTo(x - 16, y);
+          target.closePath();
+        }
+    ctx.fillStyle = 'rgba(255, 60, 70, 0.38)';
+    ctx.fill(noJump);
+    ctx.fillStyle = 'rgba(255, 176, 40, 0.34)';
+    ctx.fill(noWalk);
+  }
 
   if (v.grid) {
     ctx.beginPath();
@@ -339,18 +378,24 @@ function drawOverlay(
     ctx.setLineDash([]);
   }
 
-  if (v.specials) {
+  // Special tiles without a graphic (no WinDS1 ds1edit.dt1 configured, or an unknown code).
+  if (v.specials && scene.unmarkedSpecials.length) {
     ctx.lineWidth = 2 * px;
     ctx.fillStyle = 'rgba(180, 110, 255, 0.25)';
     ctx.strokeStyle = 'rgba(200, 140, 255, 0.9)';
-    for (const cells of ds1.walls) {
-      cells.forEach((c, i) => {
-        if (c.prop1 === 0 || (c.orientation !== Orientation.SpecialTile1 && c.orientation !== Orientation.SpecialTile2)) return;
-        ctx.beginPath();
-        diamond(ctx, (i % ds1.width) + 0.15, Math.floor(i / ds1.width) + 0.15, 0.7, 0.7);
-        ctx.fill();
-        ctx.stroke();
-      });
+    for (const sp of scene.unmarkedSpecials) {
+      ctx.beginPath();
+      diamond(ctx, sp.cellX + 0.15, sp.cellY + 0.15, 0.7, 0.7);
+      ctx.fill();
+      ctx.stroke();
+      if (cam.zoom > 0.5) {
+        const [x, y] = cellToWorld(sp.cellX + 0.5, sp.cellY + 0.5);
+        ctx.font = `${11 * px}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(235, 215, 255, 0.95)';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${sp.main}/${sp.sub}`, x, y + 4 * px);
+        ctx.textAlign = 'start';
+      }
     }
   }
 
@@ -382,7 +427,7 @@ function drawOverlay(
     ctx.setLineDash([]);
   }
 
-  if (hover) {
+  if (hover && tool !== 'object') {
     ctx.beginPath();
     diamond(ctx, hover.cellX, hover.cellY);
     ctx.lineWidth = 2 * px;
@@ -390,39 +435,57 @@ function drawOverlay(
     ctx.stroke();
   }
 
-  if (v.paths) {
-    ctx.lineWidth = 1.5 * px;
-    ctx.strokeStyle = 'rgba(255, 150, 60, 0.9)';
-    ctx.fillStyle = 'rgba(255, 150, 60, 0.9)';
-    for (const o of ds1.objects) {
-      if (!o.path.length) continue;
+  const showObjects = v.objects || tool === 'object';
+  if (v.paths || tool === 'object') {
+    ds1.objects.forEach((o, i) => {
+      if (!o.path.length) return;
+      const selected = i === selectedObject;
+      if (!v.paths && !selected) return;
+      // The NPC walks to point 0, then along the points, looping back to point 0.
       ctx.beginPath();
       ctx.moveTo(...subTileToWorld(o.x, o.y));
       for (const p of o.path) ctx.lineTo(...subTileToWorld(p.x, p.y));
+      ctx.lineTo(...subTileToWorld(o.path[0].x, o.path[0].y));
+      ctx.lineWidth = (selected ? 2 : 1.5) * px;
+      ctx.strokeStyle = selected ? 'rgba(255, 190, 90, 1)' : 'rgba(255, 150, 60, 0.85)';
       ctx.stroke();
-      for (const p of o.path) {
+      o.path.forEach((p, n) => {
         const [x, y] = subTileToWorld(p.x, p.y);
-        ctx.fillRect(x - 2 * px, y - 2 * px, 4 * px, 4 * px);
-      }
-    }
+        const r = (selected ? 4 : 2) * px;
+        ctx.fillStyle = selected ? 'rgba(255, 205, 110, 1)' : 'rgba(255, 150, 60, 0.9)';
+        ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+        if (selected && cam.zoom > 0.4) {
+          ctx.font = `${10 * px}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.fillText(`${n}${p.action !== 1 ? ` a${p.action}` : ''}`, x + 6 * px, y - 4 * px);
+        }
+      });
+    });
   }
 
-  if (v.objects) {
+  if (showObjects) {
     const r = Math.max(4 * px, 5);
-    for (const o of ds1.objects) {
+    ds1.objects.forEach((o, i) => {
       const [x, y] = subTileToWorld(o.x, o.y);
+      const selected = i === selectedObject;
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = o.type === 1 ? 'rgba(240, 80, 80, 0.85)' : 'rgba(80, 160, 255, 0.85)';
+      ctx.arc(x, y, selected ? r * 1.5 : r, 0, Math.PI * 2);
+      ctx.fillStyle = o.type === 1 ? 'rgba(240, 80, 80, 0.9)' : 'rgba(80, 160, 255, 0.9)';
       ctx.fill();
-      ctx.lineWidth = px;
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.lineWidth = (selected ? 2.5 : 1) * px;
+      ctx.strokeStyle = selected ? 'rgba(255, 225, 150, 1)' : 'rgba(0,0,0,0.8)';
       ctx.stroke();
-      if (cam.zoom > 0.6) {
-        ctx.font = `${11 * px}px ui-sans-serif, system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.fillText(`${o.type === 1 ? 'M' : 'O'}${o.id}`, x + r + 2 * px, y + 4 * px);
+      if (cam.zoom > 0.45 || selected) {
+        ctx.font = `${selected ? 600 : 400} ${11 * px}px ui-sans-serif, system-ui, sans-serif`;
+        const label = objectLabel(o);
+        const tx = x + r + 3 * px;
+        const ty = y + 4 * px;
+        ctx.lineWidth = 3 * px;
+        ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+        ctx.strokeText(label, tx, ty);
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.fillText(label, tx, ty);
       }
-    }
+    });
   }
 }

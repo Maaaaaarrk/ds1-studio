@@ -18,9 +18,14 @@ Configure it in `ds1studio.local.json` (git-ignored; see `ds1studio.local.exampl
 {
   "gameDir": "C:/Program Files/Diablo II",
   "modDirs": ["C:/Program Files/Diablo II/ProjectD2"],
-  "modMpqs": false
+  "modMpqs": false,
+  "winds1Dir": "C:/path/to/win_ds1edit"
 }
 ```
+
+`winds1Dir` is optional: if set, the app reads WinDS1's `Data/obj.txt` (object names) and `Data/ds1edit.dt1`
+(labelled graphics for special tiles such as warps, entries and corpse locations). Without it, NPC names come from
+`MonPreset.txt` and special tiles are drawn as numbered markers.
 
 Without that file it falls back to `C:/Program Files/Diablo II`. Without a dev server (e.g. a static build),
 the app asks for the folders via the browser's folder picker (Chrome/Edge).
@@ -62,7 +67,8 @@ file list; you can override the level type per map in the **Map** panel.
 - [x] Viewer: MPQ + loose files, all DS1 versions, walls/floors/shadows/roofs/lower walls, objects, NPC paths, inspector
 - [x] DS1 writer, byte-exact on every vanilla and ProjectD2 v18 preset
 - [x] Tile editing: tile palette, paint/erase/pick, brush preview, undo/redo, save with backup
-- [ ] Rectangle selection: fill, copy/paste, move; per-cell flag editing (hidden, prop bytes)
-- [ ] Objects & NPC paths editing, substitution groups, tag layer, special tiles (warps, spawn points)
-- [ ] Object/monster names, animated floors, walkability (sub-tile flags) overlay
+- [x] Rectangle selection: fill, copy/paste, move; per-cell flag editing (hidden, prop bytes)
+- [x] Objects & NPC paths editing, object/monster names, special tiles (WinDS1 graphics), animated floors, walkability overlay
+- [ ] Substitution groups and tag layer editing; resize map; new map
+- [ ] Object sprites (COF/DCC) instead of markers
 - [ ] Tauri desktop shell (needs the Rust toolchain)

@@ -65,8 +65,13 @@ export function LayersPanel({ map, scene, visibility: v, onChange }: { map: Open
         {ds1.groups.length > 0 && <Toggle label="Substitution groups" swatch="rgb(120,200,255)" checked={v.groups} onChange={(x) => set({ groups: x })} count={ds1.groups.length} />}
         <Toggle label="Missing tiles" swatch="rgb(255,70,90)" checked={v.missing} onChange={(x) => set({ missing: x })} count={scene.missing.length} />
         <Toggle label="Grid (G)" checked={v.grid} onChange={(x) => set({ grid: x })} />
+        <Toggle label="Walkability (W)" swatch="linear-gradient(90deg, rgb(255,176,40) 50%, rgb(255,60,70) 50%)" checked={v.walkable} onChange={(x) => set({ walkable: x })} />
+        {scene.animated && <Toggle label="Animate floors" checked={v.animate} onChange={(x) => set({ animate: x })} />}
       </div>
-      <p className="muted small">Objects (blue) share the monster toggle. Space/right-drag to pan, scroll to zoom, F to fit.</p>
+      <p className="muted small">
+        Objects (blue) share the monster toggle. Walkability: amber blocks walking, red also blocks jumping/teleport. Space/right-drag to pan,
+        scroll to zoom, F to fit.
+      </p>
     </Panel>
   );
 }

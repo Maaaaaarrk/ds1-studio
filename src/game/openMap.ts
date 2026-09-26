@@ -21,6 +21,7 @@ export async function openMap(gd: GameData, path: string, override?: MapOverride
   const lib = new TileLibrary();
   const dt1s = await Promise.all(resolution.paths.map((p) => gd.dt1(p).catch(() => null)));
   resolution.paths.forEach((p, i) => lib.add(p, dt1s[i]));
+  if (gd.specialTiles) lib.addFallback('winds1/ds1edit.dt1 (special tiles)', gd.specialTiles);
   const palette = await gd.palette(ds1.act);
   return { path, ds1, resolution, lib, palette };
 }

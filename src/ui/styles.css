@@ -154,3 +154,14 @@ details summary { cursor: pointer; margin-top: 8px; }
 .button-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .button-grid .btn { padding: 5px 8px; font-size: 12px; }
 .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: inherit; }
+
+/* Objects */
+.object-list { max-height: 180px; overflow-y: auto; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius); }
+.object-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 8px; background: none; border: 0; text-align: left; cursor: pointer; }
+.object-row:hover { background: var(--panel-2); }
+.object-row.active { background: var(--accent-dim); color: #f1d9a6; }
+.object-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.object-edit { border-top: 1px solid var(--border); padding-top: 4px; margin-bottom: 6px; }
+.object-edit .cell-edit, .panel-body > .cell-edit { margin: 4px 0; }
+.orient-select.narrow { width: auto; margin-top: 0; }
+.path-row { gap: 6px; }

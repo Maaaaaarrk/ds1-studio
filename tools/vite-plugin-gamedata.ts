@@ -11,6 +11,9 @@ import type { Plugin } from 'vite';
  *
  * Saving (POST /__d2/save/<game path>) writes .ds1 files under `saveDir`, which defaults to the first mod dir.
  * The first time an existing file is overwritten, the original is copied to `<name>.bak`.
+ *
+ * Optional `winds1Dir` (a WinDS1 install) exposes Data/obj.txt (object names) and Data/ds1edit.dt1 (special-tile
+ * graphics) as the virtual files winds1/obj.txt and winds1/ds1edit.dt1.
  */
 
 interface Config {
@@ -20,7 +23,11 @@ interface Config {
   modMpqs?: boolean;
   /** Where edited files are written (default: first mod dir). */
   saveDir?: string;
+  /** A WinDS1 install, for object names and special-tile graphics. */
+  winds1Dir?: string;
 }
+
+const WINDS1_FILES = ['obj.txt', 'ds1edit.dt1'];
 
 export interface ManifestSource {
   id: string;
@@ -66,6 +73,9 @@ export function gameDataPlugin(): Plugin {
             sources.push({ id: `mod${i}-${f}`, kind: 'mpq', label: `${mod}${sep}${f}`, path: join(mod, f) });
           }
         }
+      }
+      if (conf.winds1Dir && existsSync(join(conf.winds1Dir, 'Data'))) {
+        sources.push({ id: 'winds1', kind: 'loose', label: `${conf.winds1Dir}${sep}Data`, path: join(conf.winds1Dir, 'Data') });
       }
       if (conf.gameDir) {
         if (existsSync(join(conf.gameDir, 'data'))) sources.push({ id: 'game-data', kind: 'loose', label: `${conf.gameDir}${sep}data`, path: conf.gameDir });
@@ -122,6 +132,16 @@ export function gameDataPlugin(): Plugin {
 
         const src = sources.find((s) => s.id === parts[1]);
         if (!src) return next();
+
+        if (src.id === 'winds1') {
+          const name = parts.slice(2).join('/').replace(/^winds1\//, '');
+          if (parts[0] === 'list') return json(200, WINDS1_FILES.filter((f) => existsSync(join(src.path, f))).map((f) => `winds1/${f}`));
+          if (parts[0] !== 'file' || !WINDS1_FILES.includes(name)) return json(404, { error: 'not found' });
+          const file = join(src.path, name);
+          res.setHeader('content-length', String(statSync(file).size));
+          createReadStream(file).pipe(res);
+          return;
+        }
 
         if (parts[0] === 'list' && src.kind === 'loose') {
           let files = looseLists.get(src.id);

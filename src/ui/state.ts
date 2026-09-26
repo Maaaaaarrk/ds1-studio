@@ -1,10 +1,11 @@
-export type Tool = 'select' | 'paint' | 'erase' | 'pick';
+export type Tool = 'select' | 'paint' | 'erase' | 'pick' | 'object';
 
 export const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
   { id: 'select', label: 'Select', key: 'v', hint: 'Inspect cells; drag to pan' },
   { id: 'paint', label: 'Paint', key: 'b', hint: 'Paint the chosen tile on the active layer' },
   { id: 'erase', label: 'Erase', key: 'e', hint: 'Clear cells on the active layer' },
   { id: 'pick', label: 'Pick', key: 'i', hint: 'Copy a tile from the map into the brush' },
+  { id: 'object', label: 'Objects', key: 'o', hint: 'Select, move, add and delete objects/NPCs and edit NPC paths' },
 ];
 
 export interface Visibility {
@@ -19,6 +20,8 @@ export interface Visibility {
   groups: boolean;
   missing: boolean;
   grid: boolean;
+  walkable: boolean;
+  animate: boolean;
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
@@ -33,6 +36,8 @@ export const DEFAULT_VISIBILITY: Visibility = {
   groups: false,
   missing: true,
   grid: false,
+  walkable: false,
+  animate: true,
 };
 
 export const ORIENTATION_NAMES: Record<number, string> = {

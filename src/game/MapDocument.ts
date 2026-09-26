@@ -1,4 +1,4 @@
-import { DEFAULT_PROP1, EMPTY_CELL, withTile, type Ds1, type TileCell, type WallCell } from '../formats/ds1';
+import { DEFAULT_PROP1, EMPTY_CELL, withTile, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 
 export type LayerKind = 'floor' | 'wall' | 'shadow';
 
@@ -31,6 +31,14 @@ interface CellChange {
   after: AnyCell;
 }
 
+/** One undoable step: cell changes and/or a before/after snapshot of the object list. */
+interface HistoryStep {
+  cells: CellChange[];
+  objects?: { before: Ds1Object[]; after: Ds1Object[] };
+}
+
+const cloneObjects = (objs: Ds1Object[]): Ds1Object[] => objs.map((o) => ({ ...o, path: o.path.map((p) => ({ ...p })) }));
+
 export interface CellEdit {
   layer: LayerRef;
   x: number;
@@ -43,9 +51,10 @@ export interface CellEdit {
  * Changes made between beginStroke/endStroke undo as a single step.
  */
 export class MapDocument {
-  private undoStack: CellChange[][] = [];
-  private redoStack: CellChange[][] = [];
+  private undoStack: HistoryStep[] = [];
+  private redoStack: HistoryStep[] = [];
   private stroke: Map<string, CellChange> | null = null;
+  private objectsBefore: Ds1Object[] | null = null;
   private savedRevision = 0;
   revision = 0;
 
@@ -108,7 +117,7 @@ export class MapDocument {
   }
 
   endStroke(): void {
-    if (this.stroke?.size) this.pushHistory([...this.stroke.values()]);
+    if (this.stroke?.size) this.pushHistory({ cells: [...this.stroke.values()] });
     this.stroke = null;
   }
 
@@ -132,23 +141,52 @@ export class MapDocument {
         this.stroke.set(k, prev ? { ...c, before: prev.before } : c);
       }
     } else {
-      this.pushHistory(applied);
+      this.pushHistory({ cells: applied });
     }
     this.revision++;
     return true;
   }
 
-  private pushHistory(changes: CellChange[]): void {
-    this.undoStack.push(changes);
+  /** Replaces the object list as one undoable step. */
+  setObjects(next: Ds1Object[]): void {
+    this.endObjectEdit();
+    this.pushHistory({ cells: [], objects: { before: cloneObjects(this.ds1.objects), after: cloneObjects(next) } });
+    this.ds1.objects = cloneObjects(next);
+    this.revision++;
+  }
+
+  /** Starts a live object edit (e.g. a drag): changes via `liveObjects` become one undo step at `endObjectEdit`. */
+  beginObjectEdit(): void {
+    this.endObjectEdit();
+    this.objectsBefore = cloneObjects(this.ds1.objects);
+  }
+
+  liveObjects(next: Ds1Object[]): void {
+    this.ds1.objects = next;
+    this.revision++;
+  }
+
+  endObjectEdit(): void {
+    const before = this.objectsBefore;
+    this.objectsBefore = null;
+    if (before && JSON.stringify(before) !== JSON.stringify(this.ds1.objects)) {
+      this.pushHistory({ cells: [], objects: { before, after: cloneObjects(this.ds1.objects) } });
+    }
+  }
+
+  private pushHistory(step: HistoryStep): void {
+    this.undoStack.push(step);
     if (this.undoStack.length > 500) this.undoStack.shift();
     this.redoStack = [];
   }
 
   undo(): boolean {
     this.endStroke();
+    this.endObjectEdit();
     const step = this.undoStack.pop();
     if (!step) return false;
-    for (const c of [...step].reverse()) this.cells(c.layer)[c.index] = c.before;
+    for (const c of [...step.cells].reverse()) this.cells(c.layer)[c.index] = c.before;
+    if (step.objects) this.ds1.objects = cloneObjects(step.objects.before);
     this.redoStack.push(step);
     this.revision++;
     return true;
@@ -157,7 +195,8 @@ export class MapDocument {
   redo(): boolean {
     const step = this.redoStack.pop();
     if (!step) return false;
-    for (const c of step) this.cells(c.layer)[c.index] = c.after;
+    for (const c of step.cells) this.cells(c.layer)[c.index] = c.after;
+    if (step.objects) this.ds1.objects = cloneObjects(step.objects.after);
     this.undoStack.push(step);
     this.revision++;
     return true;

@@ -13,14 +13,15 @@ interface Props {
   onPick: (b: Brush) => void;
 }
 
-type WallFilter = 'all' | 'walls' | 'objects' | 'roofs' | 'lower';
+type WallFilter = 'all' | 'walls' | 'objects' | 'roofs' | 'lower' | 'special';
 
 const WALL_FILTERS: { id: WallFilter; label: string; test: (o: number) => boolean }[] = [
   { id: 'all', label: 'All', test: () => true },
-  { id: 'walls', label: 'Walls', test: (o) => o >= 1 && o <= 11 },
+  { id: 'walls', label: 'Walls', test: (o) => o >= 1 && o <= 9 },
   { id: 'objects', label: 'Objects', test: (o) => o === Orientation.PillarsColumnsAndStandaloneObjects || o === Orientation.Tree },
   { id: 'roofs', label: 'Roofs', test: (o) => o === Orientation.Roof },
   { id: 'lower', label: 'Lower', test: (o) => o >= 16 },
+  { id: 'special', label: 'Special', test: (o) => o === Orientation.SpecialTile1 || o === Orientation.SpecialTile2 },
 ];
 
 function fitsLayer(kind: LayerKind, o: number): boolean {
