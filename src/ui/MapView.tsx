@@ -140,6 +140,8 @@ export function MapView(props: Props) {
   const renderer = useRef<MapRenderer | null>(null);
   const atlas = useRef(new TileAtlas());
   const camera = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
+  /** Arrow keys currently held ('Shift' too while one is). */
+  const arrows = useRef(new Set<string>());
   const dirty = useRef(true);
   const [frame, setFrame] = useState(0);
   const automapImage = useMemo(() => (props.automap ? renderAutomap(map.ds1.width, map.ds1.height, props.automap) : null), [props.automap, map]);
@@ -160,9 +162,23 @@ export function MapView(props: Props) {
   useEffect(() => {
     renderer.current = new MapRenderer(glCanvas.current!);
     let raf = 0;
+    let last = performance.now();
     const frame = () => {
       raf = requestAnimationFrame(frame);
       const dpr = window.devicePixelRatio || 1;
+      // Arrow keys pan smoothly while held (Shift = faster), at a steady on-screen speed whatever the zoom.
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const k = arrows.current;
+      const dx = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0);
+      const dy = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0);
+      if (dx || dy) {
+        const speed = (k.has('Shift') ? 1800 : 700) * dpr * dt / camera.current.zoom;
+        camera.current.x += dx * speed;
+        camera.current.y += dy * speed;
+        dirty.current = true;
+      }
       for (const c of [glCanvas.current!, overlay.current!]) {
         const w = Math.round(c.clientWidth * dpr);
         const h = Math.round(c.clientHeight * dpr);
@@ -384,7 +400,15 @@ export function MapView(props: Props) {
       dirty.current = true;
     };
     const leave = () => latest.current.hover && latest.current.onHover(null);
+    const typing = (t: EventTarget | null) =>
+      t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
     const keydown = (ev: KeyboardEvent) => {
+      if (ev.key.startsWith('Arrow') && !typing(ev.target) && !document.querySelector('.modal-backdrop') && !ev.ctrlKey && !ev.altKey) {
+        arrows.current.add(ev.key);
+        if (ev.shiftKey) arrows.current.add('Shift');
+        ev.preventDefault();
+      }
+      if (ev.key === 'Shift' && arrows.current.size) arrows.current.add('Shift');
       if (ev.code === 'Space' && !(ev.target instanceof HTMLInputElement)) {
         space = true;
         setCursor();
@@ -392,6 +416,9 @@ export function MapView(props: Props) {
       }
     };
     const keyup = (ev: KeyboardEvent) => {
+      arrows.current.delete(ev.key);
+      if (ev.key === 'Shift') arrows.current.delete('Shift');
+      if (![...arrows.current].some((a) => a.startsWith('Arrow'))) arrows.current.clear();
       if (ev.code === 'Space') {
         space = false;
         setCursor();
@@ -406,6 +433,8 @@ export function MapView(props: Props) {
     el.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keydown);
     window.addEventListener('keyup', keyup);
+    const blur = () => arrows.current.clear(); // no stuck keys after Alt+Tab
+    window.addEventListener('blur', blur);
     return () => {
       el.removeEventListener('pointerdown', down);
       el.removeEventListener('pointermove', move);
@@ -415,6 +444,7 @@ export function MapView(props: Props) {
       el.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('keyup', keyup);
+      window.removeEventListener('blur', blur);
     };
   }, []);
 

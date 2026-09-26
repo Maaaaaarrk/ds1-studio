@@ -9,6 +9,10 @@ import {
   FolderCog,
   Footprints,
   Grid3x3,
+  RefreshCw,
+  Info,
+  Bug,
+  BookOpen,
   Palette as PaletteIcon,
   ScanEye,
   Map as MapIcon,
@@ -40,7 +44,7 @@ import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../format
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
-import { clampRect, clearEdits, copyRect, fillEdits, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
+import { clampRect, clearEdits, clipboardSources, copyRect, fillEdits, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult } from '../game/compat';
 import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
@@ -57,7 +61,7 @@ import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Splitter, usePersistentSize } from './Splitter';
-import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
+import { Modal, NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
 import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { CubeRecipeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
@@ -67,6 +71,8 @@ import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
 import { ObjectGallery } from './ObjectGallery';
+import { AboutDialog, UpdateDialog } from './HelpDialogs';
+import { bugReportUrl, checkForUpdate, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
@@ -135,7 +141,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -516,7 +522,8 @@ export function App() {
   const copy = useCallback(
     (cut: boolean) => {
       if (!doc || !selection) return;
-      const clip = copyRect(doc, selection);
+      const raw = copyRect(doc, selection);
+      const clip = map ? { ...raw, ...clipboardSources(raw, map.lib) } : raw;
       const [w, h] = rectSize(selection);
       if (onlyLayer) {
         // One tile of a stack (Shift+wheel): just its layer, no objects.
@@ -531,11 +538,27 @@ export function App() {
     },
     [doc, selection, notify, onlyLayer],
   );
+  /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
+  const [pasteOffer, setPasteOffer] = useState<{ clip: Clipboard; tiles: number; different: number; dt1s: string[]; label: string } | null>(null);
+  const beginPaste = useCallback(
+    (clip: Clipboard, label: string, skipCheck = false) => {
+      if (!skipCheck && map) {
+        const m = missingForPaste(clip, map.lib);
+        if (m.tiles || m.different) {
+          setPasteOffer({ clip, tiles: m.tiles, different: m.different, dt1s: m.dt1s, label });
+          return;
+        }
+      }
+      setClipboard(clip);
+      setPasting(true);
+      notify(`${label} · click the map (hold Alt to stack onto existing tiles) · Esc to cancel`);
+    },
+    [map, notify],
+  );
   const startPaste = useCallback(() => {
     if (!clipboard) return notify('Nothing to paste: copy a selection first (Ctrl+C).');
-    setPasting(true);
-    notify('Click to place the paste (hold Alt to stack onto existing tiles) · Esc to cancel');
-  }, [clipboard, notify]);
+    beginPaste(clipboard, 'Pasting');
+  }, [clipboard, notify, beginPaste]);
   const clearSelection = useCallback(
     (allLayers: boolean) => {
       if (!doc || !selection) return;
@@ -815,6 +838,35 @@ export function App() {
     [gd, map, doc, writeFiles, mutate, reloadTables, notify],
   );
 
+  // Desktop app: a quiet update check at most once a day; a newer version is announced, never installed unasked.
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
+  useEffect(() => {
+    if (!isTauri) return;
+    let last = 0;
+    try {
+      last = Number(localStorage.getItem('ds1studio.updateCheck')) || 0;
+    } catch {
+      // per-viewer convenience only
+    }
+    if (Date.now() - last < 86_400_000) return;
+    const t = setTimeout(() => {
+      checkForUpdate()
+        .then((u) => {
+          try {
+            localStorage.setItem('ds1studio.updateCheck', String(Date.now()));
+          } catch {
+            // ignore
+          }
+          if (u) {
+            setPendingUpdate(u);
+            notify(`DS1 Studio ${u.version} is available: Help → Check for updates`);
+          }
+        })
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [notify]);
+
   // Presets: saved ones come from the mod folder.
   useEffect(() => {
     if (gd) void loadPresets(gd).then(setPresets);
@@ -840,14 +892,7 @@ export function App() {
     const category = window.prompt('Category', 'My presets') || 'My presets';
     await savePreset(presetFromSelection(doc, map.lib, selection, name, category));
   }, [doc, map, selection, savePreset]);
-  const placePreset = useCallback(
-    (p: Preset) => {
-      setClipboard(presetToClipboard(p));
-      setPasting(true);
-      notify(`Placing "${p.name}" · click the map (hold Alt to stack onto existing tiles) · Esc to cancel`);
-    },
-    [notify],
-  );
+  const placePreset = useCallback((p: Preset) => beginPaste(presetToClipboard(p), `Placing "${p.name}"`), [beginPaste]);
   const suggest = useCallback(async () => {
     if (!gd || !map) return;
     setSuggesting({ phase: 'scan', done: 0, total: 1 });
@@ -1230,6 +1275,27 @@ export function App() {
         { label: 'Share', items: [{ label: 'Export .ds1', icon: <Download />, onClick: () => void exportFile(), disabled: noMap }] },
       ],
     },
+    {
+      id: 'help',
+      label: 'Help',
+      groups: [
+        {
+          label: 'Updates',
+          items: [
+            { label: 'Check for updates', icon: <RefreshCw />, onClick: () => setDialog('update'), title: 'Look for a newer version on GitHub and install it' },
+            { label: 'About', icon: <Info />, onClick: () => setDialog('about'), title: 'Version and build information' },
+          ],
+        },
+        {
+          label: 'Support',
+          items: [
+            { label: 'Report a bug', icon: <Bug />, onClick: () => void openExternal(bugReportUrl({ map: map?.path })), title: 'Open a pre-filled bug report on GitHub' },
+            { label: 'User guide', icon: <BookOpen />, onClick: () => void openExternal(`${REPO_URL}#readme`), title: 'Features, shortcuts and how-tos' },
+            { label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' },
+          ],
+        },
+      ],
+    },
   ];
 
   return (
@@ -1465,7 +1531,65 @@ export function App() {
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
- {dialog === 'dt1edit' && map && (
+      {dialog === 'about' && <AboutDialog onClose={() => setDialog(null)} />}
+      {dialog === 'update' && <UpdateDialog initial={pendingUpdate} onClose={() => setDialog(null)} />}
+      {pasteOffer && map && (
+        <Modal title="These tiles need other tile libraries" onClose={() => setPasteOffer(null)}>
+          {pasteOffer.tiles > 0 && (
+            <p className="small">
+              {pasteOffer.tiles} of the tiles you&apos;re pasting aren&apos;t in this map&apos;s tile libraries, so they would show as missing here and in game.
+            </p>
+          )}
+          {pasteOffer.different > 0 && (
+            <p className="small">
+              {pasteOffer.different} tile{pasteOffer.different === 1 ? '' : 's'} use numbers this map already has from a different DT1, so they would look like this
+              map&apos;s tiles instead. Adding the DT1s makes both versions available (the game then picks between them at random for those numbers).
+            </p>
+          )}
+          {pasteOffer.dt1s.length ? (
+            <>
+              <p className="small">They come from:</p>
+              <ul className="small mono">
+                {pasteOffer.dt1s.map((p) => (
+                  <li key={p}>{p.replace(/^data\/global\/tiles\//i, '')}</li>
+                ))}
+              </ul>
+              <p className="muted small">Adding them loads them for this map (and updates LvlTypes.txt / Dt1Mask when the map is in LvlPrest.txt).</p>
+            </>
+          ) : (
+            <p className="muted small">The DT1s they came from aren&apos;t known (copied before this version, or from WinDS1 graphics).</p>
+          )}
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setPasteOffer(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                const o = pasteOffer;
+                setPasteOffer(null);
+                beginPaste(o.clip, o.label, true);
+              }}
+            >
+              Paste anyway
+            </button>
+            {pasteOffer.dt1s.length > 0 && (
+              <button
+                className="btn primary"
+                onClick={async () => {
+                  const o = pasteOffer;
+                  setPasteOffer(null);
+                  await applyDt1s([...map.lib.loaded.filter((l) => l.found && !l.path.startsWith('winds1/')).map((l) => l.path), ...o.dt1s]);
+                  beginPaste(o.clip, o.label, true);
+                }}
+              >
+                Add {pasteOffer.dt1s.length} DT1{pasteOffer.dt1s.length === 1 ? '' : 's'} and paste
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+      {dialog === 'dt1edit' && map && (
         <Dt1Editor
           map={map}
           gd={data.gd}

@@ -25,7 +25,46 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "targets": [
+      "nsis",
+      "msi",
+      "appimage",
+      "deb",
+      "rpm"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "RoofooEvazan",
+    "homepage": "https://github.com/RoofooEvazan/ds1-studio",
+    "category": "DeveloperTool",
+    "shortDescription": "Map editor for Diablo II DS1/DT1 files",
+    "longDescription": "DS1 Studio is a modern map editor for classic Diablo II (1.13/1.14) DS1 map presets and DT1 tile libraries.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg0OTY1MjM4MzY3MEUwREIKUldUYjRIQTJPRktXaENOOTJoblZJYlN2SSs1d0tvd29JRFVod1greWJLSWhxQkNVT3VBelVxbCsK",
+      "endpoints": [
+        "https://github.com/RoofooEvazan/ds1-studio/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

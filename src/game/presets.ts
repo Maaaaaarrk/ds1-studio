@@ -114,6 +114,7 @@ export function presetToClipboard(p: Preset): Clipboard {
       }),
     })),
     objects: p.objects,
+    dt1s: p.dt1s,
   };
 }
 

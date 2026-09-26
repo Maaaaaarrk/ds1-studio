@@ -53,6 +53,15 @@ export function ShortcutsDialog({ bindings, onBind, onReset, onClose }: Props) {
             ))}
           </div>
         ))}
+        <div>
+          <div className="field-label">Mouse &amp; navigation (fixed)</div>
+          {FIXED.map(([what, how]) => (
+            <div key={what} className="shortcut-row">
+              <span>{what}</span>
+              <span className="kbd-btn fixed">{how}</span>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="modal-actions">
         <button className="btn" onClick={onReset}>
@@ -65,3 +74,14 @@ export function ShortcutsDialog({ bindings, onBind, onReset, onClose }: Props) {
     </Modal>
   );
 }
+
+/** Controls that aren't rebindable, listed for reference (the README's table is generated from the same list). */
+export const FIXED: [string, string][] = [
+  ['Pan the map', 'Arrow keys (Shift = faster)'],
+  ['Pan the map', 'Space + drag, middle or right drag'],
+  ['Zoom', 'Mouse wheel'],
+  ['Step through stacked tiles', 'Shift + wheel'],
+  ['Stack a paste / preset onto existing tiles', 'Alt + click'],
+  ['Zoom tile / object thumbnails', 'Ctrl + wheel over the panel'],
+  ['Select a range of tiles (DT1 editor)', 'Shift + click'],
+];

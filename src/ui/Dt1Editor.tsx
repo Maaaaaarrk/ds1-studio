@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { isEmptyCell, type WallCell } from '../formats/ds1';
-import { Orientation, type Dt1 } from '../formats/dt1';
+import { decodeTile, Orientation, type Dt1, type TileImage } from '../formats/dt1';
+import { setManyTilePixels } from '../formats/dt1Paint';
+import { ImageThumb, PixelPainter } from './PixelPainter';
 import type { Palette } from '../formats/palette';
 import { hueRemap, recolorDt1, swapRemap } from '../formats/dt1Edit';
 import type { GameData } from '../game/GameData';
@@ -73,10 +75,15 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [size, setSize] = useState(64);
+  /** Pixel edits per tile index, applied (before any recolour) when saving. */
+  const [edits, setEdits] = useState<Map<number, TileImage>>(new Map());
+  const [painting, setPainting] = useState<number | null>(null);
 
   useEffect(() => {
     setDt1(null);
     setPicked(new Set());
+    setEdits(new Map());
+    setPainting(null);
     if (!path) return;
     void gd.dt1(path).then(setDt1);
     setName(path.split('/').pop()!.replace(/\.dt1$/i, '') + '_edit');
@@ -161,7 +168,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     try {
       const bytes = await gd.fs.read(path);
       if (!bytes) throw new Error(`${path} not found`);
-      const out = changes ? recolorDt1(bytes, remap, picked.size ? [...picked] : undefined) : bytes;
+      const painted = edits.size ? setManyTilePixels(bytes, [...edits].map(([tileIndex, image]) => ({ tileIndex, image }))) : bytes;
+      const out = changes ? recolorDt1(painted, remap, picked.size ? [...picked] : undefined) : painted;
       await onSave({ path: newPath, bytes: out, switchMap: switchMap && !overwrite, original: path });
     } catch (e) {
       setError((e as Error).message);
@@ -193,6 +201,17 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           <button className="btn small" onClick={() => setPicked(new Set())}>
             Clear
           </button>
+          <button className="btn small" disabled={picked.size !== 1} onClick={() => setPainting([...picked][0])} title="Paint the selected tile pixel by pixel (or double-click a tile)">
+            Paint pixels…
+          </button>
+          {edits.size > 0 && (
+            <span className="small accent-text">
+              {edits.size} tile{edits.size === 1 ? '' : 's'} painted{' '}
+              <button className="link" onClick={() => setEdits(new Map())}>
+                discard
+              </button>
+            </span>
+          )}
           <button className="btn small" disabled={!selection} onClick={() => setPicked(selectionTiles())} title="Select the tiles of this DT1 used in the map selection">
             From map selection
           </button>
@@ -213,7 +232,20 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             ))}
           </select>
         </div>
-        <div className="dte-body">
+        {painting !== null && dt1 && (
+          <PixelPainter
+            key={painting}
+            tile={dt1.tiles[painting]}
+            tileIndex={painting}
+            image={edits.get(painting) ?? decodeTile(dt1.tiles[painting])!}
+            palette={map.palette}
+            onDone={(img) => {
+              if (img) setEdits((m) => new Map(m).set(painting, img));
+              setPainting(null);
+            }}
+          />
+        )}
+        <div className="dte-body" hidden={painting !== null}>
           <div
             className="thumb-grid dte-grid"
             style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size + 14}px, 1fr))`, ['--thumb-h' as string]: `${size}px` }}
@@ -222,14 +254,16 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           >
             {dt1?.tiles.map((t, i) => {
               const affected = changes && (picked.size === 0 || picked.has(i));
+              const edited = edits.get(i);
               return (
                 <div
                   key={i}
-                  className={`thumb${picked.has(i) ? ' active' : ''}`}
-                  title={`#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · ${t.mainIndex}/${t.subIndex}`}
+                  className={`thumb${picked.has(i) ? ' active' : ''}${edited ? ' edited' : ''}`}
+                  title={`#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · ${t.mainIndex}/${t.subIndex}${edited ? ' · painted' : ''} · double-click to paint`}
                   onClick={(e) => toggle(i, e.shiftKey)}
+                  onDoubleClick={() => t.blocks.length && setPainting(i)}
                 >
-                  <Thumb tile={t} palette={affected ? previewPal : map.palette} />
+                  {edited ? <ImageThumb image={edited} palette={affected ? previewPal : map.palette} /> : <Thumb tile={t} palette={affected ? previewPal : map.palette} />}
                   <span className="thumb-label">
                     {t.mainIndex}/{t.subIndex}
                   </span>
@@ -292,12 +326,12 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             {error && <p className="small error-text">{error}</p>}
           </div>
         </div>
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>
+        <div className="modal-actions" hidden={painting !== null}>
+          <button className="btn" onClick={() => (!edits.size || window.confirm('Discard the painted tiles?')) && onClose()}>
             Close
           </button>
           <button className="btn primary" disabled={!canSave || !dt1 || busy || !validName} onClick={() => void save()} title={canSave ? '' : 'No writable mod folder'}>
-            {busy ? 'Saving…' : overwrite ? 'Save (overwrite)' : changes ? 'Save recoloured copy' : 'Save copy'}
+            {busy ? 'Saving…' : overwrite ? 'Save (overwrite)' : changes || edits.size ? 'Save edited copy' : 'Save copy'}
           </button>
         </div>
       </div>

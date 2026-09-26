@@ -144,6 +144,27 @@ fn read_file(state: State<AppState>, path: String) -> Result<Response, String> {
     fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 
+/// Joins `rel` onto `root`, reusing the real name of every folder/file that already exists with different letter case
+/// (the editor works with lower-cased game paths; Linux file systems are case-sensitive, so without this a save
+/// would create `lvlprest.txt` next to `LvlPrest.txt` instead of replacing it). A no-op on Windows.
+fn resolve_case_insensitive(root: &Path, rel: &Path) -> PathBuf {
+    let mut out = root.to_path_buf();
+    for comp in rel.components() {
+        let Component::Normal(name) = comp else { continue };
+        let exact = out.join(name);
+        if exact.exists() {
+            out = exact;
+            continue;
+        }
+        let want = name.to_string_lossy().to_lowercase();
+        let found = fs::read_dir(&out).ok().and_then(|entries| {
+            entries.flatten().map(|e| e.file_name()).find(|n| n.to_string_lossy().to_lowercase() == want)
+        });
+        out = out.join(found.unwrap_or_else(|| name.to_os_string()));
+    }
+    out
+}
+
 /// What the editor may write, and where: maps, tiles and sprites under data/global, tables under data/global/excel,
 /// and the studio's own files (presets) under data/ds1studio.
 fn writable(rel: &str) -> bool {
@@ -201,7 +222,7 @@ fn save_file(state: State<AppState>, request: Request) -> Result<SaveResult, Str
         .unwrap()
         .save_root()
         .ok_or("no mod folder configured to save into")?;
-    let file = root.join(rel_path);
+    let file = resolve_case_insensitive(&root, rel_path);
     if let Some(dir) = file.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -247,6 +268,9 @@ async fn import_file(app: AppHandle, extension: String) -> Result<Response, Stri
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let config = config_file(app.handle())
                 .ok()

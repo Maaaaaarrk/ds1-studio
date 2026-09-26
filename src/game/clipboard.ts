@@ -1,4 +1,6 @@
 import { isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
+import { normalizePath } from '../vfs/vfs';
+import type { TileLibrary } from './GameData';
 import { layerKey, MapDocument, type Brush, type CellEdit, type LayerRef } from './MapDocument';
 
 /** Inclusive cell rectangle. */
@@ -16,6 +18,10 @@ export interface Clipboard {
   layers: { layer: LayerRef; cells: (TileCell | WallCell)[] }[];
   /** Objects/NPCs on the copied cells, with sub-tile coordinates relative to the top-left cell. */
   objects?: Ds1Object[];
+  /** The DT1s the copied tiles came from, so pasting into another map can offer to load them. */
+  dt1s?: string[];
+  /** Source DT1 of each copied tile, by "orientation|main|sub". */
+  tileSources?: Record<string, string>;
 }
 
 export function rectFrom(a: [number, number], b: [number, number]): CellRect {
@@ -151,4 +157,59 @@ export function overlapEdits(doc: MapDocument, clip: Clipboard, x: number, y: nu
     });
   }
   return { edits, walls: counts.wall, floors: counts.floor, replaced };
+}
+
+/** The tile key a clipboard cell needs from the tile library. */
+function orientationOf(layer: LayerRef, cell: TileCell | WallCell): number {
+  return layer.kind === 'floor' ? 0 : layer.kind === 'shadow' ? 13 : (cell as WallCell).orientation;
+}
+
+/** Libraries the copied tiles come from (read from the source map's library), overall and per tile. */
+export function clipboardSources(clip: Clipboard, lib: TileLibrary): { dt1s: string[]; tileSources: Record<string, string> } {
+  const out = new Set<string>();
+  const tileSources: Record<string, string> = {};
+  for (const { layer, cells } of clip.layers)
+    for (const c of cells) {
+      if (isEmptyCell(c)) continue;
+      const o = orientationOf(layer, c);
+      if (o === 10 || o === 11) continue; // specials come from WinDS1's own graphics
+      const t = lib.pick(o, c.mainIndex, c.subIndex, 0);
+      const src = t && lib.sourceOf(t);
+      if (src && !src.path.startsWith('winds1/')) {
+        out.add(normalizePath(src.path));
+        tileSources[`${o}|${c.mainIndex}|${c.subIndex}`] = normalizePath(src.path);
+      }
+    }
+  return { dt1s: [...out].sort(), tileSources };
+}
+
+/**
+ * What pasting `clip` into a map with library `lib` would get wrong: tiles the target can't draw at all (`tiles`),
+ * tiles it has under the same numbers from a different DT1 so they'd look different (`different`), and which of the
+ * clipboard's DT1s (not loaded there) provide them.
+ */
+export function missingForPaste(clip: Clipboard, lib: TileLibrary): { tiles: number; different: number; dt1s: string[] } {
+  const missing = new Set<string>();
+  const different = new Set<string>();
+  const needed = new Set<string>();
+  const loaded = new Set(lib.loaded.filter((l) => l.found).map((l) => normalizePath(l.path)));
+  for (const { layer, cells } of clip.layers)
+    for (const c of cells) {
+      if (isEmptyCell(c)) continue;
+      const o = orientationOf(layer, c);
+      if (o === 10 || o === 11) continue;
+      const k = `${o}|${c.mainIndex}|${c.subIndex}`;
+      const from = clip.tileSources?.[k];
+      const variants = lib.variants(o, c.mainIndex, c.subIndex);
+      if (!variants.length) {
+        missing.add(k);
+        if (from) needed.add(from);
+      } else if (from && !loaded.has(from) && !variants.some((t) => normalizePath(lib.sourceOf(t)?.path ?? '') === from)) {
+        different.add(k);
+        needed.add(from);
+      }
+    }
+  // Without per-tile sources (older clipboards, presets), offer every unloaded DT1 the clipboard lists.
+  const dt1s = clip.tileSources ? [...needed].sort() : missing.size ? (clip.dt1s ?? []).filter((p) => !loaded.has(normalizePath(p))) : [];
+  return { tiles: missing.size, different: different.size, dt1s };
 }
