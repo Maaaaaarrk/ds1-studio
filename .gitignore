@@ -1,5 +1,6 @@
-node_modules
+.test-output
 dist
 ds1studio.local.json
+node_modules
+src-tauri/gen
 src-tauri/target
-.test-output

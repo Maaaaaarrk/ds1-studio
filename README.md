@@ -2,9 +2,21 @@
 
 A modern map-preset (DS1) viewer — and, soon, editor — for classic Diablo II (1.13/1.14), meant to replace WinDS1.
 
-TypeScript + WebGL2 + React, runs in the browser today; a Tauri desktop shell is planned.
+TypeScript + WebGL2 + React, packaged as a Windows desktop app with Tauri (it also runs in a browser for development).
 
-## Running
+## Desktop app
+
+```bash
+npm install
+npm run app:dev     # run the desktop app (hot reload)
+npm run app:build   # build an installer: src-tauri/target/release/bundle/nsis/
+```
+
+Needs Rust (rustup, MSVC toolchain) and the Visual Studio C++ build tools. On first start it asks for the Diablo II,
+mod and (optional) WinDS1 folders and remembers them (Map ▾ → Folders… to change). The native side only reads inside
+those folders and only writes `.ds1` files into the mod folder.
+
+## Browser / dev server
 
 ```bash
 npm install
@@ -71,4 +83,4 @@ file list; you can override the level type per map in the **Map** panel.
 - [x] Objects & NPC paths editing, object/monster names, special tiles (WinDS1 graphics), animated floors, walkability overlay
 - [x] Substitution groups and tag layer editing; resize map; new map; save as
 - [x] Object sprites (COF/DCC/DC6), depth-sorted with walls
-- [ ] Tauri desktop shell (needs the Rust toolchain)
+- [x] Tauri desktop shell

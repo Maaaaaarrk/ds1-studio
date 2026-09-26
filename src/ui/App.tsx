@@ -16,6 +16,8 @@ import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } fro
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
 import type { Sprite } from '../game/sprites';
+import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
+import { DesktopSetup } from './DesktopSetup';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette } from './TilePalette';
 
@@ -61,6 +63,9 @@ export function App() {
   const [sprites, setSprites] = useState<Map<string, Sprite>>(() => new Map());
   const [menuOpen, setMenuOpen] = useState(false);
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
+  const [desktopCfg, setDesktopCfg] = useState<DesktopConfig>({ modDirs: [], modMpqs: false });
+  /** Desktop app: the folder dialog is open over a loaded workspace. */
+  const [changingFolders, setChangingFolders] = useState(false);
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
@@ -92,14 +97,41 @@ export function App() {
     setData({ status: 'ready', gd, files, saveTarget });
   }, []);
 
-  // In dev, the Vite plugin serves the local install; otherwise ask for a folder.
+  /** Desktop app: remember the folders and mount them. */
+  const openDesktop = useCallback(
+    async (cfg: DesktopConfig) => {
+      try {
+        setData({ status: 'loading', message: 'Opening game archives…' });
+        await setConfig(cfg);
+        setDesktopCfg(cfg);
+        const fs = await loadFromTauri(cfg);
+        if (!fs.baseSources.length) throw new Error('No game data found in the chosen folders.');
+        setMap(null);
+        setDoc(null);
+        setChangingFolders(false);
+        await mountFs(fs, tauriSaveTarget(cfg));
+      } catch (e) {
+        setData({ status: 'setup', error: String(e) });
+      }
+    },
+    [mountFs],
+  );
+
+  // Desktop app: use the remembered folders. Dev: the Vite plugin serves the local install. Otherwise ask for a folder.
   useEffect(() => {
     (async () => {
+      if (isTauri) {
+        const cfg = await getConfig();
+        setDesktopCfg(cfg);
+        if (cfg.gameDir) await openDesktop(cfg);
+        else setData({ status: 'setup' });
+        return;
+      }
       const fs = await loadFromDevServer();
       if (fs) await mountFs(fs, await devServerSaveTarget());
       else setData({ status: 'setup' });
     })().catch((e) => setData({ status: 'setup', error: String(e) }));
-  }, [mountFs]);
+  }, [mountFs, openDesktop]);
 
   const pickFolders = async (withMod: boolean) => {
     try {
@@ -542,6 +574,17 @@ export function App() {
     return () => window.removeEventListener('beforeunload', onUnload);
   }, [doc]);
 
+  if (isTauri && (data.status === 'setup' || data.status === 'loading' || changingFolders)) {
+    return (
+      <DesktopSetup
+        initial={desktopCfg}
+        error={data.status === 'setup' ? data.error : undefined}
+        busy={data.status === 'loading' ? data.message : undefined}
+        onOpen={openDesktop}
+        onCancel={changingFolders ? () => setChangingFolders(false) : undefined}
+      />
+    );
+  }
   if (data.status !== 'ready') {
     return <SetupScreen state={data} onPick={pickFolders} />;
   }
@@ -584,6 +627,7 @@ export function App() {
               <button disabled={!doc} onMouseDown={exportFile}>
                 Export .ds1 <span className="kbd">download</span>
               </button>
+              {isTauri && <button onMouseDown={() => confirmDiscard() && setChangingFolders(true)}>Folders…</button>}
             </div>
           )}
         </div>

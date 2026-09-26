@@ -187,3 +187,11 @@ details summary { cursor: pointer; margin-top: 8px; }
 .menu-list .kbd { color: var(--muted); font-size: 11px; }
 .group-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
 .group-row.active .mono:first-child { color: var(--accent); }
+
+/* Desktop setup */
+.setup-card.wide { width: min(640px, calc(100% - 32px)); }
+.folder-row { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin: 10px 0; background: var(--panel-2); }
+.folder-label { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; margin-bottom: 6px; }
+.folder-value { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.folder-value > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-check { margin: -4px 0 6px 4px; }
