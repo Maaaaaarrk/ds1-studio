@@ -1215,10 +1215,18 @@ export function App() {
         setTool('select');
       },
       'edit.cancel': () => {
-        setPasting(false);
-        setPlacing(null);
         setResizeMode(false);
         setMarks(undefined);
+        // First Esc frees the cursor: a paste / preset, an object to place, or the tile being painted with.
+        if (pasting || placing || (brush && tool === 'paint')) {
+          setPasting(false);
+          setPlacing(null);
+          if (tool === 'paint') {
+            setBrush(null);
+            setTool('select');
+          }
+          return;
+        }
         if (tool === 'object') setSelectedObject(null);
         else if (stack && stack.index >= 0) setStack({ ...stack, index: -1 });
         else {
@@ -1250,7 +1258,7 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null };
   useEffect(() => {

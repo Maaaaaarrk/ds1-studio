@@ -232,7 +232,7 @@ your computer.
 | Cut | <kbd>Ctrl</kbd> + <kbd>X</kbd> |
 | Paste | <kbd>Ctrl</kbd> + <kbd>V</kbd> |
 | Select all | <kbd>Ctrl</kbd> + <kbd>A</kbd> |
-| Cancel / deselect | <kbd>Escape</kbd> |
+| Cancel / drop the tile on the cursor / deselect | <kbd>Escape</kbd> |
 | Delete (active layer / object) | <kbd>Delete</kbd> |
 | Delete all layers | <kbd>Shift</kbd> + <kbd>Delete</kbd> |
 

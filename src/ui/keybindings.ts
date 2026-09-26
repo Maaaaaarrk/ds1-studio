@@ -16,7 +16,7 @@ export const ACTIONS = [
   { id: 'edit.cut', label: 'Cut', group: 'Edit', key: 'Ctrl+X' },
   { id: 'edit.paste', label: 'Paste', group: 'Edit', key: 'Ctrl+V' },
   { id: 'edit.selectAll', label: 'Select all', group: 'Edit', key: 'Ctrl+A' },
-  { id: 'edit.cancel', label: 'Cancel / deselect', group: 'Edit', key: 'Escape' },
+  { id: 'edit.cancel', label: 'Cancel / drop the tile on the cursor / deselect', group: 'Edit', key: 'Escape' },
   { id: 'edit.delete', label: 'Delete (active layer / object)', group: 'Edit', key: 'Delete' },
   { id: 'edit.deleteAll', label: 'Delete all layers', group: 'Edit', key: 'Shift+Delete' },
   { id: 'view.fit', label: 'Fit map', group: 'View', key: 'F' },
