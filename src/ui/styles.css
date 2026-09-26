@@ -548,3 +548,24 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .ame-foot { flex: 1; }
 .ame-open { width: 100%; margin: 6px 0; }
 .check-fixes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+
+/* Cube recipe */
+.cr-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
+.cr-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); min-width: 0; }
+.cr-card-title { font-weight: 700; color: var(--accent, #d4a84f); display: flex; align-items: center; gap: 6px; }
+.cr-picker { display: flex; flex-direction: column; gap: 6px; }
+.cr-list { overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.cr-group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted, #999); padding: 6px 8px 2px; position: sticky; top: 0; background: var(--panel, #16181d); }
+.cr-item { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; color: inherit; text-align: left; padding: 3px 8px; cursor: pointer; }
+.cr-item:hover { background: rgba(255, 255, 255, 0.05); }
+.cr-item.active { background: var(--accent-dim, rgba(212, 168, 79, 0.18)); }
+.cr-icon { width: 28px; height: 28px; object-fit: contain; image-rendering: pixelated; flex: none; }
+.cr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.cr-field { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+.cr-code { font-size: 14px; padding: 2px 8px; border-radius: 4px; background: var(--panel-2, #1b1f27); border: 1px solid var(--border); }
+.cr-code-input { width: 90px; }
+.cr-ing { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; }
+.cr-qty { width: 56px; }
+.cr-advanced summary { cursor: pointer; }
+.cr-advanced input { width: 100%; margin-top: 6px; }
+.ok-text { color: #8fd18f; }
