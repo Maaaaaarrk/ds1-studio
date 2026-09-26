@@ -97,7 +97,7 @@ export function TileSettingsPanel({ tiles, palette, settingsOf, changed, onChang
         )}
       </div>
 
-      <SubtileEditor tiles={tiles} palette={palette} settingsOf={settingsOf} onFlags={(fn) => onChange({}, fn)} />
+      <SubtileEditor tiles={tiles} palette={palette} flagsOf={(i) => settingsOf(i).flags} onFlags={(fn) => onChange({}, fn)} />
 
       <div className="ts-fields">
         <label className="ts-field">
@@ -133,19 +133,22 @@ export function TileSettingsPanel({ tiles, palette, settingsOf, changed, onChang
 }
 
 /** The 5×5 sub-tiles over the tile's floor diamond, coloured by their flags; click or drag to set or clear a flag. */
-function SubtileEditor({ tiles, palette, settingsOf, onFlags }: {
+export function SubtileEditor({ tiles, palette, flagsOf, onFlags, maxSize = 300 }: {
   tiles: { index: number; tile: Dt1Tile; image: TileImage | null }[];
   palette: Palette;
-  settingsOf: (index: number) => TileSettings;
+  /** Current flags (25, file order) of each tile. */
+  flagsOf: (index: number) => Uint8Array;
   onFlags: (fn: (current: Uint8Array) => Uint8Array) => void;
+  /** Largest canvas side in pixels. */
+  maxSize?: number;
 }) {
   const [bit, setBit] = useState(0x01);
   const [show, setShow] = useState<'all' | 'bit'>('all');
   const canvas = useRef<HTMLCanvasElement>(null);
   const drag = useRef<{ set: boolean; done: Set<number> } | null>(null);
   const first = tiles[0];
-  const flags = settingsOf(first.index).flags;
-  const mixed = tiles.some((t) => settingsOf(t.index).flags.some((f, i) => f !== flags[i]));
+  const flags = flagsOf(first.index);
+  const mixed = tiles.some((t) => flagsOf(t.index).some((f, i) => f !== flags[i]));
 
   // Layout: the image and the cell diamond in tile coordinates, scaled to fit.
   const layout = useMemo(() => {
@@ -157,9 +160,9 @@ function SubtileEditor({ tiles, palette, settingsOf, onFlags }: {
     const y0 = Math.min(img?.offsetY ?? 0, topY);
     const x1 = Math.max((img?.offsetX ?? 0) + (img?.width ?? 0), 160);
     const y1 = Math.max((img?.offsetY ?? 0) + (img?.height ?? 0), topY + 80);
-    const scale = Math.min(300 / (x1 - x0), 300 / (y1 - y0), 3);
+    const scale = Math.min(maxSize / (x1 - x0), maxSize / (y1 - y0), 3);
     return { topY, x0, y0, w: x1 - x0, h: y1 - y0, scale };
-  }, [first]);
+  }, [first, maxSize]);
 
   // Sub-tile t (file order) → its diamond centre in canvas pixels.
   const centre = (t: number): [number, number] => {

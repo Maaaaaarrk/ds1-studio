@@ -98,6 +98,7 @@ import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, t
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
 import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
 import { renderMapImage } from '../render/exportImage';
+import { writeTileSettings } from '../formats/dt1Header';
 import { ExportImageDialog, ReplaceDialog } from './EditDialogs';
 
 type DataState =
@@ -180,6 +181,13 @@ export function App() {
   const [recoveryOffer, setRecoveryOffer] = useState<Recovery | null>(null);
   const [centerOn, setCenterOn] = useState<{ x: number; y: number; signal: number } | null>(null);
   const [exportingImage, setExportingImage] = useState(false);
+  /**
+   * Sub-tile flag edits made from the Cell panel, not saved yet. They change the loaded tiles directly (so the map and
+   * the walkability overlay show them at once); the original flags are kept to discard. Saving writes the DT1s.
+   */
+  const flagEdits = useRef(new Map<Dt1Tile, { path: string; index: number; original: Uint8Array }>());
+  const [flagEditCount, setFlagEditCount] = useState(0);
+  const [savingFlags, setSavingFlags] = useState(false);
   const [paletteFocus, setPaletteFocus] = useState<PaletteFocus | null>(null);
   /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
   const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
@@ -310,6 +318,12 @@ export function App() {
   const gd = data.status === 'ready' ? data.gd : null;
 
   const confirmDiscard = useCallback(() => {
+    if (flagEdits.current.size) {
+      if (!window.confirm(`Discard the unsaved sub-tile changes to ${flagEdits.current.size} tile${flagEdits.current.size === 1 ? '' : 's'}?`)) return false;
+      for (const [t, e] of flagEdits.current) t.subTileFlags = e.original;
+      flagEdits.current.clear();
+      setFlagEditCount(0);
+    }
     if (!doc?.dirty) return true;
     if (!window.confirm(`Discard unsaved changes to ${doc.path.split('/').pop()}?`)) return false;
     void deleteRecovery(doc.path).then(() => listRecoveries().then(setRecoveries));
@@ -430,6 +444,30 @@ export function App() {
     }
     setRecoveryOffer(null);
   }, [recoveryOffer, gd, map, notify]);
+
+  /** Changes the sub-tile flags of `tiles` (in their DT1s) with `fn`; shown at once, saved with saveTileFlags. */
+  const editTileFlags = useCallback(
+    (tiles: Dt1Tile[], fn: (current: Uint8Array) => Uint8Array) => {
+      if (!map) return;
+      for (const t of tiles) {
+        const src = map.lib.sourceOf(t);
+        if (!src || isBuiltinPath(src.path)) continue;
+        const entry = flagEdits.current.get(t) ?? { path: src.path, index: src.index, original: t.subTileFlags.slice() };
+        t.subTileFlags = fn(t.subTileFlags);
+        if (t.subTileFlags.every((f, i) => f === entry.original[i])) flagEdits.current.delete(t);
+        else flagEdits.current.set(t, entry);
+      }
+      setFlagEditCount(flagEdits.current.size);
+      bump();
+    },
+    [map],
+  );
+  const discardTileFlags = useCallback(() => {
+    for (const [t, e] of flagEdits.current) t.subTileFlags = e.original;
+    flagEdits.current.clear();
+    setFlagEditCount(0);
+    bump();
+  }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` invalidates the scene after in-place edits
   const scene = useMemo(() => (map ? buildScene(map.ds1, map.lib) : null), [map, revision]);
@@ -1117,6 +1155,35 @@ export function App() {
     },
     [gd, map, doc, writeFiles, mutate, reloadTables, notify],
   );
+
+  /** Writes the DT1s whose sub-tile flags were changed in the Cell panel into the mod (originals kept as .bak). */
+  const saveTileFlags = useCallback(async () => {
+    if (!gd || !flagEdits.current.size) return;
+    setSavingFlags(true);
+    try {
+      const byPath = new Map<string, Map<number, { flags: Uint8Array }>>();
+      for (const [t, e] of flagEdits.current) {
+        if (!byPath.has(e.path)) byPath.set(e.path, new Map());
+        byPath.get(e.path)!.set(e.index, { flags: t.subTileFlags });
+      }
+      const writes: { path: string; bytes: Uint8Array }[] = [];
+      for (const [path, changes] of byPath) {
+        const bytes = await gd.fs.read(path);
+        if (!bytes) throw new Error(`${path} could not be read`);
+        writes.push({ path, bytes: writeTileSettings(bytes, changes) });
+      }
+      await writeFiles(writes);
+      const n = flagEdits.current.size;
+      flagEdits.current.clear();
+      setFlagEditCount(0);
+      await reloadTables();
+      notify(`Saved sub-tile flags of ${n} tile${n === 1 ? '' : 's'} into ${writes.map((w) => w.path.split('/').pop()).join(', ')}`);
+    } catch (e) {
+      notify(`Couldn't save the DT1: ${(e as Error).message}`, true);
+    } finally {
+      setSavingFlags(false);
+    }
+  }, [gd, writeFiles, reloadTables, notify]);
 
   // Desktop app: a quiet update check at most once a day; a newer version is announced, never installed unasked.
   const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
@@ -2019,6 +2086,17 @@ export function App() {
               onFocusTile={focusTile}
               onlyLayer={onlyLayer}
               brush={brush}
+              tileFlags={{
+                pending: flagEditCount,
+                edited: (t) => flagEdits.current.has(t),
+                onEdit: editTileFlags,
+                onSave: () => void saveTileFlags(),
+                onDiscard: discardTileFlags,
+                canSave: canWrite,
+                saving: savingFlags,
+                walkabilityShown: visibility.walkable,
+                onShowWalkability: () => setVisibility((v) => ({ ...v, walkable: true })),
+              }}
             />
             <HistoryPanel
               doc={doc}

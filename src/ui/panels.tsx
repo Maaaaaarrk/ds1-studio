@@ -4,6 +4,10 @@ import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { ColHelp, HelpTip } from './HelpTip';
 import { Thumb } from './TilePalette';
+import { SubtileEditor } from './TileSettings';
+import { isBuiltinPath } from '../game/specialTiles';
+import { decodeTile } from '../formats/dt1';
+import type { Palette } from '../formats/palette';
 import type { Bindings } from './keybindings';
 import { GameData } from '../game/GameData';
 import { rectSize, type CellRect } from '../game/clipboard';
@@ -142,6 +146,59 @@ interface CellPanelProps {
   onlyLayer?: LayerRef | null;
   /** The paint brush, offered for filling an empty layer. */
   brush?: Brush | null;
+  /** Editing the sub-tile flags of the tiles in the cell (they belong to the DT1, so saving writes the DT1). */
+  tileFlags?: TileFlagsControl;
+}
+
+export interface TileFlagsControl {
+  /** Tiles with unsaved flag changes. */
+  pending: number;
+  edited: (tile: Dt1Tile) => boolean;
+  onEdit: (tiles: Dt1Tile[], fn: (current: Uint8Array) => Uint8Array) => void;
+  onSave: () => void;
+  onDiscard: () => void;
+  canSave: boolean;
+  saving: boolean;
+  walkabilityShown: boolean;
+  onShowWalkability: () => void;
+}
+
+/** The clickable 5×5 sub-tile flags of the tile drawn in a cell, optionally for all its random variants. */
+function CellSubtiles({ tile, variants, palette, control, source }: { tile: Dt1Tile; variants: Dt1Tile[]; palette: Palette; control: TileFlagsControl; source: string }) {
+  const [all, setAll] = useState(true);
+  const [open, setOpen] = useState(true);
+  const image = useMemo(() => decodeTile(tile), [tile]);
+  const targets = all ? variants : [tile];
+  const edited = targets.some(control.edited);
+  return (
+    <div className="cell-flags">
+      <button className="cell-flags-head" onClick={() => setOpen(!open)}>
+        <span className="chev">{open ? '▾' : '▸'}</span> Sub-tile flags (walkability){edited && <span className="badge">edited</span>}
+      </button>
+      {open && (
+        <>
+          <SubtileEditor tiles={[{ index: 0, tile, image }]} palette={palette} flagsOf={() => tile.subTileFlags} onFlags={(fn) => control.onEdit(targets, fn)} maxSize={260} />
+          {variants.length > 1 && (
+            <label className="small">
+              <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> change all {variants.length} variants of {tile.mainIndex}/{tile.subIndex}{' '}
+              <HelpTip text="Cells with these numbers show one of several variant tiles, picked at random by the game. Changing them all keeps the walkability the same whichever one it picks." />
+            </label>
+          )}
+          <p className="muted tiny-note">
+            These flags belong to the tile in {source}: every cell and map using it changes too. Save writes the DT1 into your mod.
+            {!control.walkabilityShown && (
+              <>
+                {' '}
+                <button className="link" onClick={control.onShowWalkability}>
+                  Show walkability on the map
+                </button>
+              </>
+            )}
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** Plain-language explanations of every field of a DS1 cell (shown on the "?" next to each). */
@@ -212,7 +269,7 @@ function drawnTile(scene: Scene, layer: LayerRef, x: number, y: number): Dt1Tile
 }
 
 /** Shows every layer of one cell; editable when that cell is selected. */
-export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer, brush }: CellPanelProps) {
+export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer, brush, tileFlags }: CellPanelProps) {
   const { ds1, lib } = map;
   if (!cell) {
     return (
@@ -323,6 +380,15 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
             <RawBytes cell={c} onCommit={(next) => set(layer.kind === 'wall' ? { ...(c as WallCell), ...next } : next)} />
           </CellField>
         </div>
+        {tileFlags && drawn && src && !isBuiltinPath(src.path) && (
+          <CellSubtiles
+            tile={drawn}
+            variants={lib.variants(drawn.orientation, drawn.mainIndex, drawn.subIndex)}
+            palette={map.palette}
+            control={tileFlags}
+            source={src.path.replace(/^data\/global\/tiles\//i, '')}
+          />
+        )}
       </div>
     );
   });
@@ -337,6 +403,19 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
           Only {layerLabel(onlyLayer)} is selected: copy, cut and Delete leave the other layers alone. Shift+wheel steps through the stacked tiles, Esc
           selects all layers again.
         </p>
+      )}
+      {editable && tileFlags && tileFlags.pending > 0 && (
+        <div className="cell-flags-bar">
+          <span className="small">
+            Sub-tile changes to <b>{tileFlags.pending}</b> tile{tileFlags.pending === 1 ? '' : 's'}, not saved
+          </span>
+          <button className="btn small" onClick={tileFlags.onDiscard} disabled={tileFlags.saving}>
+            Discard
+          </button>
+          <button className="btn small primary" onClick={tileFlags.onSave} disabled={!tileFlags.canSave || tileFlags.saving} title={tileFlags.canSave ? 'Write the changed DT1s into your mod folder (the old file is kept as .bak)' : 'No writable mod folder'}>
+            {tileFlags.saving ? 'Saving…' : 'Save DT1s to mod'}
+          </button>
+        </div>
       )}
       {editable ? (
         <div className="cell-cards">{visible}</div>

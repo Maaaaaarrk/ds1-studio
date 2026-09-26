@@ -648,3 +648,10 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .cell-field-input { display: flex; align-items: center; }
 .cell-field-input > select { width: 100%; }
 .cell-card.empty .btn { padding: 1px 10px; min-height: 0; }
+
+/* Sub-tile flags in the Cell panel */
+.cell-flags { border-top: 1px solid var(--border); padding-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.cell-flags-head { display: flex; align-items: center; gap: 6px; background: transparent; border: 0; padding: 0; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-align: left; }
+.cell-flags .st { display: flex; flex-direction: column; gap: 6px; }
+.cell-flags-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; margin-bottom: 6px; border: 1px solid var(--accent); border-radius: 6px; background: rgba(232, 184, 76, 0.08); }
+.cell-flags-bar > span { flex: 1 1 100%; }

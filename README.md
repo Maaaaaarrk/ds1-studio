@@ -104,7 +104,12 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
   layer, adding layers as needed) instead of replacing it.
 - **Copying between maps:** if the map you paste into doesn't load the DT1s the tiles came from, DS1 Studio says so and
   offers to add them.
-- Resize maps by dragging their edges, create new maps, edit per-cell flags, tags and groups.
+- **Cell panel:** select one cell to edit every layer in it, laid out like the DT1 editor: tile preview, kind, main /
+  sub index, flags, hidden, the raw bytes and the tag, each with an explanation. The tile's **sub-tile flags**
+  (walk, sight, missiles, teleport…) can be painted right there on its 5×5 grid, for all its variants at once; the
+  map and the Walkability overlay update immediately, and **Save DT1s to mod** writes the changed DT1s (the flags
+  belong to the tile, so every cell using it changes).
+- Resize maps by dragging their edges, create new maps, edit tags and groups.
 
 | | |
 | :-: | :-: |
