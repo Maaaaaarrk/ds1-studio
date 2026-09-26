@@ -23,6 +23,7 @@ export interface Visibility {
   walkable: boolean;
   animate: boolean;
   sprites: boolean;
+  rooms: boolean;
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
@@ -40,6 +41,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   walkable: false,
   animate: true,
   sprites: true,
+  rooms: false,
 };
 
 export const ORIENTATION_NAMES: Record<number, string> = {

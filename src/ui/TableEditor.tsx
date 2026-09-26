@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { appendRow, cloneRow, deleteRow, setCell } from '../formats/txtTable';
 import type { TxtTableDoc } from '../formats/txtTable';
+import { HelpTip } from './HelpTip';
 import './tableEditor.css';
 
 export interface TableEditorProps {
@@ -12,6 +13,8 @@ export interface TableEditorProps {
   dirty: boolean;
   /** Data-row index (0-based, excluding the header) to reveal and select. */
   highlightRow?: number;
+  /** Plain-language explanation of a column, shown behind a "?" in its header. */
+  help?: (column: string) => string | undefined;
 }
 
 const ROW_H = 24;
@@ -36,7 +39,7 @@ function measureColumns(doc: TxtTableDoc): number[] {
   return chars.map((len, c) => Math.min(c === 0 ? 240 : 260, Math.max(c === 0 ? 120 : 48, len * CHAR_W + 18)));
 }
 
-export function TableEditor({ title, doc, onChange, onSave, dirty, highlightRow }: TableEditorProps) {
+export function TableEditor({ title, doc, onChange, onSave, dirty, highlightRow, help }: TableEditorProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, left: 0, w: 800, h: 600 });
   const [colQuery, setColQuery] = useState('');
@@ -392,6 +395,7 @@ export function TableEditor({ title, doc, onChange, onSave, dirty, highlightRow 
             <div className="te-cell te-idx te-hcell">#</div>
             <div className="te-cell te-name te-hcell" style={{ width: nameW }} title={doc.columns[0]}>
               {doc.columns[0] || <em className="muted">(blank)</em>}
+              {help?.(doc.columns[0]) && <HelpTip text={`${doc.columns[0]}: ${help(doc.columns[0])}`} />}
             </div>
             <div className="te-pad" style={{ width: leftPad }} />
             {shownCols.map((c) => (
@@ -402,6 +406,7 @@ export function TableEditor({ title, doc, onChange, onSave, dirty, highlightRow 
                 title={`${doc.columns[c] || '(blank)'} — column ${c}`}
               >
                 {doc.columns[c] || <em className="muted">(blank)</em>}
+                {help?.(doc.columns[c]) && <HelpTip text={`${doc.columns[c]}: ${help(doc.columns[c])}`} />}
               </div>
             ))}
           </div>

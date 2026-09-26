@@ -9,6 +9,8 @@ import {
   FolderCog,
   Footprints,
   Grid3x3,
+  Keyboard,
+  LayoutGrid,
   Layers,
   Library,
   Maximize,
@@ -49,6 +51,9 @@ import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, LayersPanel, MapInfoPanel, SelectionPanel } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
+import { comboOf, useKeybindings, type ActionId } from './keybindings';
+import { ShortcutsDialog } from './ShortcutsDialog';
+import { Splitter, usePersistentSize } from './Splitter';
 import { NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
 import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
@@ -79,19 +84,6 @@ function layerOfItem(it: DrawItem): LayerRef {
   return it.kind === 'floor' ? { kind: 'floor', index: it.layer } : it.kind === 'shadow' ? { kind: 'shadow', index: it.layer } : { kind: 'wall', index: it.layer };
 }
 
-/** Layer visibility toggled by the number keys. */
-const LAYER_KEYS: Record<string, (v: Visibility) => Visibility> = {
-  '1': (v) => ({ ...v, floors: v.floors.map((x, i) => (i === 0 ? !x : x)) }),
-  '2': (v) => ({ ...v, floors: v.floors.map((x, i) => (i === 1 ? !x : x)) }),
-  '3': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 0 ? !x : x)) }),
-  '4': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 1 ? !x : x)) }),
-  '5': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 2 ? !x : x)) }),
-  '6': (v) => ({ ...v, walls: v.walls.map((x, i) => (i === 3 ? !x : x)) }),
-  '7': (v) => ({ ...v, shadows: !v.shadows }),
-  '8': (v) => ({ ...v, roofs: !v.roofs }),
-  '9': (v) => ({ ...v, lowerWalls: !v.lowerWalls }),
-  '0': (v) => ({ ...v, specials: !v.specials }),
-};
 
 function isSingleCell(r: CellRect): boolean {
   return r.x0 === r.x1 && r.y0 === r.y1;
@@ -126,7 +118,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -145,6 +137,11 @@ export function App() {
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
+  /** The tile tool to return to when Tab leaves object editing. */
+  const lastTileTool = useRef<Tool>('select');
+  const keys = useKeybindings();
+  const [leftW, setLeftW] = usePersistentSize('left', 260, 180, 560);
+  const [rightW, setRightW] = usePersistentSize('right', 330, 260, 760);
 
   const bump = () => setRevision((r) => r + 1);
   const shiftHeld = useRef(false);
@@ -781,61 +778,88 @@ export function App() {
     if (where) notify(`Exported ${where}`);
   }, [doc, notify]);
 
-  // Keyboard shortcuts.
-  const handlers = useRef({ undo, redo, save, copy, startPaste, clearSelection, deleteSelectedObject, doc, tool });
-  handlers.current = { undo, redo, save, copy, startPaste, clearSelection, deleteSelectedObject, doc, tool };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
-      const mod = e.ctrlKey || e.metaKey;
-      const k = e.key.toLowerCase();
-      if (mod && k === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) handlers.current.redo();
-        else handlers.current.undo();
-      } else if (mod && k === 'y') {
-        e.preventDefault();
-        handlers.current.redo();
-      } else if (mod && k === 's') {
-        e.preventDefault();
-        void handlers.current.save();
-      } else if (mod && (k === 'c' || k === 'x')) {
-        handlers.current.copy(k === 'x');
-      } else if (mod && k === 'v') {
-        handlers.current.startPaste();
-      } else if (mod && k === 'a') {
-        const d = handlers.current.doc;
-        if (d) {
-          e.preventDefault();
-          setSelection({ x0: 0, y0: 0, x1: d.ds1.width - 1, y1: d.ds1.height - 1 });
-          setTool('select');
-        }
-      } else if (k === 'escape') {
+  // Keyboard shortcuts: every key goes through the (user-rebindable) keymap.
+  const toggleObjects = useCallback(() => {
+    setTool((t) => {
+      if (t === 'object') return lastTileTool.current;
+      lastTileTool.current = t;
+      return 'object';
+    });
+  }, []);
+  const actions = useMemo((): Partial<Record<ActionId, () => void>> => {
+    const vis = (f: (v: Visibility) => Visibility) => () => setVisibility(f);
+    const layerToggle = (key: 'floors' | 'walls', i: number) => vis((v) => ({ ...v, [key]: v[key].map((x, n) => (n === i ? !x : x)) }));
+    return {
+      'tool.select': () => setTool('select'),
+      'tool.paint': () => setTool('paint'),
+      'tool.erase': () => setTool('erase'),
+      'tool.pick': () => setTool('pick'),
+      'tool.object': () => setTool('object'),
+      'tool.toggleObjects': toggleObjects,
+      'edit.undo': undo,
+      'edit.redo': redo,
+      'edit.redo2': redo,
+      'file.save': () => void save(),
+      'edit.copy': () => copy(false),
+      'edit.cut': () => copy(true),
+      'edit.paste': startPaste,
+      'edit.selectAll': () => {
+        if (!doc) return;
+        setSelection({ x0: 0, y0: 0, x1: doc.ds1.width - 1, y1: doc.ds1.height - 1 });
+        setTool('select');
+      },
+      'edit.cancel': () => {
         setPasting(false);
         setPlacing(null);
         setResizeMode(false);
         setMarks(undefined);
-        if (handlers.current.tool === 'object') setSelectedObject(null);
+        if (tool === 'object') setSelectedObject(null);
         else setSelection(null);
-      } else if (k === 'delete' || k === 'backspace') {
-        e.preventDefault();
-        if (handlers.current.tool !== 'object' || !handlers.current.deleteSelectedObject()) handlers.current.clearSelection(e.shiftKey);
-      } else if (!mod && !e.altKey) {
-        const t = TOOLS.find((t) => t.key === k);
-        if (t) setTool(t.id);
-        else if (k === 'f') setFitSignal((n) => n + 1);
-        else if (k === 'g') setVisibility((v) => ({ ...v, grid: !v.grid }));
-        else if (k === 'w') setVisibility((v) => ({ ...v, walkable: !v.walkable }));
-        else if (LAYER_KEYS[e.key]) setVisibility(LAYER_KEYS[e.key]);
-        else if (k === 'p') setVisibility((v) => ({ ...v, paths: !v.paths }));
-        else if (k === 'm') setVisibility((v) => ({ ...v, objects: !v.objects }));
-        else if (k === 'n') setVisibility((v) => ({ ...v, sprites: !v.sprites }));
-      }
+      },
+      'edit.delete': () => {
+        if (tool !== 'object' || !deleteSelectedObject()) clearSelection(false);
+      },
+      'edit.deleteAll': () => clearSelection(true),
+      'view.fit': () => setFitSignal((n) => n + 1),
+      'view.grid': vis((v) => ({ ...v, grid: !v.grid })),
+      'view.rooms': vis((v) => ({ ...v, rooms: !v.rooms })),
+      'view.walkable': vis((v) => ({ ...v, walkable: !v.walkable })),
+      'view.markers': vis((v) => ({ ...v, objects: !v.objects })),
+      'view.sprites': vis((v) => ({ ...v, sprites: !v.sprites })),
+      'view.paths': vis((v) => ({ ...v, paths: !v.paths })),
+      'layer.floor1': layerToggle('floors', 0),
+      'layer.floor2': layerToggle('floors', 1),
+      'layer.wall1': layerToggle('walls', 0),
+      'layer.wall2': layerToggle('walls', 1),
+      'layer.wall3': layerToggle('walls', 2),
+      'layer.wall4': layerToggle('walls', 3),
+      'layer.shadows': vis((v) => ({ ...v, shadows: !v.shadows })),
+      'layer.roofs': vis((v) => ({ ...v, roofs: !v.roofs })),
+      'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
+      'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
+    };
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection]);
+  const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
+  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      if (keyState.current.dialogOpen) return;
+      const combo = comboOf(e);
+      if (!combo) return;
+      const id = keyState.current.actionFor(combo);
+      const run = id && keyState.current.actions[id];
+      if (!run) return;
+      e.preventDefault();
+      run();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+  // saveAs() saves on the next tick through this ref.
+  const handlers = useRef({ save });
+  handlers.current = { save };
 
   // Warn before closing the tab with unsaved edits.
   useEffect(() => {
@@ -869,6 +893,7 @@ export function App() {
     setTableTarget({ table, key });
     setDialog('tables');
   };
+  const kb = keys.bindings;
   const TOOL_ICONS = { select: <MousePointer2 />, paint: <Paintbrush />, erase: <Eraser />, pick: <Pipette />, object: <Box /> };
   const ribbonTabs: RibbonTab[] = [
     {
@@ -878,7 +903,7 @@ export function App() {
         {
           label: 'File',
           items: [
-            { label: 'Save', icon: <Save />, onClick: () => void save(), disabled: noMap, active: !!doc?.dirty, shortcut: 'Ctrl+S', title: data.saveTarget ? `Save into ${data.saveTarget.label}` : 'Save (downloads: no mod folder)' },
+            { label: 'Save', icon: <Save />, onClick: () => void save(), disabled: noMap, active: !!doc?.dirty, shortcut: kb['file.save'], title: data.saveTarget ? `Save into ${data.saveTarget.label}` : 'Save (downloads: no mod folder)' },
             { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
             { label: 'Export .ds1', icon: <FileOutput />, onClick: () => void exportFile(), disabled: noMap, size: 'sm' },
             ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const }] : []),
@@ -887,17 +912,17 @@ export function App() {
         {
           label: 'Edit',
           items: [
-            { label: 'Paste', icon: <ClipboardPaste />, onClick: startPaste, disabled: noMap || !clipboard, shortcut: 'Ctrl+V' },
-            { label: 'Cut', icon: <Scissors />, onClick: () => copy(true), disabled: !selection, size: 'sm', shortcut: 'Ctrl+X' },
-            { label: 'Copy', icon: <Copy />, onClick: () => copy(false), disabled: !selection, size: 'sm', shortcut: 'Ctrl+C' },
-            { label: 'Delete', icon: <Trash2 />, onClick: () => clearSelection(false), disabled: !selection, size: 'sm', shortcut: 'Del' },
-            { label: 'Undo', icon: <Undo2 />, onClick: undo, disabled: !doc?.canUndo, size: 'sm', shortcut: 'Ctrl+Z' },
-            { label: 'Redo', icon: <Redo2 />, onClick: redo, disabled: !doc?.canRedo, size: 'sm', shortcut: 'Ctrl+Y' },
+            { label: 'Paste', icon: <ClipboardPaste />, onClick: startPaste, disabled: noMap || !clipboard, shortcut: kb['edit.paste'] },
+            { label: 'Cut', icon: <Scissors />, onClick: () => copy(true), disabled: !selection, size: 'sm', shortcut: kb['edit.cut'] },
+            { label: 'Copy', icon: <Copy />, onClick: () => copy(false), disabled: !selection, size: 'sm', shortcut: kb['edit.copy'] },
+            { label: 'Delete', icon: <Trash2 />, onClick: () => clearSelection(false), disabled: !selection, size: 'sm', shortcut: kb['edit.delete'] },
+            { label: 'Undo', icon: <Undo2 />, onClick: undo, disabled: !doc?.canUndo, size: 'sm', shortcut: kb['edit.undo'] },
+            { label: 'Redo', icon: <Redo2 />, onClick: redo, disabled: !doc?.canRedo, size: 'sm', shortcut: kb['edit.redo'] },
           ],
         },
         {
           label: 'Tools',
-          items: TOOLS.map((t) => ({ label: t.label, icon: TOOL_ICONS[t.id], onClick: () => setTool(t.id), active: tool === t.id, disabled: noMap, title: t.hint, shortcut: t.key.toUpperCase() })),
+          items: TOOLS.map((t) => ({ label: t.label, icon: TOOL_ICONS[t.id], onClick: () => setTool(t.id), active: tool === t.id, disabled: noMap, title: t.hint, shortcut: kb[`tool.${t.id}` as ActionId] })),
         },
         {
           label: 'Layer',
@@ -921,13 +946,15 @@ export function App() {
         {
           label: 'View',
           items: [
-            { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: 'F' },
-            { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: 'G' },
-            { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: 'W' },
-            { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: 'N' },
+            { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: kb['view.fit'] },
+            { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: kb['view.grid'] },
+            { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
+            { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: kb['view.walkable'] },
+            { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: kb['view.sprites'] },
           ],
         },
         { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' }] },
+        { label: 'Settings', items: [{ label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' }] },
       ],
     },
     {
@@ -1009,7 +1036,7 @@ export function App() {
   ];
 
   return (
-    <div className="app">
+    <div className="app" style={{ gridTemplateColumns: `${leftW}px 1fr ${rightW}px` }}>
       <Ribbon
         tabs={ribbonTabs}
         brand={
@@ -1032,6 +1059,7 @@ export function App() {
         }
       />
 
+      <Splitter axis="x" direction={1} size={leftW} onResize={setLeftW} className="edge-right" title="Drag to widen or narrow the presets list" />
       <aside className="sidebar left">
         <FileBrowser files={data.files} current={map?.path ?? null} loading={loadingPath} onOpen={open} />
       </aside>
@@ -1077,6 +1105,7 @@ export function App() {
         {loadingPath && <div className="toast">Loading {loadingPath.split('/').pop()}…</div>}
       </main>
 
+      <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />
       <aside className="sidebar right">
         {map && scene && doc && (
           <>
@@ -1180,7 +1209,7 @@ export function App() {
               onFocusTile={focusTile}
             />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
-            <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} />
+            <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} keys={kb} />
             <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)} />
           </>
         )}
@@ -1189,6 +1218,7 @@ export function App() {
       {dialog === 'new' && <NewMapDialog gd={data.gd} onCreate={createMap} onClose={() => setDialog(null)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
+      {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
       {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
       {dialog === 'tables' && (
         <DataTables

@@ -3,6 +3,7 @@ import { appendRow, cloneRow, colIndex, getCell, parseTxtTable, serializeTxtTabl
 import type { LayeredFs } from '../vfs/vfs';
 import { normalizePath } from '../vfs/vfs';
 import { Modal } from './Dialogs';
+import { ColHelp } from './HelpTip';
 
 const EXCEL = 'data/global/excel/';
 
@@ -153,7 +154,9 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onAppl
   return (
     <Modal title="Add map to game" onClose={onClose}>
       <p className="muted small">
-        Makes the game load <span className="mono">{rel}</span>: a LvlPrest row pointing at it, with a Dt1Mask covering the tile libraries it uses.
+        Makes the game load <span className="mono">{rel}</span>: a LvlPrest row (File1 <ColHelp table="LvlPrest" col="File1" />) pointing at it, with a
+        Dt1Mask <ColHelp table="LvlPrest" col="Dt1Mask" /> covering the tile libraries it uses; missing libraries go into free LvlTypes slots{' '}
+        <ColHelp table="LvlTypes" col="File 1" />.
       </p>
       <div className="form-row">
         <span>Level</span>
@@ -167,7 +170,9 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onAppl
         </div>
       </div>
       <label className="form-row">
-        <span>{mode === 'new' ? 'Template' : 'Level'}</span>
+        <span>
+          {mode === 'new' ? 'Template' : 'Level'} <ColHelp table="LvlPrest" col="LevelId" />
+        </span>
         <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
           <option value={0}>Choose…</option>
           {levelRows.map((l) => (
@@ -287,7 +292,9 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: CubeProps) {
         system); vanilla D2 can only open the hard-coded portals.
       </p>
       <label className="form-row">
-        <span>Template item</span>
+        <span>
+          Template item <ColHelp table="Misc" col="namestr" />
+        </span>
         <select value={template} onChange={(e) => setTemplate(Number(e.target.value))}>
           <option value={-1}>Choose…</option>
           {items.map((x) => (
@@ -302,11 +309,15 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: CubeProps) {
         <input className="text-input" value={itemName} onChange={(e) => setItemName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
       </label>
       <label className="form-row">
-        <span>Item code</span>
+        <span>
+          Item code <ColHelp table="Misc" col="code" />
+        </span>
         <input className="text-input mono" value={code} maxLength={4} placeholder="e.g. mymp" onChange={(e) => setCode(e.target.value.trim())} onKeyDown={(e) => e.stopPropagation()} />
       </label>
       <label className="form-row">
-        <span>Cube inputs</span>
+        <span>
+          Cube inputs <ColHelp table="CubeMain" col="input 1" />
+        </span>
         <input className="text-input mono" value={inputs} onChange={(e) => setInputs(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
       </label>
       <div className="change-list">

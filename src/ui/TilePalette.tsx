@@ -3,6 +3,7 @@ import { decodeTile, Orientation, type Dt1Tile } from '../formats/dt1';
 import type { Palette } from '../formats/palette';
 import type { TileLibrary } from '../game/GameData';
 import type { Brush, LayerKind } from '../game/MapDocument';
+import { Splitter, usePersistentSize } from './Splitter';
 import { ORIENTATION_NAMES } from './state';
 
 interface Props {
@@ -98,6 +99,7 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
   const [query, setQuery] = useState('');
   const [dt1, setDt1] = useState<string>('all');
   const grid = useRef<HTMLDivElement>(null);
+  const [gridH, setGridH] = usePersistentSize('tiles', 340, 120, 1400);
   const [thumb, setThumb] = useState(() => {
     try {
       return Number(localStorage.getItem('ds1studio.thumbSize')) || 52;
@@ -191,7 +193,7 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
       <div
         className="thumb-grid"
         ref={grid}
-        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumb + 14}px, 1fr))`, ['--thumb-h' as string]: `${thumb}px` }}
+        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumb + 14}px, 1fr))`, ['--thumb-h' as string]: `${thumb}px`, maxHeight: gridH, height: gridH }}
         title="Ctrl + scroll to zoom the thumbnails"
       >
         {entries.map((e) => {
@@ -217,6 +219,7 @@ export function TilePalette({ lib, palette, layerKind, brush, focus, onPick }: P
         })}
         {entries.length === 0 && <div className="muted small pad">No tiles for this layer in {dt1 === 'all' ? 'the loaded DT1s' : 'this DT1'}.</div>}
       </div>
+      <Splitter axis="y" direction={1} size={gridH} onResize={setGridH} className="pane-handle" title="Drag to make the tiles pane taller or shorter" />
     </div>
   );
 }

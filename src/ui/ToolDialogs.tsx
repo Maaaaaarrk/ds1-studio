@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CheckResult } from '../game/compat';
 import type { ImportPlan, MapPackage } from '../game/mapPackage';
 import { Modal } from './Dialogs';
+import { ColHelp } from './HelpTip';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Compatibility check
@@ -44,6 +45,7 @@ export function CompatDialog({ results, onRerun, onShowCells, onFix, onRegister,
               <div>
                 <span className="muted small">{r.area} · </span>
                 {r.title}
+                {r.columns?.map((c) => <ColHelp key={`${c.table}.${c.col}`} table={c.table} col={c.col} />)}
               </div>
               {r.detail && <div className="muted small">{r.detail}</div>}
               <div className="inline">

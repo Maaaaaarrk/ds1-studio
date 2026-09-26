@@ -14,6 +14,8 @@ export interface CheckResult {
   detail?: string;
   /** Cells or sub-tiles to show on the map. */
   cells?: { x: number; y: number }[];
+  /** Table columns the result is about (the UI explains them). */
+  columns?: { table: string; col: string }[];
   /** Suggested fix the UI can offer (opens a table at a row, or adds DT1s). */
   fix?: { kind: 'open-table'; table: string; key?: string } | { kind: 'add-dt1s'; paths: string[] };
 }
@@ -66,6 +68,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
       area: 'Tables',
       title: 'Not referenced by LvlPrest.txt',
       detail: `No LvlPrest row lists "${rel}" in File1–File6, so the game never loads this map. Add a row (Name, Def, LevelId, File1, Dt1Mask).`,
+      columns: [{ table: 'LvlPrest', col: 'File1' }, { table: 'LvlPrest', col: 'LevelId' }, { table: 'LvlPrest', col: 'Dt1Mask' }],
       fix: { kind: 'open-table', table: 'LvlPrest.txt' },
     });
   else {
@@ -77,6 +80,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
         severity: 'info',
         area: 'Level',
         title: 'Shared preset (LevelId 0)',
+        columns: [{ table: 'LvlPrest', col: 'LevelId' }],
         detail: 'Placed by a level generator (LvlMaze/LvlSub or another level), not a level on its own. Level checks are skipped.',
       });
     } else {
@@ -99,6 +103,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
               title: `${notLoaded.length} tile librar${notLoaded.length > 1 ? 'ies are' : 'y is'} used but not loaded in game`,
               detail: `${notLoaded.map((p) => `${short(p)} (${used.get(p)} tiles)`).join(', ')}. Add ${notLoaded.length > 1 ? 'them' : 'it'} to LvlTypes "${typeRow['Name']}" (File 1–32) and set the matching bits in this preset's Dt1Mask (${mask}).`,
               fix: { kind: 'open-table', table: 'LvlTypes.txt', key: typeRow['Name'] },
+              columns: [{ table: 'LvlTypes', col: 'File 1' }, { table: 'LvlPrest', col: 'Dt1Mask' }],
             });
           else out.push({ severity: 'ok', area: 'Level', title: 'Every tile library the map uses is loaded by its level type' });
           for (const f of info?.files.filter(Boolean) ?? []) {
@@ -109,9 +114,9 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene): Promis
         // Palette: the level's act decides it.
         const act = Number(level['Act']);
         if (act !== ds1.act)
-          out.push({ severity: 'info', area: 'Level', title: `Level is in Act ${act + 1}, DS1 header says Act ${ds1.act + 1}`, detail: 'The game uses the level’s act (palette, music, town). The header value is not used for that.' });
+          out.push({ severity: 'info', area: 'Level', title: `Level is in Act ${act + 1}, DS1 header says Act ${ds1.act + 1}`, detail: 'The game uses the level’s act (palette, music, town). The header value is not used for that.', columns: [{ table: 'Levels', col: 'Act' }] });
         if (Number(level['Waypoint']) && Number(level['Waypoint']) !== 255 && !ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, 2, o.id))))
-          out.push({ severity: 'warning', area: 'Level', title: 'Level has a waypoint slot but no waypoint object on this map' });
+          out.push({ severity: 'warning', area: 'Level', title: 'Level has a waypoint slot but no waypoint object on this map', columns: [{ table: 'Levels', col: 'Waypoint' }] });
       }
     }
   }

@@ -127,11 +127,11 @@ export function PresetsPanel(props: Props) {
 
   return (
     <section className="panel presets-panel">
-      <div className="panel-header static">
-        <span>Presets</span>
-        <span className="muted small">{saved.length} saved</span>
-      </div>
-      <div className="panel-body">
+      <div className="presets-sticky">
+        <div className="panel-header static">
+          <span>Presets</span>
+          <span className="muted small">{saved.length} saved</span>
+        </div>
         <div className="button-grid">
           <button className="btn" disabled={!hasSelection || !canSave} onClick={onSaveSelection} title={canSave ? 'Save the selected cells (all layers + objects) as a preset' : 'No writable mod folder'}>
             Save selection…
@@ -141,6 +141,8 @@ export function PresetsPanel(props: Props) {
           </button>
         </div>
         <input className="search small-input preset-search" placeholder="Filter presets…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      <div className="panel-body">
         {groups.map(([cat, list]) => (
           <div key={cat}>
             <div className="field-label">{cat}</div>

@@ -451,6 +451,42 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.stroke();
   }
 
+  // The game builds the level out of 8x8-tile rooms (streamed in and out as players move), cut from the map's origin.
+  if (v.rooms) {
+    const R = 8;
+    const cols = Math.ceil(ds1.width / R);
+    const rows = Math.ceil(ds1.height / R);
+    for (let ry = 0; ry < rows; ry++)
+      for (let rx = 0; rx < cols; rx++) {
+        const x0 = rx * R;
+        const y0 = ry * R;
+        const w = Math.min(R, ds1.width - x0);
+        const h = Math.min(R, ds1.height - y0);
+        const partial = w < R || h < R;
+        ctx.beginPath();
+        diamond(ctx, x0, y0, w, h);
+        ctx.fillStyle = (rx + ry) % 2 ? 'rgba(90, 200, 255, 0.07)' : 'rgba(90, 200, 255, 0.02)';
+        ctx.fill();
+        ctx.setLineDash(partial ? [8 * px, 5 * px] : []);
+        ctx.lineWidth = 2 * px;
+        ctx.strokeStyle = partial ? 'rgba(255, 190, 90, 0.85)' : 'rgba(90, 200, 255, 0.85)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (cam.zoom > 0.12) {
+          const [cx, cy] = cellToWorld(x0 + w / 2, y0 + h / 2);
+          ctx.font = `600 ${12 * px}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          const label = `Room ${ry * cols + rx}  (${rx},${ry})${partial ? ` · ${w}×${h}` : ''}`;
+          ctx.lineWidth = 3 * px;
+          ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+          ctx.strokeText(label, cx, cy);
+          ctx.fillStyle = partial ? 'rgba(255, 215, 150, 1)' : 'rgba(190, 235, 255, 1)';
+          ctx.fillText(label, cx, cy);
+          ctx.textAlign = 'start';
+        }
+      }
+  }
+
   if (v.groups && ds1.groups.length) {
     ctx.lineWidth = 2 * px;
     ctx.setLineDash([6 * px, 4 * px]);

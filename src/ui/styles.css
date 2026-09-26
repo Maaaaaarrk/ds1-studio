@@ -293,3 +293,25 @@ details summary { cursor: pointer; margin-top: 8px; }
 .side-tabs button.active { color: #f1d9a6; border-bottom-color: var(--accent); }
 .topbar-title { font-weight: 600; white-space: nowrap; }
 .dt-list > * { flex: none; }
+
+/* Help tips */
+.help-tip { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: 4px; border-radius: 50%; border: 1px solid #4a5160; color: var(--muted); font-size: 9.5px; font-weight: 700; cursor: help; flex: none; vertical-align: middle; font-family: var(--font); line-height: 1; }
+.help-tip:hover, .help-tip:focus { color: var(--accent); border-color: var(--accent); outline: none; }
+.help-pop { position: fixed; z-index: 1000; max-width: 320px; background: #1d2027; color: var(--text); border: 1px solid #3a404c; border-radius: 6px; padding: 8px 10px; font-size: 12px; font-weight: 400; line-height: 1.45; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); white-space: normal; text-transform: none; letter-spacing: 0; pointer-events: none; }
+
+/* Splitters & pinned headers */
+.sidebar { position: relative; }
+.splitter { position: absolute; z-index: 20; background: transparent; transition: background 0.15s; }
+.splitter:hover, body.resizing-x .splitter-x, body.resizing-y .splitter-y { background: rgba(212, 168, 79, 0.45); }
+.splitter-x { position: relative; width: 6px; cursor: col-resize; align-self: stretch; }
+.splitter-x.edge-right { grid-area: left; justify-self: end; margin-right: -3px; }
+.splitter-x.edge-left { grid-area: right; justify-self: start; margin-left: -3px; }
+.splitter-y.pane-handle { position: relative; height: 7px; margin: 4px 0 0; cursor: row-resize; border-radius: 3px; background: var(--panel-2); }
+.splitter-y.pane-handle::after { content: ''; position: absolute; left: 50%; top: 2px; width: 36px; height: 3px; margin-left: -18px; border-radius: 2px; background: #4a5160; }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
+.sidebar.right .side-tabs { position: sticky; top: 0; z-index: 10; }
+.presets-sticky { position: sticky; top: 34px; z-index: 9; background: var(--panel); padding: 0 12px 8px; border-bottom: 1px solid var(--border); }
+.presets-sticky .panel-header { padding-left: 0; padding-right: 0; }
+.presets-panel .panel-body { padding-top: 8px; }
+.thumb-grid { resize: none; }

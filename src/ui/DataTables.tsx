@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { colIndex, findRows, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
 import type { LayeredFs } from '../vfs/vfs';
+import { columnHelp } from '../data/columnHelp';
 import { TableEditor } from './TableEditor';
 
 /** The tables map makers touch most, listed first. */
@@ -103,6 +104,7 @@ export function DataTables({ fs, initial, canSave, onSave, onClose }: Props) {
                 doc={doc}
                 dirty={dirty}
                 highlightRow={highlight}
+                help={(col) => columnHelp(nameOf(path), col)}
                 onChange={(d) => {
                   setDoc(d);
                   setDirty(true);
