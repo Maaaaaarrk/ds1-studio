@@ -72,4 +72,56 @@ describe.runIf(hasMod)('mod folder data', () => {
     console.log('DS1 versions:', Object.fromEntries(versions));
     expect(failures.slice(0, 20)).toEqual([]);
   }, 120_000);
+
+  it('round-trips every loose v18 DS1 byte-for-byte', async () => {
+    const { writeDs1 } = await import('../src/formats/ds1');
+    const diffs: string[] = [];
+    for (const f of walk(`${MOD_DATA}/global/tiles`, '.ds1')) {
+      const bytes = new Uint8Array(readFileSync(f));
+      if (new DataView(bytes.buffer, bytes.byteOffset).getInt32(0, true) !== 18) continue;
+      const ds1 = parseDs1(bytes);
+      const out = writeDs1(ds1);
+      if (out.length !== bytes.length || out.some((b, i) => b !== bytes[i])) diffs.push(f);
+    }
+    expect(diffs.slice(0, 10)).toEqual([]);
+  }, 120_000);
+});
+
+describe.runIf(hasD2)('DS1 writer', async () => {
+  const { writeDs1 } = await import('../src/formats/ds1');
+  const mpq = hasD2 ? await MpqArchive.open('d2data.mpq', new NodeFileAccess(`${D2_DIR}/d2data.mpq`)) : null!;
+  const files = hasD2 ? new TextDecoder().decode((await mpq.read('(listfile)'))!).split(/\r?\n/).filter((f) => /\.ds1$/i.test(f)) : [];
+
+  it('round-trips every v18 DS1 byte-for-byte', async () => {
+    const diffs: string[] = [];
+    let n = 0;
+    for (const f of files) {
+      const bytes = (await mpq.read(f))!;
+      if (new DataView(bytes.buffer).getInt32(0, true) !== 18) continue;
+      n++;
+      const out = writeDs1(parseDs1(bytes));
+      if (out.length !== bytes.length || out.some((b, i) => b !== bytes[i])) {
+        const at = out.findIndex((b, i) => b !== bytes[i]);
+        diffs.push(`${f}: len ${bytes.length} -> ${out.length}, first diff @${at}`);
+      }
+    }
+    expect(n).toBeGreaterThan(1000);
+    expect(diffs.slice(0, 10)).toEqual([]);
+  }, 120_000);
+
+  it('upgrades older versions to v18 without losing content', async () => {
+    const bad: string[] = [];
+    for (const f of files) {
+      const a = parseDs1((await mpq.read(f))!);
+      if (a.version === 18) continue;
+      const b = parseDs1(writeDs1(a));
+      const strip = (d: typeof a) => ({ ...d, version: 0, trailing: 0, tags: d.tagType === 1 || d.tagType === 2 ? d.tags : [], walls: d.walls.map((l) => l.map((c) => ({ ...c, orientationHigh: 0 }))) });
+      try {
+        expect(strip(b)).toEqual(strip(a));
+      } catch {
+        bad.push(`${f} (v${a.version})`);
+      }
+    }
+    expect(bad.slice(0, 10)).toEqual([]);
+  }, 120_000);
 });
