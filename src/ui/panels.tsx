@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { DEFAULT_PROP1, isEmptyCell, withFields, type Ds1, type TileCell, type WallCell } from '../formats/ds1';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
+import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { rectSize, type CellRect } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
@@ -318,7 +319,7 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
   );
 }
 
-export function MapInfoPanel({ map, gd, onReopen }: { map: OpenMap; gd: GameData; onReopen: (o?: MapOverride) => void }) {
+export function MapInfoPanel({ map, gd, onReopen, onPalette }: { map: OpenMap; gd: GameData; onReopen: (o?: MapOverride) => void; onPalette: (act: number) => void }) {
   const { ds1, resolution: r, lib } = map;
   const sourceText = {
     lvlprest: 'from LvlPrest.txt',
@@ -344,6 +345,23 @@ export function MapInfoPanel({ map, gd, onReopen }: { map: OpenMap; gd: GameData
           <tr><td className="muted">Source</td><td className="small">{gd.fs.locate(map.path) ?? '?'}</td></tr>
         </tbody>
       </table>
+
+      <div className="field">
+        <div className="field-label">
+          Palette{' '}
+          <span className="muted small">
+            {{ level: 'from the level type', tiles: 'best match for the tiles', ds1: 'from the DS1 header', manual: 'chosen manually' }[map.paletteSource]}
+          </span>
+        </div>
+        <select value={map.paletteAct} onChange={(e) => onPalette(Number(e.target.value))}>
+          {PALETTE_NAMES.map((name, a) => (
+            <option key={a} value={a}>
+              {name}
+              {a === map.ds1.act ? ' (DS1 header)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="field">
         <div className="field-label">

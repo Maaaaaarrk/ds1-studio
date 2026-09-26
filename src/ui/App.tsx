@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
+import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { clampRect, clearEdits, copyRect, fillEdits, pasteEdits, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
-import { openMap, type MapOverride, type OpenMap } from '../game/openMap';
+import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, hitTest, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, type SaveTarget } from '../vfs/save';
@@ -818,7 +819,7 @@ export function App() {
             />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} />
-            <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} />
+            <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)} />
           </>
         )}
       </aside>
@@ -839,6 +840,7 @@ export function App() {
             <span>{Math.round(zoom * 100)}%</span>
             <span>
               {map.ds1.width}×{map.ds1.height} · v{map.ds1.version} · Act {map.ds1.act + 1}
+              {map.paletteAct !== map.ds1.act ? ` · ${PALETTE_NAMES[map.paletteAct]} palette` : ''}
             </span>
           </>
         )}

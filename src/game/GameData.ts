@@ -1,6 +1,6 @@
 import { ds1FileToDt1Path, type Ds1 } from '../formats/ds1';
 import { parseDt1, type Dt1, type Dt1Tile } from '../formats/dt1';
-import { parsePalette, palettePath, type Palette } from '../formats/palette';
+import { OLD_ACT5_PALETTE, parsePalette, palettePath, type Palette } from '../formats/palette';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { normalizePath, type LayeredFs } from '../vfs/vfs';
 import { loadObjectSprite, parseObjTxt, type Sprite, type SpriteSpec } from './sprites';
@@ -8,6 +8,8 @@ import { loadObjectSprite, parseObjTxt, type Sprite, type SpriteSpec } from './s
 export interface LvlTypeInfo {
   id: number;
   name: string;
+  /** 1-based act from LvlTypes.txt "Act" (0 when unknown). */
+  act: number;
   files: string[]; // "File 1".."File 32", "" when unused
 }
 
@@ -83,7 +85,7 @@ export class GameData {
         const f = row[`File ${i}`] ?? '';
         files.push(f && f !== '0' ? f : '');
       }
-      gd.lvlTypes.push({ id, name: row['Name'], files });
+      gd.lvlTypes.push({ id, name: row['Name'], act: Number(row['Act']) || 0, files });
     }
     for (const row of levels?.rows ?? []) {
       const id = Number(row['Id']);
@@ -107,9 +109,16 @@ export class GameData {
     return gd;
   }
 
+  /** An act palette (0-4), or OLD_ACT5_PALETTE for d2data.mpq's own Act 5 palette (shadowed by d2exp.mpq in LoD). */
   palette(act: number): Promise<Palette> {
     let p = this.palettes.get(act);
     if (!p) {
+      if (act === OLD_ACT5_PALETTE) {
+        const d2data = this.fs.baseSources.find((s) => /d2data\.mpq$/i.test(s.label));
+        p = (d2data ? d2data.read(palettePath(4)) : Promise.resolve(null)).then((b) => (b ? parsePalette(b) : this.palette(4)));
+        this.palettes.set(act, p);
+        return p;
+      }
       p = this.fs.readOrThrow(palettePath(act)).then(parsePalette);
       this.palettes.set(act, p);
     }
@@ -196,7 +205,11 @@ export class GameData {
       if (!type) type = this.bestTypeForFiles(embedded, preset.dt1Mask);
       if (type) return { source: 'lvlprest', lvlType: type, preset, paths: GameData.dt1sFor(type, preset.dt1Mask) };
     }
-    // Not referenced by LvlPrest (unused/test presets): use the LvlType sharing the most files with the embedded list.
+    // Not referenced by LvlPrest (custom, unused or test presets). If the DS1's own file list is complete, use it as is,
+    // like WinDS1 does; otherwise use the LvlType sharing the most files with it.
+    if (embedded.length && embedded.every((p) => this.fs.locate(p))) {
+      return { source: 'embedded', lvlType: null, preset, paths: embedded };
+    }
     const guess = this.bestTypeForFiles(embedded, 0xffffffff);
     if (guess) {
       const paths = GameData.dt1sFor(guess, 0xffffffff);

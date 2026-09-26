@@ -143,12 +143,17 @@ export function MapView(props: Props) {
     dirty.current = true;
   };
 
-  // New map: fresh atlas + palette, fit to view.
+  // New map: fresh atlas, fit to view. (Re-resolving tiles or switching palettes keeps the same DS1 and camera.)
   useEffect(() => {
     atlas.current = new TileAtlas();
-    renderer.current!.setPalette(map.palette);
     fit();
-  }, [map]);
+  }, [map.ds1]);
+
+  // The atlas holds palette indices, so a palette change only swaps the palette texture.
+  useEffect(() => {
+    renderer.current!.setPalette(map.palette);
+    dirty.current = true;
+  }, [map.palette]);
 
   useEffect(() => {
     if (fitSignal) fit();

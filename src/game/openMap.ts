@@ -1,10 +1,16 @@
 import { parseDs1, type Ds1 } from '../formats/ds1';
-import type { Palette } from '../formats/palette';
+import { decodeTile, type Dt1Tile } from '../formats/dt1';
+import { OLD_ACT5_PALETTE, type Palette } from '../formats/palette';
 import { TileLibrary, type Dt1Resolution, type GameData } from './GameData';
+
+export type PaletteSource = 'level' | 'tiles' | 'ds1' | 'manual';
 
 export interface OpenMap {
   path: string;
   ds1: Ds1;
+  /** 0-based act whose palette the map is drawn with, and how it was chosen. */
+  paletteAct: number;
+  paletteSource: PaletteSource;
   resolution: Dt1Resolution;
   lib: TileLibrary;
   palette: Palette;
@@ -22,6 +28,104 @@ export async function openMap(gd: GameData, path: string, override?: MapOverride
   const dt1s = await Promise.all(resolution.paths.map((p) => gd.dt1(p).catch(() => null)));
   resolution.paths.forEach((p, i) => lib.add(p, dt1s[i]));
   if (gd.specialTiles) lib.addFallback('winds1/ds1edit.dt1 (special tiles)', gd.specialTiles);
-  const palette = await gd.palette(ds1.act);
-  return { path, ds1, resolution, lib, palette };
+  const [paletteAct, paletteSource] = await choosePaletteAct(gd, ds1, resolution, lib);
+  const palette = await gd.palette(paletteAct);
+  return { path, ds1, resolution, lib, palette, paletteAct, paletteSource };
+}
+
+/** Palette slots whose colour differs between the acts (the rest of the palette is shared). */
+function actSpecificSlots(palettes: Palette[]): Uint8Array {
+  const slots = new Uint8Array(256);
+  for (let i = 1; i < 256; i++)
+    for (const p of palettes)
+      for (let c = 0; c < 3; c++) if (Math.abs(p[i * 4 + c] - palettes[0][i * 4 + c]) > 8) slots[i] = 1;
+  return slots;
+}
+
+const DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, -1],
+  [1, -1],
+  [-1, 1],
+];
+
+/**
+ * How much the act-specific pixels of some tiles stand out under each palette: their colour distance to the nearest
+ * ordinary (shared-colour) pixels around them, looking up to 3 pixels out so clusters are measured too. Art drawn for
+ * a palette blends in; shown with another act's palette, those pixels become off-colour specks and blotches.
+ */
+function speckScores(tiles: Dt1Tile[], palettes: Palette[]): { scores: number[]; samples: number } {
+  const slots = actSpecificSlots(palettes);
+  const scores = palettes.map(() => 0);
+  let samples = 0;
+  for (const tile of tiles) {
+    const img = decodeTile(tile);
+    if (!img) continue;
+    const { width, height, pixels } = img;
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        const i = pixels[y * width + x];
+        if (!i || !slots[i]) continue;
+        const around: number[] = [];
+        for (const [dx, dy] of DIRS) {
+          for (let r = 1; r <= 3; r++) {
+            const nx = x + dx * r;
+            const ny = y + dy * r;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) break;
+            const n = pixels[ny * width + nx];
+            if (!n) break;
+            if (!slots[n]) {
+              around.push(n);
+              break;
+            }
+          }
+        }
+        if (around.length < 3) continue;
+        samples++;
+        palettes.forEach((p, k) => {
+          for (let c = 0; c < 3; c++) {
+            const mean = around.reduce((sum, n) => sum + p[n * 4 + c], 0) / around.length;
+            scores[k] += Math.abs(p[i * 4 + c] - mean);
+          }
+        });
+      }
+  }
+  return { scores: scores.map((v) => (samples ? v / samples : 0)), samples };
+}
+
+/**
+ * The game draws a level with the palette of the act it belongs to (the DS1 header's act is not used for that).
+ * For maps LvlPrest places in a level, use that level type's act. Otherwise (custom maps) keep the header's act unless
+ * the map's tiles look clearly cleaner under another act's palette, i.e. they were drawn for that palette.
+ */
+async function choosePaletteAct(gd: GameData, ds1: Ds1, r: Dt1Resolution, lib: TileLibrary): Promise<[number, PaletteSource]> {
+  // Only trust the level type when LvlPrest names a level; presets shared by many levels (LevelId 0) get a guessed type.
+  if (r.source === 'lvlprest' && (r.preset?.levelId ?? 0) > 0 && r.lvlType?.act) return [r.lvlType.act - 1, 'level'];
+  // Sample the tiles this map actually uses.
+  const used = new Set<Dt1Tile>();
+  const sample = (orientation: number, main: number, sub: number) => {
+    const t = lib.pick(orientation, main, sub, 0);
+    if (t) used.add(t);
+  };
+  for (const layer of ds1.floors) for (const c of layer) if (c.prop1) sample(0, c.mainIndex, c.subIndex);
+  for (const layer of ds1.walls) for (const c of layer) if (c.prop1 && c.orientation !== 10 && c.orientation !== 11) sample(c.orientation, c.mainIndex, c.subIndex);
+  const tiles = [...used];
+  const step = Math.max(1, Math.floor(tiles.length / 48));
+  const picked = tiles.filter((_, i) => i % step === 0);
+  if (!picked.length) return [ds1.act, 'ds1'];
+  const palettes = await Promise.all([0, 1, 2, 3, 4, OLD_ACT5_PALETTE].map((a) => gd.palette(a)));
+  const { scores, samples } = speckScores(picked, palettes);
+  const best = scores.indexOf(Math.min(...scores));
+  // Vanilla art mostly avoids the act-specific colours; switch only on clear evidence.
+  const clear = samples >= 200 && scores[ds1.act] - scores[best] > 12 && scores[best] < scores[ds1.act] * 0.6;
+  return clear ? [best, 'tiles'] : [ds1.act, 'ds1'];
+}
+
+/** Redraws an open map with another act's palette. */
+export async function withPalette(gd: GameData, map: OpenMap, act: number): Promise<OpenMap> {
+  return { ...map, paletteAct: act, paletteSource: 'manual', palette: await gd.palette(act) };
 }
