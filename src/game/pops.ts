@@ -104,14 +104,66 @@ export function tilesToHide(ds1: Ds1, rect: { x0: number; y0: number; x1: number
 
 export const popTargets = (ds1: Ds1, a: PopArea) => tilesToHide(ds1, hideRect(a), a.target);
 
+/**
+ * The game builds a preset map as rooms of 8×8 cells (D2Common DRLGPRESET_BuildArea), and brings hidden tiles back only
+ * in the rooms next to the player's room (DRLGPRESET_UpdatePops walks ppRoomsNear), after which it forgets the area was
+ * hidden. So when a player leaves a hide area into a room that isn't next to every room its tiles are in, the far part
+ * of the roof stays hidden until they go back in and out another way.
+ */
+export const ROOM_CELLS = 8;
+
+export interface PopReach {
+  /** Cells just outside the trigger area from which some of its hidden tiles are out of reach. */
+  exits: { x: number; y: number }[];
+  /** The trigger rectangle that keeps every tile in reach (still hiding all of them), or null when none does. */
+  fix: { x0: number; y0: number; x1: number; y1: number } | null;
+}
+
+/** Whether leaving a hide area anywhere brings its whole roof back (see ROOM_CELLS); null when it does. */
+export function popReach(ds1: Ds1, a: PopArea, popPad = 0): PopReach | null {
+  const tiles = popTargets(ds1, a);
+  if (!tiles.length) return null;
+  const room = (v: number) => Math.floor(v / ROOM_CELLS);
+  // PopPad (sub-tiles) moves the south and east edges of the trigger area.
+  const grow = Math.ceil(popPad / 5);
+  const ring = (r: { x0: number; y0: number; x1: number; y1: number }) => {
+    const out: { x: number; y: number }[] = [];
+    const [ex, ey] = [r.x1 + grow + 1, r.y1 + grow + 1];
+    for (let x = r.x0 - 1; x <= ex; x++) for (let y = r.y0 - 1; y <= ey; y++) if (x < r.x0 || x >= ex || y < r.y0 || y >= ey) out.push({ x, y });
+    return out;
+  };
+  const far = (c: { x: number; y: number }) => tiles.some((t) => Math.abs(room(t.x) - room(c.x)) > 1 || Math.abs(room(t.y) - room(c.y)) > 1);
+  const exits = ring(a).filter(far);
+  if (!exits.length) return null;
+  // Every tile's room must be next to every exit's room: exits within one room of the tiles' outermost rooms.
+  const [tx0, tx1, ty0, ty1] = [Math.min(...tiles.map((t) => t.x)), Math.max(...tiles.map((t) => t.x)), Math.min(...tiles.map((t) => t.y)), Math.max(...tiles.map((t) => t.y))];
+  const x0 = Math.max(a.x0, (room(tx1) - 1) * ROOM_CELLS + 1);
+  const y0 = Math.max(a.y0, (room(ty1) - 1) * ROOM_CELLS + 1);
+  const x1 = Math.min(a.x1, (room(tx0) + 2) * ROOM_CELLS - 2 - grow);
+  const y1 = Math.min(a.y1, (room(ty0) + 2) * ROOM_CELLS - 2 - grow);
+  // The hidden tiles are the rectangle grown by one cell: it must still cover them all.
+  const ok = x0 <= x1 && y0 <= y1 && x0 - 1 <= tx0 && y0 - 1 <= ty0 && x1 + 1 >= tx1 && y1 + 1 >= ty1 && !ring({ x0, y0, x1, y1 }).some(far);
+  return { exits, fix: ok ? { x0, y0, x1, y1 } : null };
+}
+
+/** Where an area's two corner markers go for a new rectangle (the first stays the corner it was, and so on). */
+export function movedCorners(a: PopArea, r: { x0: number; y0: number; x1: number; y1: number }): { from: PopMarker; x: number; y: number }[] {
+  return a.markers.map((m) => ({ from: m, x: m.x === a.x0 ? r.x0 : r.x1, y: m.y === a.y0 ? r.y0 : r.y1 })).filter((m) => m.x !== m.from.x || m.y !== m.from.y);
+}
+
 export interface PopProblem {
   severity: 'error' | 'warning' | 'info';
   text: string;
   area?: PopArea;
+  /** Corner markers to move so leaving the area anywhere brings the whole roof back. */
+  moves?: { from: PopMarker; x: number; y: number }[];
 }
 
-/** What would stop a map's pops working in game. `pops` = LvlPrest.txt's Pops for the map (null = no row). */
-export function popProblems(ds1: Ds1, areas: PopArea[], pops: number | null): PopProblem[] {
+/**
+ * What would stop a map's pops working in game. `pops` = LvlPrest.txt's Pops for the map (null = no row), `popPad` its
+ * PopPad.
+ */
+export function popProblems(ds1: Ds1, areas: PopArea[], pops: number | null, popPad = 0): PopProblem[] {
   const out: PopProblem[] = [];
   if (!areas.length) return out;
   if (pops !== null && pops === 0)
@@ -133,6 +185,19 @@ export function popProblems(ds1: Ds1, areas: PopArea[], pops: number | null): Po
     if (a.markers.some((m) => m.sub !== a.target))
       out.push({ severity: 'warning', area: a, text: `${name}: its markers have different sub indices; the game uses the first one's (${a.target}).` });
     if (!popTargets(ds1, a).length) out.push({ severity: 'warning', area: a, text: `${name}: no wall-layer tile with main index ${a.target} is in its area, so nothing disappears.` });
+    const reach = a.markers.length === 2 ? popReach(ds1, a, popPad) : null;
+    if (reach) {
+      const moves = reach.fix ? movedCorners(a, reach.fix) : [];
+      const side = [...new Set(reach.exits.map((e) => (e.y > a.y1 ? 'south' : e.y < a.y0 ? 'north' : e.x > a.x1 ? 'east' : 'west')))].join('/');
+      out.push({
+        severity: 'warning',
+        area: a,
+        text: `${name} is too big for the game's 8×8-cell rooms: leaving it on the ${side} side, part of the roof stays hidden until you go back in and out another way. The game brings tiles back only in the rooms next to the player's.${
+          moves.length ? ` Moving ${moves.map((m) => `(${m.from.x},${m.from.y}) to (${m.x},${m.y})`).join(' and ')} keeps it all in reach (it still hides every tile).` : ' Split the building into smaller hide areas.'
+        }`,
+        moves: moves.length ? moves : undefined,
+      });
+    }
   }
   return out;
 }

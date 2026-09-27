@@ -1560,6 +1560,22 @@ export function App() {
             notify(`Changed ${edits.length} marker${edits.length === 1 ? '' : 's'} (Ctrl+Z to undo; save the map to keep it)`);
             return recheck();
           }
+          case 'move-special': {
+            const edits: CellEdit[] = [];
+            for (const m of fix.moves) {
+              const from: LayerRef = { kind: 'wall', index: m.index };
+              const marker = doc.cell(from, m.x, m.y);
+              // The same wall layer if it is free at the new cell, else another free one (markers pair across layers).
+              const layers = [m.index, ...doc.ds1.walls.map((_, i) => i).filter((i) => i !== m.index)];
+              const to = layers.find((i) => isEmptyCell(doc.cell({ kind: 'wall', index: i }, m.toX, m.toY)));
+              if (to === undefined) return notify(`Every wall layer is taken at (${m.toX},${m.toY}); move the marker in Map → Roof hiding instead`);
+              edits.push({ layer: from, x: m.x, y: m.y, cell: MapDocument.painted(from, marker, null) });
+              edits.push({ layer: { kind: 'wall', index: to }, x: m.toX, y: m.toY, cell: marker });
+            }
+            if (doc.apply(edits)) bump();
+            notify(`Moved ${fix.moves.length} marker${fix.moves.length === 1 ? '' : 's'} (Ctrl+Z to undo; save the map to keep it)`);
+            return recheck();
+          }
           case 'move-objects': {
             const to = new Map(fix.moves.map((m) => [m.index, m]));
             setObjects(doc.ds1.objects.map((o, i) => (to.has(i) ? { ...o, x: to.get(i)!.x, y: to.get(i)!.y } : o)));

@@ -35,6 +35,8 @@ export type Fix = { label: string } & (
   | { kind: 'clear-cells'; cells: { layer: 'floor' | 'wall' | 'shadow'; index: number; x: number; y: number }[] }
   /** Changes wall-layer special tiles (orientation 10/11) to another main/sub number, in place. */
   | { kind: 'set-special'; cells: { index: number; x: number; y: number; main: number; sub: number }[] }
+  /** Moves wall-layer markers (special tiles) to other cells, onto the same wall layer when it is free there. */
+  | { kind: 'move-special'; moves: { index: number; x: number; y: number; toX: number; toY: number }[] }
   | { kind: 'sync-tables' }
   | { kind: 'register' }
   | { kind: 'move-objects'; moves: { index: number; x: number; y: number }[] }
@@ -345,14 +347,18 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
 
   // --- Roof hiding ("pops") -----------------------------------------------------------------------------------------
   const pops = findPops(ds1);
-  for (const p of popProblems(ds1, pops, prestRow ? Number(prestRow['Pops']) || 0 : null))
+  for (const p of popProblems(ds1, pops, prestRow ? Number(prestRow['Pops']) || 0 : null, prestRow ? Number(prestRow['PopPad']) || 0 : 0))
     out.push({
       severity: p.severity,
       area: 'Map',
       title: p.text,
       cells: p.area?.markers.map((m) => ({ x: m.x, y: m.y })),
       columns: p.area ? undefined : [{ table: 'LvlPrest', col: 'Pops' }],
-      fixes: p.area ? undefined : [{ kind: 'open-table', label: 'Open LvlPrest.txt (or use Map → Roof hiding → Set Pops)', table: 'LvlPrest.txt', key: prestRow?.['Name'] }],
+      fixes: p.moves
+        ? [{ kind: 'move-special', label: `Move the corner marker${p.moves.length === 1 ? '' : 's'}: ${p.moves.map((m) => `(${m.from.x},${m.from.y}) → (${m.x},${m.y})`).join(', ')}`, moves: p.moves.map((m) => ({ index: m.from.layer, x: m.from.x, y: m.from.y, toX: m.x, toY: m.y })) }]
+        : p.area
+          ? undefined
+          : [{ kind: 'open-table', label: 'Open LvlPrest.txt (or use Map → Roof hiding → Set Pops)', table: 'LvlPrest.txt', key: prestRow?.['Name'] }],
     });
 
   // --- Objects -----------------------------------------------------------------------------------------------------

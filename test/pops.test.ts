@@ -27,6 +27,38 @@ describe.runIf(hasD2)('pops (roofs that disappear) in vanilla presets', async ()
     expect(areas.map((a) => `${a.main}/${a.target}`).sort()).toEqual(['12/13', '13/13', '8/8']);
   });
 
+  it("checks every hide area of the game's maps against its 8×8-cell rooms, and moves a corner that is out of reach", async () => {
+    const { parseTxtTable, getCell } = await import('../src/formats/txtTable');
+    const { popReach } = await import('../src/game/pops');
+    const prest = parseTxtTable((await fs.read('data/global/excel/LvlPrest.txt'))!);
+    let areas = 0;
+    const far: string[] = [];
+    for (let r = 0; r < prest.rows.length; r++) {
+      if (!(Number(getCell(prest, r, 'Pops')) > 0)) continue;
+      for (let f = 1; f <= 6; f++) {
+        const file = getCell(prest, r, `File${f}`);
+        const b = file && file !== '0' ? await fs.read(`data/global/tiles/${file}`) : null;
+        if (!b) continue;
+        const ds1 = parseDs1(b);
+        for (const a of findPops(ds1)) {
+          areas++;
+          if (a.markers.length === 2 && popReach(ds1, a, Number(getCell(prest, r, 'PopPad')) || 0)) far.push(`${file} area ${a.main}`);
+        }
+      }
+    }
+    expect(areas).toBeGreaterThan(20);
+    // Only Travincal's temples are laid out like that in the game (outdoor pieces are split into 8×8 rooms too), so by
+    // the same code their far roofs can stay hidden after leaving on the far side.
+    expect(far).toEqual(['Act3/Travincal/TravNW.ds1 area 8', 'Act3/Travincal/TravNE.ds1 area 8', 'Act3/Travincal/TravS.ds1 area 8', 'Act3/Travincal/TravSE.ds1 area 12', 'Act3/Travincal/TravSE.ds1 area 10']);
+    // A tall roof whose trigger runs a room past it (like the Guild's hall): the south corner moves up two cells.
+    const ds1 = await load('act1/outdoors/cott6.ds1');
+    const [a] = findPops(ds1);
+    const tall = { ...a, y0: 1, y1: 17, markers: [{ ...a.markers[0], y: 1 }, { ...a.markers[1], y: 17 }] };
+    const reach = popReach(ds1, tall, 0)!;
+    expect(reach.exits.every((e) => e.y >= 16)).toBe(true); // room row 2 (cells 16-23), two rows from the roof
+    expect(reach.fix).toMatchObject({ y0: 1, y1: 14 });
+  });
+
   it('flags Pops = 0 and too few Pops', async () => {
     const ds1 = await load('act2/town/lutn.ds1');
     const areas = findPops(ds1);

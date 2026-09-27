@@ -29,7 +29,7 @@ interface Props {
  */
 export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, onRemove, onSetTables, onShow, onClose }: Props) {
   const { ds1 } = map;
-  const problems = useMemo(() => popProblems(ds1, areas, preset?.pops ?? null), [ds1, areas, preset]);
+  const problems = useMemo(() => popProblems(ds1, areas, preset?.pops ?? null, preset?.popPad ?? 0), [ds1, areas, preset]);
   const [popPad, setPopPad] = useState(() => (preset && (preset.pops > 0 || preset.popPad !== 0) ? preset.popPad : -4));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
