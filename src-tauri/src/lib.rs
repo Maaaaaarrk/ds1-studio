@@ -41,6 +41,10 @@ struct AppState {
 }
 
 fn config_file(app: &AppHandle) -> Result<PathBuf, String> {
+    // Test hook: a separate settings file, so test runs never touch the user's own.
+    if let Ok(p) = std::env::var("DS1STUDIO_CONFIG") {
+        return Ok(PathBuf::from(p));
+    }
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("ds1studio.json"))
 }
@@ -327,10 +331,12 @@ fn mcp_stdin(app: AppHandle) {
 #[derive(Default)]
 struct PickedFile(Mutex<Vec<PathBuf>>);
 
-/// Test hook: `DS1STUDIO_TEST_PICK` (paths separated by `;`) answers the next pick without showing a dialog, so the
-/// import flows can be driven end to end in tests. Unset in normal use.
-fn test_pick() -> Option<Vec<PathBuf>> {
-    std::env::var("DS1STUDIO_TEST_PICK").ok().map(|v| v.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect())
+/// Test hook: `DS1STUDIO_TEST_PICK_<EXT>` (e.g. `_DS1`, `_DT1`; paths separated by `;`) answers picks for that file
+/// type without showing a dialog, so the import flows can be driven end to end in tests. Unset in normal use.
+fn test_pick(extension: &str) -> Option<Vec<PathBuf>> {
+    std::env::var(format!("DS1STUDIO_TEST_PICK_{}", extension.to_ascii_uppercase()))
+        .ok()
+        .map(|v| v.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect())
 }
 
 /// Every file with `extension` under `dir` (subfolders included), sorted.
@@ -361,7 +367,7 @@ async fn pick_import(app: AppHandle, picked: State<'_, PickedFile>, extension: S
     use tauri_plugin_dialog::DialogExt;
     let mode = mode.unwrap_or_else(|| "file".into());
     let to_paths = |v: Vec<tauri_plugin_dialog::FilePath>| v.into_iter().filter_map(|p| p.into_path().ok()).collect::<Vec<_>>();
-    let chosen: Vec<PathBuf> = match test_pick() {
+    let chosen: Vec<PathBuf> = match test_pick(&extension) {
         Some(p) => p,
         None => match mode.as_str() {
             "folders" => app.dialog().file().blocking_pick_folders().map(to_paths).unwrap_or_default(),

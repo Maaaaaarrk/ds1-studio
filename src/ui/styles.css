@@ -683,3 +683,13 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .imp-row:hover { background: var(--hover, rgba(255, 255, 255, 0.05)); }
 .imp-row.bad { opacity: 0.7; cursor: default; }
 .imp-name, .imp-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.imp-callout { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #e8b84c; border-radius: 6px; background: rgba(232, 184, 76, 0.08); }
+.imp-callout.done { border-color: #5ad15a; background: rgba(90, 209, 90, 0.08); }
+.imp-callout > span { flex: 1 1 100%; }
+.imp-need { display: grid; grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 8px; font-size: 12px; }
+.imp-need.missing .imp-mark { color: #ff8a8a; }
+.imp-need.found .imp-mark { color: #5ad15a; }
+.imp-need.provided .imp-mark { color: #7cc8ff; }
+.imp-pick select { width: 100%; }
+.imp-extra { display: block; padding: 2px 0; }

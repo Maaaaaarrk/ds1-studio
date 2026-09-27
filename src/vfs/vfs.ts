@@ -126,6 +126,17 @@ export class LayeredFs {
     return this.sources.find((s) => s.has(path))?.label ?? null;
   }
 
+  /**
+   * A file's own spelling (capitals kept) as a source lists it, for writing into the game's tables; null when no
+   * source lists it with capitals (or at all).
+   */
+  exactPath(path: string): string | null {
+    const key = normalizePath(path);
+    for (const s of this.sources)
+      for (const p of s.list()) if (p !== p.toLowerCase() && normalizePath(p) === key) return p.replace(/\\/g, '/');
+    return null;
+  }
+
   /** Union of all sources' files, de-duplicated case-insensitively. `filter` receives the normalized path. */
   list(filter?: (normalized: string) => boolean): string[] {
     const all = new Map<string, string>();

@@ -105,6 +105,7 @@ import { renderMapImage } from '../render/exportImage';
 import { writeTileSettings } from '../formats/dt1Header';
 import { ExportImageDialog, ImportDs1Dialog, ImportDt1Dialog, ReplaceDialog, WarpLinkDialog, type ImportDs1Choice, type ImportDt1Choice, type ImportDt1File } from './EditDialogs';
 import { levelLinks, loadWarpTables, type WarpTables } from '../game/warps';
+import { neededDt1s, type NeededDt1 } from '../game/importMatch';
 import { parseDt1 } from '../formats/dt1';
 
 type DataState =
@@ -201,7 +202,7 @@ export function App() {
   /** A DT1 or DS1 picked for importing (with what it contains, or why it can't be used). */
   const [importing, setImporting] = useState<
     | { kind: 'dt1'; files: ImportDt1File[] }
-    | { kind: 'ds1'; name: string; bytes: Uint8Array; info: { width: number; height: number; act: number; missing: string[] } | string }
+    | { kind: 'ds1'; name: string; bytes: Uint8Array; info: { width: number; height: number; act: number } | string; needs: NeededDt1[] }
     | null
   >(null);
   const [importBusy, setImportBusy] = useState(false);
@@ -1041,7 +1042,8 @@ export function App() {
       let tableNote = '';
       if (data.status === 'ready' && data.saveTarget) {
         try {
-          const writes = await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
+          // Tables get each file's own spelling (capitals kept).
+          const writes = await syncLevelTables(gd.fs, map.path, paths.map((p) => gd.fs.exactPath(p) ?? p), map.resolution.lvlType?.id);
           if (writes.length) {
             await writeFiles(writes);
             await reloadTables();
@@ -1278,19 +1280,16 @@ export function App() {
       }
       const f = await importNamed(kind);
       if (!f) return;
-      let info: { width: number; height: number; act: number; missing: string[] } | string;
+      let info: { width: number; height: number; act: number } | string;
+      let needs: NeededDt1[] = [];
       try {
         const d = parseDs1(f.bytes);
-        const missing = d.files
-          .map(ds1FileToDt1Path)
-          .filter((p): p is string => !!p)
-          .filter((p) => !gd.fs.locate(normalizePath(p)))
-          .map((p) => p.replace(/^data\/global\/tiles\//i, ''));
-        info = { width: d.width, height: d.height, act: d.act, missing };
+        needs = neededDt1s(d, (p) => !!gd.fs.locate(p));
+        info = { width: d.width, height: d.height, act: d.act };
       } catch (e) {
         info = `This isn't a DS1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
       }
-      setImporting({ kind, name: f.name, bytes: f.bytes, info });
+      setImporting({ kind, name: f.name, bytes: f.bytes, info, needs });
     },
     [gd, notify],
   );
@@ -1332,7 +1331,21 @@ export function App() {
       if (!confirmDiscard()) return;
       setImportBusy(true);
       try {
-        await writeFiles([{ path: c.path, bytes: importing.bytes }]);
+        // Point the map at the tile libraries imported with it (its embedded list), so they are what it loads.
+        let bytes = importing.bytes;
+        if (c.dt1s.length) {
+          const d = parseDs1(bytes);
+          const provided = new Map(c.dt1s.filter((x) => x.replaces).map((x) => [x.replaces!, x.path]));
+          d.files = d.files.map((f) => {
+            const p = ds1FileToDt1Path(f);
+            const to = p && provided.get(normalizePath(p));
+            return to ? embeddedFileName(to) : f;
+          });
+          const listed = new Set(d.files.map((f) => normalizePath(ds1FileToDt1Path(f) ?? '')));
+          for (const x of c.dt1s) if (!x.replaces && !listed.has(normalizePath(x.path))) d.files.push(embeddedFileName(x.path));
+          bytes = writeDs1(d);
+        }
+        await writeFiles([...c.dt1s.map((x) => ({ path: x.path, bytes: x.bytes })), { path: c.path, bytes }]);
         setImporting(null);
         await reloadTables();
         await open(normalizePath(c.path), true);
@@ -2347,7 +2360,25 @@ export function App() {
         />
       )}
       {importing?.kind === 'ds1' && (
-        <ImportDs1Dialog file={importing} info={importing.info} exists={(p) => !!data.gd.fs.locate(normalizePath(p))} busy={importBusy} onImport={(c) => void importDs1(c)} onClose={() => setImporting(null)} />
+        <ImportDs1Dialog
+          file={importing}
+          info={importing.info}
+          needs={importing.needs}
+          exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
+          busy={importBusy}
+          pickDt1s={async (mode) => {
+            const found = await importMany('dt1', mode);
+            const out: ImportDt1File[] = [];
+            for (const f of found) {
+              const bytes = await f.read();
+              out.push({ name: f.name, folder: f.folder, bytes, info: describeDt1(bytes) });
+            }
+            if (!found.length && mode === 'folders') notify('No .dt1 files were found there.');
+            return out;
+          }}
+          onImport={(c) => void importDs1(c)}
+          onClose={() => setImporting(null)}
+        />
       )}
       {dialog === 'replace' && doc && map && (
         <ReplaceDialog
@@ -2503,7 +2534,7 @@ export function App() {
           mapPath={doc.path}
           width={doc.ds1.width}
           height={doc.ds1.height}
-          usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p))}
+          usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p)}
           onApply={applyTableWrites}
           onClose={() => {
             setDialog(null);

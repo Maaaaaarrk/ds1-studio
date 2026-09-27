@@ -8,6 +8,7 @@ import { exportSize, MAX_PIXELS, MAX_SIDE } from '../render/exportImage';
 import { Modal } from './Dialogs';
 import { HelpTip } from './HelpTip';
 import { Thumb } from './TilePalette';
+import { importedDt1Path, matchDt1s, type NeededDt1 } from '../game/importMatch';
 import { allLevels, allWarps, levelLinks, levelRef, linkWrite, type WarpTables } from '../game/warps';
 import type { TableWrite } from '../game/levelTables';
 
@@ -432,23 +433,57 @@ export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImp
 export interface ImportDs1Choice {
   path: string;
   register: boolean;
+  /** Tile libraries imported with the map; `replaces` = the library the map names that this one provides. */
+  dt1s: { path: string; bytes: Uint8Array; replaces?: string }[];
 }
 
-/** Import a DS1 as data/global/tiles/expansion/Map/<name>.ds1, then (optionally) add it to the game. */
-export function ImportDs1Dialog({ file, info, exists, busy, onImport, onClose }: {
+/**
+ * Import a DS1 as data/global/tiles/expansion/Map/<name>.ds1 together with the tile libraries it needs: every DT1 the
+ * map names is listed as already there, provided by a picked file, or missing, and missing ones can be found by
+ * picking DT1 files or folders. Then (optionally) add it to the game.
+ */
+export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onImport, onClose }: {
   file: { name: string };
-  info: { width: number; height: number; act: number; missing: string[] } | string;
+  info: { width: number; height: number; act: number } | string;
+  /** The tile libraries the map names (its embedded file list). */
+  needs: NeededDt1[];
   exists: (path: string) => boolean;
   busy: boolean;
+  /** Picks DT1 files or folders and reads them. */
+  pickDt1s: (mode: 'files' | 'folders') => Promise<ImportDt1File[]>;
   onImport: (c: ImportDs1Choice) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(() => baseName(file.name));
   const [register, setRegister] = useState(true);
+  const [folder, setFolder] = useState<string | null>(null);
+  const [picked, setPicked] = useState<ImportDt1File[]>([]);
+  const [manual, setManual] = useState<Record<number, number | null>>({});
+  const [extras, setExtras] = useState<Set<number>>(new Set());
+  const [acceptMissing, setAcceptMissing] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const dt1Folder = (folder ?? name).trim();
   const path = `data/global/tiles/expansion/Map/${name.trim()}.ds1`;
-  const ok = typeof info !== 'string' && safeName(name);
+  const auto = useMemo(() => matchDt1s(needs.map((n) => (n.found ? { ...n, rel: '\u0000' } : n)), picked.map((f) => ({ ...f, ok: typeof f.info !== 'string' }))), [needs, picked]);
+  const source = needs.map((n, i) => (n.found ? null : i in manual ? manual[i] : auto[i]));
+  const missing = needs.filter((n, i) => !n.found && source[i] === null);
+  const usedFiles = new Set(source.filter((x): x is number => x !== null));
+  const unmatched = picked.map((_, i) => i).filter((i) => !usedFiles.has(i) && typeof picked[i].info !== 'string');
+  const ok = typeof info !== 'string' && safeName(name) && safeName(dt1Folder) && (!missing.length || acceptMissing);
+  const add = async (mode: 'files' | 'folders') => {
+    setPicking(true);
+    try {
+      const more = await pickDt1s(mode);
+      if (more.length) setPicked((p) => [...p, ...more]);
+    } finally {
+      setPicking(false);
+    }
+  };
+  const targetOf = (needIndex: number) => importedDt1Path(dt1Folder, needs[needIndex].rel);
+  const extraTarget = (fi: number) => importedDt1Path(dt1Folder, `${picked[fi].folder ? `${picked[fi].folder}/` : ''}${picked[fi].name}`);
+  const valid = picked.map((f, i) => ({ f, i })).filter(({ f }) => typeof f.info !== 'string');
   return (
-    <Modal title="Import DS1" onClose={onClose}>
+    <Modal title="Import DS1" onClose={onClose} wide>
       <p className="small">
         <b>{file.name}</b>: {typeof info === 'string' ? <span className="error-text">{info}</span> : `${info.width}×${info.height} map, act ${info.act + 1}`}
       </p>
@@ -459,11 +494,102 @@ export function ImportDs1Dialog({ file, info, exists, busy, onImport, onClose }:
       {!safeName(name) && <p className="error-text small">Use letters, digits, - and _ only (no spaces): plain names are safe in the game&apos;s tables.</p>}
       <p className="small mono">{path}</p>
       {exists(path) && <p className="warn-text small">A map with that name exists: it will be replaced (the old one is kept as .bak).</p>}
-      {typeof info !== 'string' && info.missing.length > 0 && (
+
+      <div className="field-label">
+        Tile libraries this map uses{' '}
+        <HelpTip text="A DS1 names the DT1 files its tiles come from. The ones your game or mod doesn't have can be imported with the map: pick DT1 files or whole folders and they're matched by name (and folder). They go into PD2assets/<folder>/ and the map is pointed at them, so DS1 Studio and — after Add to game — the game load them." />
+      </div>
+      {typeof info !== 'string' && needs.some((n) => !n.found) && (
+        <div className={`imp-callout${missing.length ? '' : ' done'}`}>
+          <span className="small">
+            {missing.length
+              ? `${missing.length} of the ${needs.filter((n) => !n.found).length} libraries your game and mod don't have ${missing.length === 1 ? 'is' : 'are'} still missing. Add their DT1s:`
+              : 'Every library the map needs is there or provided.'}
+          </span>
+          <button className="btn small" disabled={picking} onClick={() => void add('files')}>
+            Add DT1 files…
+          </button>
+          <button className="btn small" disabled={picking} onClick={() => void add('folders')}>
+            Add folders…
+          </button>
+        </div>
+      )}
+      <div className="imp-list">
+        {needs.map((n, i) => {
+          const src = source[i];
+          return (
+            <div key={n.path} className={`imp-need${n.found ? ' found' : src === null ? ' missing' : ' provided'}`}>
+              <span className="imp-mark">{n.found ? '✓' : src === null ? '✗' : '＋'}</span>
+              <span className="imp-name mono small" title={n.path}>
+                {n.rel}
+              </span>
+              {n.found ? (
+                <span className="small muted">in your game / mod</span>
+              ) : (
+                <span className="imp-pick">
+                  <select
+                    value={src ?? ''}
+                    onChange={(e) => setManual((m) => ({ ...m, [i]: e.target.value === '' ? null : Number(e.target.value) }))}
+                    title={src !== null ? `→ ${targetOf(i).replace(/^data\/global\/tiles\//, '')}` : 'Pick which DT1 provides it'}
+                  >
+                    <option value="">{valid.length ? 'missing — choose a DT1…' : 'missing'}</option>
+                    {valid.map(({ f, i: fi }) => (
+                      <option key={fi} value={fi}>
+                        {f.folder ? `${f.folder}/` : ''}
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              )}
+            </div>
+          );
+        })}
+        {!needs.length && <p className="muted small pad">The map doesn&apos;t name any tile libraries (it will use its level type&apos;s).</p>}
+      </div>
+      {picked.some((f) => typeof f.info === 'string') && (
         <p className="warn-text small">
-          It lists tile libraries that aren&apos;t in your game or mod: {info.missing.join(', ')}. Import those DT1s too, or its tiles show as missing (and the game can&apos;t
-          draw them).
+          Left out (can&apos;t be read): {picked.filter((f) => typeof f.info === 'string').map((f) => f.name).join(', ')}
         </p>
+      )}
+      {unmatched.length > 0 && (
+        <details className="small">
+          <summary>
+            {unmatched.length} other picked DT1{unmatched.length === 1 ? '' : 's'} the map doesn&apos;t name ({extras.size} to import too)
+          </summary>
+          {unmatched.map((fi) => (
+            <label key={fi} className="imp-extra">
+              <input
+                type="checkbox"
+                checked={extras.has(fi)}
+                onChange={() =>
+                  setExtras((x) => {
+                    const n = new Set(x);
+                    if (n.has(fi)) n.delete(fi);
+                    else n.add(fi);
+                    return n;
+                  })
+                }
+              />{' '}
+              {picked[fi].folder ? `${picked[fi].folder}/` : ''}
+              {picked[fi].name} <span className="muted">→ {extraTarget(fi).replace(/^data\/global\/tiles\//, '')}</span>
+            </label>
+          ))}
+        </details>
+      )}
+      {(usedFiles.size > 0 || extras.size > 0) && (
+        <label className="form-row">
+          <span>
+            DT1s into PD2assets / <HelpTip text="The subfolder of data/global/tiles/PD2assets/ the imported DT1s go into (keeping the folders the map names inside it)." />
+          </span>
+          <input className="text-input" value={dt1Folder} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+        </label>
+      )}
+      {missing.length > 0 && (
+        <label className="small warn-text">
+          <input type="checkbox" checked={acceptMissing} onChange={(e) => setAcceptMissing(e.target.checked)} /> import anyway: tiles from the {missing.length} missing
+          librar{missing.length === 1 ? 'y' : 'ies'} will show as missing (and the game can&apos;t draw them)
+        </label>
       )}
       <label className="small">
         <input type="checkbox" checked={register} onChange={(e) => setRegister(e.target.checked)} /> add it to the game next{' '}
@@ -473,8 +599,21 @@ export function ImportDs1Dialog({ file, info, exists, busy, onImport, onClose }:
         <button className="btn" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn primary" disabled={!ok || busy} onClick={() => onImport({ path, register })}>
-          {busy ? 'Importing…' : 'Import'}
+        <button
+          className="btn primary"
+          disabled={!ok || busy}
+          onClick={() =>
+            onImport({
+              path,
+              register,
+              dt1s: [
+                ...needs.flatMap((n, i) => (source[i] === null || n.found ? [] : [{ path: targetOf(i), bytes: picked[source[i]!].bytes, replaces: n.path }])),
+                ...[...extras].map((fi) => ({ path: extraTarget(fi), bytes: picked[fi].bytes })),
+              ],
+            })
+          }
+        >
+          {busy ? 'Importing…' : `Import${usedFiles.size + extras.size ? ` map + ${usedFiles.size + extras.size} DT1${usedFiles.size + extras.size === 1 ? '' : 's'}` : ''}`}
         </button>
       </div>
     </Modal>
