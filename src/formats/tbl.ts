@@ -156,7 +156,23 @@ export function writeTbl(t: Tbl): Uint8Array {
     out.set(part, p);
     p += part.length;
   }
+  // The game checks this: a stale value makes D2Lang halt at start-up ("Unrecoverable internal error").
+  v.setUint16(0, tblCrc(out), true);
   return out;
+}
+
+/**
+ * The header's CRC: CRC-16/CCITT (polynomial 0x1021, initial value 0xFFFF, not reflected) over the string data, from
+ * the header's string offset to the end. Reproduces the stored value of the game's three tables and of PD2's.
+ */
+export function tblCrc(b: Uint8Array): number {
+  const start = new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(9, true);
+  let c = 0xffff;
+  for (let i = start; i < b.length; i++) {
+    c ^= b[i] << 8;
+    for (let k = 0; k < 8; k++) c = c & 0x8000 ? ((c << 1) ^ 0x1021) & 0xffff : (c << 1) & 0xffff;
+  }
+  return c;
 }
 
 /** Adds or changes strings (existing keys keep their number; new ones are appended). */

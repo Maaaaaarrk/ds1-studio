@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTbl, parseTblRaw, setTblStrings, tblHash, tblLookup, writeTbl } from '../src/formats/tbl';
+import { parseTbl, parseTblRaw, setTblStrings, tblCrc, tblHash, tblLookup, writeTbl } from '../src/formats/tbl';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
 import { D2_DIR, hasD2 } from '../tools/testdata';
@@ -31,11 +31,21 @@ describe.runIf(hasD2)('string tables (.tbl), checked against the game\'s own', a
     for (const [k, v] of [...first].slice(0, 400)) expect(tblLookup(b, k)).toBe(v);
   });
 
+  it.each(files.map((f, i) => [f, i] as const))('%s: the header CRC is CRC-16/CCITT over the strings, and a rewrite reproduces the file', (_, i) => {
+    const b = bytes[i];
+    expect(tblCrc(b)).toBe(new DataView(b.buffer, b.byteOffset).getUint16(0, true));
+    // Written back unchanged: the same CRC (a stale CRC makes the game halt at start-up).
+    const out = writeTbl(parseTbl(b));
+    expect(new DataView(out.buffer).getUint16(0, true)).toBe(tblCrc(out));
+  });
+
   it('writes a table the game can read: same strings, same numbers, and new ones found', () => {
     const b = bytes[2];
     const t = parseTbl(b);
     const plus = setTblStrings(t, { ds1s_test_item: 'Guild Hall Map', ds1s_test_level: 'Guild Hall' });
     const out = writeTbl(plus);
+    expect(new DataView(out.buffer).getUint16(0, true)).toBe(tblCrc(out));
+    expect(new DataView(out.buffer).getUint16(0, true)).not.toBe(t.crc); // new strings, new CRC
     const back = parseTbl(out);
     expect(back.entries.slice(0, t.entries.length)).toEqual(t.entries); // numbers unchanged
     expect(back.entries.length).toBe(t.entries.length + 2);
