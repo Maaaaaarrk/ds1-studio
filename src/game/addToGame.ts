@@ -103,6 +103,30 @@ export function typeAct(types: TxtTableDoc, typeId: number): number | null {
   return act >= 1 && act <= 5 ? act - 1 : null;
 }
 
+/** Rows of the levels other than `except` whose LevelType is `typeId`. */
+export function levelsOfType(levels: TxtTableDoc, typeId: number, except = -1): number[] {
+  return dataRows(levels).filter((r) => num(getCell(levels, r, 'LevelType')) === typeId && num(getCell(levels, r, 'Id')) !== except);
+}
+
+/**
+ * A level type of the map's own, appended as the next record: File 1… are `dt1s` (full or tiles-relative paths), every
+ * other column (Act, Expansion…) is copied from `fromRow`. Used instead of adding a map's tile libraries to a level type
+ * other levels use, whose tile list then stays theirs.
+ */
+export function appendOwnType(types: TxtTableDoc, fromRow: number, name: string, dt1s: string[]): { types: TxtTableDoc; typeRow: number; typeId: number; slots: Map<string, number> } {
+  const files = [...new Map(dt1s.map((p) => [normalizePath(p.replace(/^\/?data\/global\/tiles\//i, '')), p.replace(/\\/g, '/').replace(/^\/?data\/global\/tiles\//i, '')])).values()];
+  if (files.length > 32) throw new Error(`The map uses ${files.length} tile libraries; a level type holds at most 32.`);
+  const typeId = dataRows(types).length;
+  const values = Object.fromEntries(types.columns.map((c, i) => [c, types.rows[fromRow][i] ?? ''])) as Record<string, string>;
+  values.Name = name;
+  values.Id = String(typeId);
+  const slots = new Map<string, number>();
+  for (let i = 1; i <= 32; i++) if (has(types, `File ${i}`)) values[`File ${i}`] = files[i - 1] ?? '0';
+  files.forEach((f, i) => slots.set(normalizePath(`data/global/tiles/${f}`), i + 1));
+  const appended = appendAt(types, values);
+  return { types: appended.doc, typeRow: appended.row, typeId, slots };
+}
+
 /** Suggested world position for a new level in an act: past every level there, like the game's Act 5 extras (4000+). */
 export function freeOffset(levels: TxtTableDoc, act: number): { x: number; y: number } {
   let right = 1000;
@@ -152,10 +176,10 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
   const levelRow = rowOfRecord(levels, input.levelId);
   if (levelRow < 0) return 'Pick a level.';
   const levelName = (id: number) => getCell(levels, rowOfRecord(levels, id), 'Name');
-  const typeId = num(getCell(levels, levelRow, 'LevelType'));
-  const typeRow = rowOfRecord(types, typeId);
+  let typeId = num(getCell(levels, levelRow, 'LevelType'));
+  let typeRow = rowOfRecord(types, typeId);
   if (typeRow < 0) return `LvlTypes.txt has no level type ${typeId}.`;
-  const typeName = getCell(types, typeRow, 'Name');
+  let typeName = getCell(types, typeRow, 'Name');
   const sizeX = String(input.width - 1);
   const sizeY = String(input.height - 1);
 
@@ -166,15 +190,37 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     if (issue) return `LvlTypes: ${issue}`;
   }
   let slots: Map<string, number>;
+  // A level type other levels use keeps its tile list: when the map needs libraries it doesn't have, the map gets a
+  // level type of its own (the new level's template, or the existing level, then points at it).
+  let ownType = false;
   try {
     const before = types;
     const r = ensureTypeSlots(types, typeRow, input.usedDt1s);
-    types = r.types;
-    slots = r.slots;
-    for (const a of r.added) {
-      const [col, value] = a.split(' = ');
-      changes.push({ table: 'LvlTypes.txt', row: `Type ${typeId} "${typeName}"`, column: col, from: getCell(before, typeRow, col), to: value, why: 'a tile library the map uses' });
+    const sharers = levelsOfType(levels, typeId, input.mode === 'existing' ? input.levelId : -1);
+    if (r.added.length && sharers.length) {
+      const own = appendOwnType(types, typeRow, name, input.usedDt1s);
+      const users = sharers.map((x) => `${getCell(levels, x, 'Id')} ${getCell(levels, x, 'Name')}`);
+      warnings.push(
+        `Level type ${typeId} "${typeName}" is also used by ${users.slice(0, 3).join(', ')}${users.length > 3 ? ` and ${users.length - 3} more` : ''}, so the map gets its own level type ${own.typeId} "${name}" with just its ${own.slots.size} tile libraries. The level loses that type's AutoMap.txt entries: add its own with the Automap editor.`,
+      );
+      changes.push({ table: 'LvlTypes.txt', row: `Type ${own.typeId} "${name}"`, column: '(new row)', from: '', to: `copy of ${typeId} "${typeName}" (Act, Expansion), appended as record ${own.typeId}` });
+      for (const s of own.slots.values())
+        changes.push({ table: 'LvlTypes.txt', row: `Type ${own.typeId} "${name}"`, column: `File ${s}`, from: '', to: getCell(own.types, own.typeRow, `File ${s}`), why: s === 1 ? 'the tile libraries the map uses' : undefined });
+      types = own.types;
+      typeRow = own.typeRow;
+      typeId = own.typeId;
+      typeName = name;
+      slots = own.slots;
+      ownType = true;
       touched.add('LvlTypes.txt');
+    } else {
+      types = r.types;
+      slots = r.slots;
+      for (const a of r.added) {
+        const [col, value] = a.split(' = ');
+        changes.push({ table: 'LvlTypes.txt', row: `Type ${typeId} "${typeName}"`, column: col, from: getCell(before, typeRow, col), to: value, why: 'a tile library the map uses' });
+        touched.add('LvlTypes.txt');
+      }
     }
   } catch (e) {
     return (e as Error).message;
@@ -220,6 +266,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     set('Levels.txt', row, label, 'OffsetY', String(off.y));
     set('Levels.txt', row, label, 'Depend', '0');
     set('Levels.txt', row, label, 'DrlgType', '2', 'a preset level: its map comes from LvlPrest');
+    if (ownType) set('Levels.txt', row, label, 'LevelType', String(typeId), 'its own level type (see LvlTypes)');
     for (let i = 0; i < 8; i++) {
       set('Levels.txt', row, label, `Vis${i}`, '0', i === 0 ? 'no links yet (see Warps)' : undefined);
       set('Levels.txt', row, label, `Warp${i}`, '-1');
@@ -242,6 +289,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
       }
       warnings.push(`The level's size changes from ${cur[0]}×${cur[1]} to ${sizeX}×${sizeY}. If it grows, check it doesn't overlap a neighbouring level (OffsetX/OffsetY).`);
     }
+    if (ownType) set('Levels.txt', levelRow, `Level ${input.levelId} "${levelName(input.levelId)}"`, 'LevelType', String(typeId), 'its own level type (see LvlTypes)');
   }
 
   // LvlPrest: the level's claiming row (existing) or a new one (new level). Def = record number.
@@ -323,7 +371,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
 
   // Dt1Mask and hide areas on the preset row.
   const oldMask = num(getCell(prest, pRow, 'Dt1Mask')) >>> 0;
-  const mask = input.mode === 'new' ? maskOf(slots) : maskFor(types, typeRow, input.usedDt1s, oldMask);
+  const mask = input.mode === 'new' || ownType ? maskOf(slots) : maskFor(types, typeRow, input.usedDt1s, oldMask);
   set('LvlPrest.txt', pRow, pLabel, 'Dt1Mask', String(mask >>> 0), `LvlTypes "${typeName}" File slots ${[...slots.values()].sort((a, b) => a - b).join(', ')}`);
   if (input.popCount > num(getCell(prest, pRow, 'Pops'))) {
     set('LvlPrest.txt', pRow, pLabel, 'Pops', String(input.popCount), 'the map\'s roof hide areas');
@@ -621,6 +669,70 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
         const p = mask & (1 << (i - 1)) && f && f !== '0' ? tilePathProblem(f) : null;
         if (p) out.push({ severity: 'error', title: `LvlTypes "${getCell(types, tRow, 'Name')}" File ${i} path too long`, detail: p, columns: [{ table: 'LvlTypes', col: `File ${i}` }] });
       }
+    if (tRow >= 0 && first === r) {
+      const shared = sharedTypeIssue(tables, lRow, r, tRow);
+      if (shared) out.push(shared);
+    }
   }
   return out;
+}
+
+/** The game's own levels end here (Baal's world stone chamber is 132, the Uber levels 133-136). */
+export const LAST_GAME_LEVEL = 136;
+
+/**
+ * A level added to the game (past its own levels) that uses a level type an earlier level owns, holding tile libraries
+ * only it loads: libraries added to someone else's level type for this map. The game's own levels share types that way
+ * too (Courtyard 1 and 2), so only added levels that aren't the type's first user are flagged. The fix gives the level
+ * its own type with exactly the libraries it loads and clears those slots from the shared row. Types that random levels
+ * (DrlgType 1/3) use are left alone: their tiles come from shared presets that can select any slot.
+ */
+function sharedTypeIssue(tables: { prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc }, lRow: number, pRow: number, tRow: number): TableIssue | null {
+  const { prest, levels, types } = tables;
+  const levelId = num(getCell(levels, lRow, 'Id'));
+  const typeId = num(getCell(types, tRow, 'Id'));
+  const others = levelsOfType(levels, typeId, levelId);
+  if (levelId <= LAST_GAME_LEVEL || !others.length || others.some((o) => num(getCell(levels, o, 'DrlgType')) !== 2)) return null;
+  if (Math.min(...others.map((o) => num(getCell(levels, o, 'Id')))) > levelId) return null; // it is the type's owner
+  const presetOf = (id: number) => dataRows(prest).find((x) => num(getCell(prest, x, 'LevelId')) === id);
+  let othersMask = 0;
+  for (const o of others) {
+    const p = presetOf(num(getCell(levels, o, 'Id')));
+    if (p !== undefined) othersMask |= num(getCell(prest, p, 'Dt1Mask'));
+  }
+  const mask = num(getCell(prest, pRow, 'Dt1Mask')) >>> 0;
+  const file = (i: number) => {
+    const f = getCell(types, tRow, `File ${i}`);
+    return f && f !== '0' ? f : '';
+  };
+  const loads = Array.from({ length: 32 }, (_, i) => i + 1).filter((i) => mask & (1 << (i - 1)) && file(i));
+  const onlyMine = loads.filter((i) => !(othersMask & (1 << (i - 1))));
+  if (!onlyMine.length) return null;
+  const lName = getCell(levels, lRow, 'Name');
+  const tName = getCell(types, tRow, 'Name');
+  const users = others.map((o) => `${getCell(levels, o, 'Id')} "${getCell(levels, o, 'Name')}"`);
+  // Fix: own type with the files this level loads, the level pointed at it, its mask = those slots, and the slots only
+  // it used cleared from the shared row.
+  const own = appendOwnType(types, tRow, lName, loads.map(file));
+  let t = own.types;
+  for (const i of onlyMine) t = setCell(t, tRow, `File ${i}`, '0');
+  const ownMask = maskOf(own.slots);
+  // A note, not a warning: the game loads the right files either way (PD2's own Kanemith levels share a type like this).
+  return {
+    severity: 'info',
+    title: `Level ${levelId} "${lName}" shares level type ${typeId} "${tName}" with ${users.slice(0, 2).join(', ')}${users.length > 2 ? ` and ${users.length - 2} more` : ''}`,
+    detail: `Slots ${onlyMine.join(', ')} of that level type hold tile libraries only this level loads. The game still loads the right files (each level's Dt1Mask picks its own slots), but the levels share one tile list and the type's AutoMap.txt entries, and adding libraries for one fills the other's row. If they were added to another level's type for this map, give the level its own level type, as mods do for their own areas; it then has no AutoMap entries until you add them in the Automap editor.`,
+    columns: [
+      { table: 'Levels', col: 'LevelType' },
+      { table: 'LvlPrest', col: 'Dt1Mask' },
+    ],
+    fix: {
+      label: `Give it its own level type ${own.typeId} "${lName}" (${loads.length} tile libraries) and clear ${onlyMine.length} slot${onlyMine.length === 1 ? '' : 's'} from "${tName}"`,
+      writes: [
+        { table: 'LvlTypes.txt', path: `${EXCEL}LvlTypes.txt`, bytes: serializeTxtTable(t), summary: [`New level type ${own.typeId} "${lName}": ${loads.map(file).join(', ')}`, `"${tName}": File ${onlyMine.join(', ')} cleared (only level ${levelId} used them)`] },
+        { table: 'Levels.txt', path: `${EXCEL}Levels.txt`, bytes: serializeTxtTable(setCell(levels, lRow, 'LevelType', String(own.typeId))), summary: [`"${lName}": LevelType ${typeId} → ${own.typeId}`] },
+        { table: 'LvlPrest.txt', path: `${EXCEL}LvlPrest.txt`, bytes: serializeTxtTable(setCell(prest, pRow, 'Dt1Mask', String(ownMask))), summary: [`"${getCell(prest, pRow, 'Name')}": Dt1Mask ${mask} → ${ownMask}`] },
+      ],
+    },
+  };
 }

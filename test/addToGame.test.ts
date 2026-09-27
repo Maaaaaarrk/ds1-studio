@@ -193,21 +193,82 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(verifyInGame(next, rel, ds1).filter((p) => p.severity !== 'info')).toEqual([]);
   });
 
-  it('a new tile library goes into a free LvlTypes slot and the Dt1Mask', async () => {
+  const filesOf = (types: TxtTableDoc, row: number) => Array.from({ length: 32 }, (_, i) => getCell(types, row, `File ${i + 1}`)).filter((f) => f && f !== '0');
+
+  it('a new level that needs a new tile library gets its own level type; the template\'s stays as it is', async () => {
     const rel = 'Expansion/Town/townWest.ds1';
     const ds1 = await ds1Of(rel);
     const extra = 'data/global/tiles/PD2assets/mine/floor.dt1';
     const plan = planAddToGame(tables, { mode: 'new', levelId: 109, name: 'X', mapRel: rel, width: ds1.width, height: ds1.height, usedDt1s: [...dt1sOf(rel), extra], popCount: 2 });
     if (typeof plan === 'string') throw new Error(plan);
     const next = apply(plan);
-    const T = rowOfRecord(next.types, num(getCell(next.levels, rowOfRecord(next.levels, 109), 'LevelType')));
-    const slot = Array.from({ length: 32 }, (_, i) => i + 1).find((i) => getCell(next.types, T, `File ${i}`) === 'PD2assets/mine/floor.dt1')!;
-    expect(slot).toBeGreaterThan(0);
+    const typeId = num(getCell(next.levels, rowOfRecord(next.levels, plan.newLevelId!), 'LevelType'));
+    expect(typeId).toBe(dataRows(tables.types).length); // appended as the next record
+    const T = rowOfRecord(next.types, typeId);
+    const files = filesOf(next.types, T);
+    const rels = (paths: string[]) => paths.map((p) => normalizePath(p.replace(/^data\/global\/tiles\//i, '')));
+    expect(rels(files)).toEqual(rels([...dt1sOf(rel), extra]));
+    const templateType = rowOfRecord(tables.types, num(getCell(tables.levels, rowOfRecord(tables.levels, 109), 'LevelType')));
+    expect(getCell(next.types, T, 'Act')).toBe(getCell(tables.types, templateType, 'Act'));
     const P = rowOfRecord(next.prest, dataRows(tables.prest).length);
-    expect((Number(getCell(next.prest, P, 'Dt1Mask')) >>> 0) & (1 << (slot - 1))).not.toBe(0);
+    expect(Number(getCell(next.prest, P, 'Dt1Mask')) >>> 0).toBe(2 ** files.length - 1);
     expect([getCell(next.prest, P, 'Pops'), getCell(next.prest, P, 'PopPad')]).toEqual(['2', '-4']);
-    // Only that row of LvlTypes changed.
-    expect(same(tables.types, next.types, [T])).toBe(true);
+    // No existing LvlTypes row changed; the template level keeps its type.
+    expect(same(tables.types, next.types, tables.types.rows.map((_, i) => i).filter((i) => i >= T))).toBe(true);
+    expect(getCell(next.levels, rowOfRecord(next.levels, 109), 'LevelType')).toBe(getCell(tables.levels, rowOfRecord(tables.levels, 109), 'LevelType'));
+    expect(plan.warnings.join(' ')).toMatch(/its own level type/);
+    expect(verifyInGame(next, rel, ds1).filter((p) => p.severity !== 'info')).toEqual([]);
+  });
+
+  it('an existing level sharing its level type gets its own when the map needs a new library (Courtyard 2 shares with Courtyard 1)', async () => {
+    const rel = 'Act1/Court/Cat_Court.ds1';
+    const ds1 = await ds1Of(rel);
+    const extra = 'data/global/tiles/PD2assets/mine/floor.dt1';
+    const plan = planAddToGame(tables, { mode: 'existing', levelId: 32, name: 'Courtyard 2', mapRel: rel, width: ds1.width, height: ds1.height, usedDt1s: [...dt1sOf(rel), extra], popCount: 0 });
+    if (typeof plan === 'string') throw new Error(plan);
+    const next = apply(plan);
+    const typeId = num(getCell(next.levels, rowOfRecord(next.levels, 32), 'LevelType'));
+    expect(typeId).toBe(dataRows(tables.types).length);
+    expect(filesOf(next.types, rowOfRecord(next.types, typeId))).toHaveLength(dt1sOf(rel).length + 1);
+    // Courtyard 1 and type 6 are untouched.
+    expect(getCell(next.levels, rowOfRecord(next.levels, 27), 'LevelType')).toBe('6');
+    expect(next.types.rows[rowOfRecord(next.types, 6)]).toEqual(tables.types.rows[rowOfRecord(tables.types, 6)]);
+    // Without a new library the level keeps its (shared) type, as the game has it.
+    const plain = planAddToGame(tables, { mode: 'existing', levelId: 32, name: 'Courtyard 2', mapRel: rel, width: ds1.width, height: ds1.height, usedDt1s: dt1sOf(rel), popCount: 0 });
+    if (typeof plain === 'string') throw new Error(plain);
+    expect(plain.writes.map((w) => w.table)).not.toContain('LvlTypes.txt');
+  });
+
+  it("notes an added level whose libraries were put in another level's type, and moves it to its own", async () => {
+    const { ensureTypeSlots, maskOf } = await import('../src/game/levelTables');
+    const { setCell } = await import('../src/formats/txtTable');
+    const rel = 'Act1/Court/Cat_Court.ds1';
+    const ds1 = await ds1Of(rel);
+    // A new level 137 made from Courtyard 2 (type 6), then a library added to type 6 for it (the old behaviour).
+    const made = planAddToGame(tables, { mode: 'new', levelId: 32, name: 'My Court', mapRel: rel, width: ds1.width, height: ds1.height, usedDt1s: dt1sOf(rel), popCount: 0 });
+    if (typeof made === 'string') throw new Error(made);
+    const base = apply(made);
+    const T6 = rowOfRecord(base.types, 6);
+    const extra = 'data/global/tiles/PD2assets/mine/floor.dt1';
+    const slotted = ensureTypeSlots(base.types, T6, [...dt1sOf(rel), extra]);
+    const P = rowOfRecord(base.prest, dataRows(tables.prest).length);
+    const broken = { ...base, types: slotted.types, prest: setCell(base.prest, P, 'Dt1Mask', String(maskOf(slotted.slots))) };
+    const issue = verifyInGame(broken, rel, ds1).find((i) => /shares level type 6/.test(i.title))!;
+    expect(issue.severity).toBe('info');
+    expect(issue.title).toMatch(/Level 137 "My Court" shares level type 6 "Act 1 - Courtyard" with 27 .*32/);
+    // The fix: its own type with the files it loads, the slot added for it cleared from type 6.
+    const fixed = { ...broken };
+    for (const w of issue.fix!.writes) {
+      const doc = parseTxtTable(w.bytes);
+      if (w.table === 'LvlPrest.txt') fixed.prest = doc;
+      if (w.table === 'Levels.txt') fixed.levels = doc;
+      if (w.table === 'LvlTypes.txt') fixed.types = doc;
+    }
+    const own = num(getCell(fixed.levels, rowOfRecord(fixed.levels, 137), 'LevelType'));
+    expect(own).toBe(dataRows(tables.types).length);
+    expect(filesOf(fixed.types, rowOfRecord(fixed.types, own))).toContain('PD2assets/mine/floor.dt1');
+    expect(fixed.types.rows[rowOfRecord(fixed.types, 6)]).toEqual(tables.types.rows[rowOfRecord(tables.types, 6)]);
+    expect(verifyInGame(fixed, rel, ds1).filter((p) => p.severity !== 'info' || /shares/.test(p.title))).toEqual([]);
   });
 
   it('refuses paths the game cannot hold, and random levels for "existing"', async () => {

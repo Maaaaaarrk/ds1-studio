@@ -51,6 +51,23 @@ describe('syncLevelTables', () => {
     await expect(syncLevelTables(tables({ withPreset: false }), MAP, [tile('Act1/Test/a.dt1')])).rejects.toThrow(/Add to game/);
   });
 
+  it("gives the map's level its own level type when a new DT1 would go into a type another level uses", async () => {
+    // Records in row order, as the game reads them: types 0-1, levels 0-2 (1 and 2 share type 1), preset 0 for level 1.
+    const types = `Name\tId\t${fileCols.join('\t')}\tAct\r\nNone\t0\t${fileCols.map(() => '0').join('\t')}\t0\r\nShared\t1\t${fileCols.map((_, i) => ['Act1/Test/a.dt1', 'Act1/Test/b.dt1'][i] ?? '0').join('\t')}\t1\r\n`;
+    const levels = 'Name\tId\tLevelType\r\nNull\t0\t0\r\nMine\t1\t1\r\nTheirs\t2\t1\r\n';
+    const prest = 'Name\tDef\tLevelId\tFile1\tFile2\tFile3\tFile4\tFile5\tFile6\tDt1Mask\r\nMy Map\t0\t1\tAct1/Test/mymap.ds1\t0\t0\t0\t0\t0\t3\r\n';
+    const fs = new LayeredFs([new LooseSource('test', new Map([[`${EX}LvlTypes.txt`, types], [`${EX}Levels.txt`, levels], [`${EX}LvlPrest.txt`, prest]].map(([k, v]) => [k, async () => enc(v)])))]);
+    const writes = await syncLevelTables(fs, MAP, [tile('Act1/Test/a.dt1'), tile('Act1/Test/b.dt1'), tile('Act1/Test/c.dt1')]);
+    expect(writes.map((w) => w.table)).toEqual(['LvlTypes.txt', 'Levels.txt', 'LvlPrest.txt']);
+    const t = parseTxtTable(writes[0].bytes);
+    expect([getCell(t, 2, 'Name'), getCell(t, 2, 'Id'), getCell(t, 2, 'File 1'), getCell(t, 2, 'File 3'), getCell(t, 2, 'File 4'), getCell(t, 2, 'Act')]).toEqual(['Mine', '2', 'Act1/Test/a.dt1', 'Act1/Test/c.dt1', '0', '1']);
+    expect(getCell(t, 1, 'File 3')).toBe('0'); // the shared type is untouched
+    expect(getCell(parseTxtTable(writes[1].bytes), 1, 'LevelType')).toBe('2');
+    expect(getCell(parseTxtTable(writes[2].bytes), 0, 'Dt1Mask')).toBe('7');
+    // Its own libraries only (no new one): nothing to change, the type stays shared.
+    expect(await syncLevelTables(fs, MAP, [tile('Act1/Test/a.dt1'), tile('Act1/Test/b.dt1')])).toEqual([]);
+  });
+
   it('keeps an already-selected duplicate slot and leaves empty-slot bits alone', () => {
     const types = parseTxtTable(enc(`Name\tId\t${fileCols.join('\t')}\r\nT\t1\t${fileCols.map((_, i) => (i === 0 || i === 3 ? 'x/a.dt1' : '0')).join('\t')}\r\n`));
     // Slot 4 duplicates slot 1 and is the one selected; bit 6 is an empty slot.

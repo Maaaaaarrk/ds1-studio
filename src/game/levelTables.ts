@@ -1,6 +1,6 @@
 import { colIndex, getCell, parseTxtTable, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
 import { normalizePath, type LayeredFs } from '../vfs/vfs';
-import { appendAt, dataRows, freeOffset, levelAct, rowOfRecord } from './addToGame';
+import { appendAt, appendOwnType, dataRows, freeOffset, levelAct, levelsOfType, rowOfRecord } from './addToGame';
 
 const EXCEL = 'data/global/excel/';
 
@@ -120,6 +120,25 @@ export async function syncLevelTables(fs: LayeredFs, mapPath: string, dt1s: stri
   const { types, added } = ensureTypeSlots(types0, typeRow, dt1s);
   let p = prest;
   const changedPresets: string[] = [];
+  // New libraries for a level type other levels use too: the map's level gets a level type of its own instead, so
+  // theirs keeps its tile list. Only when this map is the level's only preset (its type then affects nothing else).
+  const levelRow = levelId ? rowOfRecord(levels, levelId) : -1;
+  const levelPresets = levelId ? dataRows(prest).filter((r) => num(getCell(prest, r, 'LevelId')) === levelId) : [];
+  if (added.length && levelRow >= 0 && levelsOfType(levels, typeId, levelId).length && levelPresets.every((r) => rows.includes(r))) {
+    const name = getCell(levels, levelRow, 'Name');
+    const own = appendOwnType(types0, typeRow, name, dt1s);
+    const mask = maskOf(own.slots);
+    for (const r of rows) {
+      const old = num(getCell(p, r, 'Dt1Mask')) >>> 0;
+      p = setCell(p, r, 'Dt1Mask', String(mask));
+      changedPresets.push(`"${getCell(p, r, 'Name')}": Dt1Mask ${old} → ${mask}`);
+    }
+    return [
+      { table: 'LvlTypes.txt', path: `${EXCEL}LvlTypes.txt`, bytes: serializeTxtTable(own.types), summary: [`New level type ${own.typeId} "${name}" with the map's ${own.slots.size} tile libraries (type ${typeId} "${getCell(types0, typeRow, 'Name')}" is also used by other levels, so it stays as it is)`] },
+      { table: 'Levels.txt', path: `${EXCEL}Levels.txt`, bytes: serializeTxtTable(setCell(levels, levelRow, 'LevelType', String(own.typeId))), summary: [`"${name}": LevelType ${typeId} → ${own.typeId}`] },
+      { table: 'LvlPrest.txt', path: `${EXCEL}LvlPrest.txt`, bytes: serializeTxtTable(p), summary: changedPresets },
+    ];
+  }
   for (const r of rows) {
     const old = num(getCell(p, r, 'Dt1Mask')) >>> 0;
     const mask = maskFor(types, typeRow, dt1s, old);

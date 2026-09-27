@@ -405,7 +405,7 @@ export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImp
       {mapOpen ? (
         <label className="small">
           <input type="checkbox" checked={addToMap} onChange={(e) => setAddToMap(e.target.checked)} /> add them to {mapOpen.split('/').pop()}&apos;s tile libraries{' '}
-          <HelpTip text="Puts each DT1 in a free File slot of the map's level type (LvlTypes.txt, 32 slots) and includes it in the map's Dt1Mask (LvlPrest.txt), so both DS1 Studio and the game load them. Without that, the game never loads the files (so it can't crash on them), but maps can't use their tiles either." />
+          <HelpTip text="Puts each DT1 in a free File slot of the map's level type (LvlTypes.txt, 32 slots; when other levels use that type too, the map's level gets a level type of its own instead) and includes it in the map's Dt1Mask (LvlPrest.txt), so both DS1 Studio and the game load them. Without that, the game never loads the files (so it can't crash on them), but maps can't use their tiles either." />
           {freeSlots !== null && <span className="muted"> · {freeSlots} free slot{freeSlots === 1 ? '' : 's'}</span>}
         </label>
       ) : (
