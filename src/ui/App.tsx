@@ -94,6 +94,7 @@ import { CompatDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDi
 import type { Sprite } from '../game/sprites';
 import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
 import { DesktopSetup } from './DesktopSetup';
+import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
 import { isBuiltinPath, specialTileInfo } from '../game/specialTiles';
@@ -2003,6 +2004,12 @@ export function App() {
       </aside>
 
       <main className="stage">
+        <ErrorBoundary
+          what="the map view"
+          resetKey={map}
+          context={() => ({ map: map?.path })}
+          action={map ? { label: 'Close this map', onClick: () => { if (confirmDiscard()) { setMap(null); setDoc(null); } } } : undefined}
+        >
         {map && scene ? (
           <MapView
             map={map}
@@ -2081,11 +2088,13 @@ export function App() {
             {toast.text}
           </div>
         )}
+        </ErrorBoundary>
         {loadingPath && <div className="toast">Loading {loadingPath.split('/').pop()}…</div>}
       </main>
 
       <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />
       <aside className="sidebar right">
+        <ErrorBoundary what="the side panel" resetKey={`${map?.path}:${tool}`} context={() => ({ map: map?.path })} compact>
         {map && scene && doc && (
           <>
             {tool === 'object' && (
@@ -2286,6 +2295,7 @@ export function App() {
             <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)} />
           </>
         )}
+        </ErrorBoundary>
       </aside>
 
       {dialog === 'new' && <NewMapDialog gd={data.gd} onCreate={createMap} onClose={() => setDialog(null)} />}

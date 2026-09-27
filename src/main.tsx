@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import './ui/styles.css';
 
 // `ds1-studio --mcp` starts a hidden window that serves the MCP tools instead of the editor.
@@ -9,7 +10,9 @@ if ((window as { __DS1_MCP__?: boolean }).__DS1_MCP__) {
 } else {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary what="DS1 Studio">
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
 }

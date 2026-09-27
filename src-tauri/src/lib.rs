@@ -323,23 +323,28 @@ fn mcp_stdin(app: AppHandle) {
     });
 }
 
-/// A file the user picks in a native "Open" dialog, with its name (imports that keep or show the name). None = cancelled.
-#[derive(Serialize)]
-struct NamedFile {
-    name: String,
-    bytes: Vec<u8>,
-}
+/// The file last picked for importing (read once with `read_picked`).
+#[derive(Default)]
+struct PickedFile(Mutex<Option<PathBuf>>);
 
+/// Native "Open" dialog for imports that need the file's name: returns the name (None = cancelled) and keeps the path
+/// for `read_picked`, which sends the bytes raw (a JSON list of numbers would be slow and heavy for big maps).
 #[tauri::command]
-async fn import_named(app: AppHandle, extension: String) -> Result<Option<NamedFile>, String> {
+async fn pick_import(app: AppHandle, picked: State<'_, PickedFile>, extension: String) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let Some(path) = app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_file() else {
         return Ok(None);
     };
     let path = path.into_path().map_err(|e| e.to_string())?;
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-    Ok(Some(NamedFile { name, bytes }))
+    *picked.0.lock().unwrap() = Some(path);
+    Ok(Some(name))
+}
+
+#[tauri::command]
+fn read_picked(picked: State<'_, PickedFile>) -> Result<Response, String> {
+    let path = picked.0.lock().unwrap().take().ok_or("no file picked")?;
+    fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -358,6 +363,7 @@ pub fn run() {
                 .unwrap_or_default();
             app.manage(AppState { config: Mutex::new(config) });
             app.manage(Mutex::new(McpState::default()));
+            app.manage(PickedFile::default());
             // The window is created here (not from the config) so MCP mode can start it hidden, as the MCP server.
             let conf = app.config().app.windows.first().cloned().ok_or("no window configured")?;
             let mut window = tauri::WebviewWindowBuilder::from_config(app.handle(), &conf)?;
@@ -382,7 +388,8 @@ pub fn run() {
             mcp_ready,
             mcp_out,
             app_exe,
-            import_named
+            pick_import,
+            read_picked
         ])
         .run(tauri::generate_context!())
         .expect("error while running DS1 Studio");

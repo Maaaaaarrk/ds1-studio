@@ -121,8 +121,9 @@ function pickFile(extension: string): Promise<File | null> {
 export async function importNamed(extension: string): Promise<{ name: string; bytes: Uint8Array } | null> {
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     const { invoke } = await import('@tauri-apps/api/core');
-    const f = await invoke<{ name: string; bytes: number[] } | null>('import_named', { extension });
-    return f ? { name: f.name, bytes: new Uint8Array(f.bytes) } : null;
+    const name = await invoke<string | null>('pick_import', { extension });
+    if (!name) return null;
+    return { name, bytes: new Uint8Array(await invoke<ArrayBuffer>('read_picked')) };
   }
   const file = await pickFile(extension);
   return file ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
