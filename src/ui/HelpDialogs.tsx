@@ -4,7 +4,49 @@ import { isTauri } from '../vfs/tauri';
 import { Modal } from './Dialogs';
 
 /** Help → About: version and build information. */
+/**
+ * The MCP server (`--mcp`) is a hidden feature: clicking the version five times reveals how to connect an AI
+ * assistant to it.
+ */
+function McpSetup() {
+  const [exe, setExe] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isTauri) return;
+    void import('@tauri-apps/api/core').then(({ invoke }) => invoke<string>('app_exe').then(setExe, () => setExe(null)));
+  }, []);
+  if (!isTauri) return <p className="small muted">The MCP server is part of the desktop app.</p>;
+  if (!exe) return <p className="small muted">Finding the program…</p>;
+  const code = `claude mcp add ds1-studio -- "${exe}" --mcp`;
+  const desktop = JSON.stringify({ mcpServers: { 'ds1-studio': { command: exe, args: ['--mcp'] } } }, null, 2);
+  const copy = (what: string, text: string) =>
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(what);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  return (
+    <div className="mcp-setup">
+      <div className="field-label">AI assistants (MCP)</div>
+      <p className="small muted">
+        Started with <code>--mcp</code>, DS1 Studio runs without a window as an MCP server: an assistant can open, read, render, edit, check and save maps with the folders chosen
+        here (saving only into the mod folder, keeping a .bak). A map edited that way needs reopening in this window to show the changes.
+      </p>
+      <div className="small">Claude Code:</div>
+      <pre className="mcp-code">{code}</pre>
+      <button className="btn small" onClick={() => copy('code', code)}>
+        {copied === 'code' ? 'Copied' : 'Copy command'}
+      </button>
+      <div className="small">Claude Desktop (claude_desktop_config.json):</div>
+      <pre className="mcp-code">{desktop}</pre>
+      <button className="btn small" onClick={() => copy('desktop', desktop)}>
+        {copied === 'desktop' ? 'Copied' : 'Copy JSON'}
+      </button>
+    </div>
+  );
+}
+
 export function AboutDialog({ onClose }: { onClose: () => void }) {
+  const [clicks, setClicks] = useState(0);
   const rows: [string, string][] = [
     ['Version', APP_VERSION],
     ['Build', `${GIT_COMMIT} · ${BUILD_DATE}`],
@@ -18,11 +60,14 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
           {rows.map(([k, v]) => (
             <tr key={k}>
               <td className="muted">{k}</td>
-              <td className="mono">{v}</td>
+              <td className="mono" onClick={k === 'Version' ? () => setClicks((n) => n + 1) : undefined}>
+                {v}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {clicks >= 5 && <McpSetup />}
       <p className="muted small">
         A modern editor for Diablo II map presets (DS1) and tile libraries (DT1). Diablo II and its data are © Blizzard Entertainment; DS1 Studio reads your
         own game files and never ships them.

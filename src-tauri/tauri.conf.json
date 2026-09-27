@@ -12,6 +12,8 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "DS1 Studio",
         "width": 1440,
         "height": 900,

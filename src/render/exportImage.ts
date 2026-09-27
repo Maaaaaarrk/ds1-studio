@@ -19,6 +19,8 @@ export interface ExportOptions {
   objects: boolean;
   /** Which scene items to draw (the map view's layer visibility). */
   visible: (it: DrawItem) => boolean;
+  /** PNG (default) or JPEG (much smaller, for previews). */
+  format?: 'png' | 'jpeg';
 }
 
 /** The largest canvas side browsers reliably allow, and a total pixel budget. */
@@ -111,5 +113,6 @@ export async function renderMapImage(scene: Scene, objects: Ds1Object[], sprites
     if (img && image) ctx.drawImage(img, it.x + image.offsetX, it.y + image.offsetY);
   }
   flush(Infinity);
-  return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the PNG'))), 'image/png'));
+  const type = opt.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the image'))), type, 0.85));
 }

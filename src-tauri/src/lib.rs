@@ -262,20 +262,91 @@ async fn import_file(app: AppHandle, extension: String) -> Result<Response, Stri
     fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// `ds1-studio --mcp`: a Model Context Protocol server on stdin/stdout for AI assistants (a hidden feature). The app
+// starts with a hidden window that runs the same editing code as the editor (src/mcp); this side only relays the
+// newline-delimited JSON-RPC messages between the standard streams and that window.
+
+/// Lines read from stdin before the window was listening, and whether it is.
+#[derive(Default)]
+struct McpState {
+    ready: bool,
+    pending: Vec<String>,
+}
+
+fn mcp_mode() -> bool {
+    std::env::args().any(|a| a == "--mcp")
+}
+
+/// This program's own path (for the MCP setup commands shown in About).
+#[tauri::command]
+fn app_exe() -> Result<String, String> {
+    std::env::current_exe().map(|p| p.display().to_string()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn mcp_ready(app: AppHandle, state: State<Mutex<McpState>>) {
+    use tauri::Emitter;
+    let mut s = state.lock().unwrap();
+    s.ready = true;
+    for line in s.pending.drain(..) {
+        let _ = app.emit_to("main", "mcp-in", line);
+    }
+}
+
+#[tauri::command]
+fn mcp_out(line: String) -> Result<(), String> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "{}", line).and_then(|_| out.flush()).map_err(|e| e.to_string())
+}
+
+/// Reads MCP messages from stdin and hands them to the window; stdin closing (the client quit) ends the app.
+fn mcp_stdin(app: AppHandle) {
+    use std::io::BufRead;
+    use tauri::Emitter;
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let state = app.state::<Mutex<McpState>>();
+            let mut s = state.lock().unwrap();
+            if s.ready {
+                let _ = app.emit_to("main", "mcp-in", line);
+            } else {
+                s.pending.push(line);
+            }
+        }
+        app.exit(0);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mcp = mcp_mode();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             let config = config_file(app.handle())
                 .ok()
                 .and_then(|f| fs::read_to_string(f).ok())
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_default();
             app.manage(AppState { config: Mutex::new(config) });
+            app.manage(Mutex::new(McpState::default()));
+            // The window is created here (not from the config) so MCP mode can start it hidden, as the MCP server.
+            let conf = app.config().app.windows.first().cloned().ok_or("no window configured")?;
+            let mut window = tauri::WebviewWindowBuilder::from_config(app.handle(), &conf)?;
+            if mcp {
+                window = window.visible(false).initialization_script("window.__DS1_MCP__ = true;");
+                mcp_stdin(app.handle().clone());
+            }
+            window.build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -288,7 +359,10 @@ pub fn run() {
             read_file,
             save_file,
             export_file,
-            import_file
+            import_file,
+            mcp_ready,
+            mcp_out,
+            app_exe
         ])
         .run(tauri::generate_context!())
         .expect("error while running DS1 Studio");
