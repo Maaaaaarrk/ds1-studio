@@ -1,4 +1,5 @@
-import type { Dt1 } from '../formats/dt1';
+import type { Ds1 } from '../formats/ds1';
+import { Orientation, type Dt1 } from '../formats/dt1';
 import { TileLibrary } from './GameData';
 import { isBuiltinPath } from './specialTiles';
 
@@ -39,4 +40,66 @@ export function duplicateDt1s(lib: TileLibrary): DuplicateDt1[] {
       if (shared) out.push({ earlier: libs[i].path, later: libs[j].path, shared });
     }
   return out;
+}
+
+export interface ClashingDt1s {
+  /** Cells whose floor or wall tile number more than one of the DT1s provides. */
+  cells: { x: number; y: number }[];
+  /** "a|b" → how many placed tiles both provide. */
+  pairs: Map<string, number>;
+  /** DT1s that can go: every tile number the map uses from them is in another loaded DT1 too. */
+  removable: string[];
+}
+
+/**
+ * Tile numbers the map places that two different (not copied) mod DT1s both provide, like one mod's house1 and house2
+ * reusing the same numbers. The game picks among all of them at random for each cell, so those cells show a mix of the
+ * two libraries (the map looks jumbled in game and differently in the editor). The game's own DT1s (`fromGame`) are
+ * left out: they use shared numbers on purpose, as random variants. Copies are reported by duplicateDt1s instead.
+ */
+export function clashingDt1s(lib: TileLibrary, ds1: Pick<Ds1, 'width' | 'height' | 'floors' | 'walls'>, fromGame: (path: string) => boolean): ClashingDt1s | null {
+  const libs = lib.loaded
+    .filter((l) => l.found && !isBuiltinPath(l.path) && !fromGame(l.path))
+    .map((l) => ({ path: l.path, keys: tileKeys({ tiles: lib.tilesOf(l.path) }) }));
+  const copies = new Set(duplicateDt1s(lib).map((d) => `${d.earlier}|${d.later}`));
+  const owners = (k: number, among: typeof libs) => among.filter((l) => l.keys.has(k)).map((l) => l.path);
+  const placed = new Map<number, number[]>();
+  for (let i = 0; i < ds1.width * ds1.height; i++) {
+    const keys = [
+      ...ds1.floors.filter((l) => l[i].prop1 !== 0).map((l) => TileLibrary.key(Orientation.Floor, l[i].mainIndex, l[i].subIndex)),
+      ...ds1.walls.filter((l) => l[i].prop1 !== 0 && l[i].orientation !== 10 && l[i].orientation !== 11).map((l) => TileLibrary.key(l[i].orientation, l[i].mainIndex, l[i].subIndex)),
+    ];
+    for (const k of keys) placed.set(k, [...(placed.get(k) ?? []), i]);
+  }
+  const pairs = new Map<string, number>();
+  const cellSet = new Set<number>();
+  for (const [k, at] of placed) {
+    const o = owners(k, libs);
+    for (let a = 0; a < o.length; a++)
+      for (let b = a + 1; b < o.length; b++) {
+        if (copies.has(`${o[a]}|${o[b]}`) || copies.has(`${o[b]}|${o[a]}`)) continue;
+        pairs.set(`${o[a]}|${o[b]}`, (pairs.get(`${o[a]}|${o[b]}`) ?? 0) + at.length);
+        at.forEach((i) => cellSet.add(i));
+      }
+  }
+  if (!pairs.size) return null;
+  // Drop, one at a time, a DT1 that clashes and supplies nothing the others don't: the one clashing on most cells.
+  let keep = libs.slice();
+  const removable: string[] = [];
+  for (;;) {
+    const candidates = keep
+      .map((l) => {
+        const mine = [...placed].filter(([k]) => l.keys.has(k));
+        const exclusive = mine.some(([k]) => owners(k, keep).length === 1);
+        const clashCells = mine.filter(([k]) => owners(k, keep).length > 1).reduce((s, [, at]) => s + at.length, 0);
+        return { l, exclusive, clashCells };
+      })
+      .filter((c) => !c.exclusive && c.clashCells > 0)
+      .sort((a, b) => b.clashCells - a.clashCells);
+    if (!candidates.length) break;
+    removable.push(candidates[0].l.path);
+    keep = keep.filter((l) => l !== candidates[0].l);
+  }
+  const cells = [...cellSet].sort((a, b) => a - b).map((i) => ({ x: i % ds1.width, y: Math.floor(i / ds1.width) }));
+  return { cells, pairs, removable };
 }

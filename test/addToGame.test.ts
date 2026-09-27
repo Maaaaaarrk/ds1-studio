@@ -182,6 +182,33 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(plan.changes.some((c) => c.table === 'Levels.txt' && c.column === 'OffsetX')).toBe(true);
   });
 
+  it('keeps new levels inside the automap range and flags one too far out (the game halts once a unit is put on the automap)', async () => {
+    const { setCell } = await import('../src/formats/txtTable');
+    const { automapFits } = await import('../src/game/addToGame');
+    const rel = 'Expansion/Town/townWest.ds1';
+    const ds1 = await ds1Of(rel);
+    const plan = planAddToGame(tables, { mode: 'new', levelId: 109, name: 'Far', mapRel: rel, width: ds1.width, height: ds1.height, usedDt1s: dt1sOf(rel), popCount: 0 });
+    if (typeof plan === 'string') throw new Error(plan);
+    const next = apply(plan);
+    const L = rowOfRecord(next.levels, plan.newLevelId!);
+    const at = (d: TxtTableDoc) => ['OffsetX', 'OffsetY'].map((c) => num(getCell(d, L, c)));
+    const [x, y] = at(next.levels);
+    expect(automapFits(x, y, ds1.width - 1, ds1.height - 1)).toBe(true);
+    // Where DS1 Studio used to put guild3: x - y is 7040 tiles, past the 16-bit automap range.
+    const far = { ...next, levels: setCell(setCell(next.levels, L, 'OffsetX', '8000'), L, 'OffsetY', '1000') };
+    const issue = verifyInGame(far, rel, ds1).find((i) => /too far out/.test(i.title))!;
+    expect(issue.severity).toBe('error');
+    const moved = parseTxtTable(issue.fix!.writes[0].bytes);
+    const [mx, my] = at(moved);
+    expect(automapFits(mx, my, ds1.width - 1, ds1.height - 1)).toBe(true);
+    expect(verifyInGame({ ...far, levels: moved }, rel, ds1).filter((p) => p.severity !== 'info')).toEqual([]);
+    // The middle of every level of the game is inside (the Arcane Sanctuary's empty far corner is not: 4200 > 4095).
+    for (const r of dataRows(tables.levels)) {
+      const [ox, oy, w, h] = ['OffsetX', 'OffsetY', 'SizeX', 'SizeY'].map((c) => num(getCell(tables.levels, r, c)));
+      if (ox > 0 && !num(getCell(tables.levels, r, 'Depend'))) expect(automapFits(ox + Math.floor(w / 2), oy + Math.floor(h / 2), 0, 0)).toBe(true);
+    }
+  });
+
   it('flags a loading-screen image the game cannot open (empty or missing EntryFile crashes on the loading screen), with a fix', async () => {
     const { setCell } = await import('../src/formats/txtTable');
     const rel = 'Expansion/Town/townWest.ds1';

@@ -51,7 +51,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
+import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
@@ -1549,6 +1549,15 @@ export function App() {
             });
             if (doc.apply(edits)) bump();
             notify(`Cleared ${edits.length} tiles (Ctrl+Z to undo)`);
+            return recheck();
+          }
+          case 'set-special': {
+            const edits: CellEdit[] = fix.cells.map((c) => {
+              const layer: LayerRef = { kind: 'wall', index: c.index };
+              return { layer, x: c.x, y: c.y, cell: withTile(doc.cell(layer, c.x, c.y), c.main, c.sub, 1) };
+            });
+            if (doc.apply(edits)) bump();
+            notify(`Changed ${edits.length} marker${edits.length === 1 ? '' : 's'} (Ctrl+Z to undo; save the map to keep it)`);
             return recheck();
           }
           case 'move-objects': {

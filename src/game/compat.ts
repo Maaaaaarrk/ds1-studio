@@ -6,9 +6,9 @@ import { normalizePath } from '../vfs/vfs';
 import { GameData, TileLibrary } from './GameData';
 import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
-import { duplicateDt1s } from './duplicateDt1s';
+import { clashingDt1s, duplicateDt1s } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
-import { ENTRY_IMAGE_DIR, verifyInGame } from './addToGame';
+import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
 import { loadTable } from './levelTables';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
@@ -33,6 +33,8 @@ export type Fix = { label: string } & (
   | { kind: 'remove-dt1s'; paths: string[] }
   | { kind: 'table-write'; writes: { table: string; path: string; bytes: Uint8Array; summary: string[] }[] }
   | { kind: 'clear-cells'; cells: { layer: 'floor' | 'wall' | 'shadow'; index: number; x: number; y: number }[] }
+  /** Changes wall-layer special tiles (orientation 10/11) to another main/sub number, in place. */
+  | { kind: 'set-special'; cells: { index: number; x: number; y: number; main: number; sub: number }[] }
   | { kind: 'sync-tables' }
   | { kind: 'register' }
   | { kind: 'move-objects'; moves: { index: number; x: number; y: number }[] }
@@ -125,6 +127,23 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
         { kind: 'remove-dt1s', label: `Keep the later ones: remove ${earlier.map(short).join(', ')}`, paths: earlier },
         { kind: 'remove-dt1s', label: `Keep the earlier ones: remove ${later.map(short).join(', ')}`, paths: later },
       ],
+    });
+  }
+  const clash = clashingDt1s(lib, ds1, (p) => /\.mpq$/i.test(gd.fs.locate(normalizePath(p)) ?? ''));
+  if (clash) {
+    const pairs = [...clash.pairs].sort((a, b) => b[1] - a[1]);
+    out.push({
+      severity: 'warning',
+      area: 'Tiles',
+      title: `${clash.cells.length} cells use tile numbers that two of the map's DT1s both have`,
+      detail: `${pairs
+        .slice(0, 4)
+        .map(([p, n]) => `${p.split('|').map(short).join(' and ')} (${n})`)
+        .join('; ')}. For each such cell the game picks one of them at random, so the map looks jumbled in game (and differently each time, and in the editor). ${
+        clash.removable.length ? `Every tile the map uses from ${clash.removable.map(short).join(', ')} is in another loaded DT1 too, so removing ${clash.removable.length > 1 ? 'them' : 'it'} leaves one choice per cell.` : 'Each DT1 has tiles only it provides, so keep them and change the clashing cells instead.'
+      }`,
+      cells: clash.cells,
+      fixes: clash.removable.length ? [{ kind: 'remove-dt1s', label: `Remove ${clash.removable.map(short).join(', ')} from the map's libraries`, paths: clash.removable }] : [],
     });
   }
   if (scene.missing.length) {
@@ -298,6 +317,31 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
       detail: 'The map has no special tiles (orientation 10/11), which mark where players arrive (town entries, warps, portals). Players entering from another level may be placed at the map edge or not at all.',
     });
   else out.push({ severity: 'ok', area: 'Map', title: `${specials.length} entry/warp marker tiles`, cells: specials });
+
+  // Arriving by portal (red portals, PD2 map items) puts players on the Map entry marker (10/30/11): every level of the
+  // game that is reached through a portal has one (Tristram, Nihlathak's Temple, the Worldstone Chamber, Uber Tristram…),
+  // and no town does. Town entries (30/0, 31/0) are only used in towns; without a Map entry the game places players
+  // wherever it likes.
+  const presetLevel = prestRow ? Number(prestRow['LevelId']) || 0 : 0;
+  if (presetLevel && !TOWNS.has(presetLevel)) {
+    const marks: { index: number; x: number; y: number; main: number; sub: number }[] = [];
+    ds1.walls.forEach((layer, index) =>
+      layer.forEach((c, i) => {
+        if (c.prop1 && (c.orientation === Orientation.SpecialTile1 || c.orientation === Orientation.SpecialTile2) && c.mainIndex >= 30)
+          marks.push({ index, x: i % ds1.width, y: Math.floor(i / ds1.width), main: c.mainIndex, sub: c.subIndex });
+      }),
+    );
+    const townEntry = marks.find((m) => m.main === 30 && m.sub === 0) ?? marks.find((m) => m.main === 31 && m.sub === 0);
+    if (!marks.some((m) => m.main === 30 && m.sub === 11))
+      out.push({
+        severity: townEntry ? 'warning' : 'info',
+        area: 'Map',
+        title: townEntry ? `A town entry marker (${townEntry.main}/${townEntry.sub}) in a level that is not a town` : 'No Map entry marker (10/30/11)',
+        detail: `Players arriving by portal (a red portal or a PD2 map item) appear on the Map entry marker, special tile 10/30/11, as in every portal level of the game (Tristram, Nihlathak's Temple, the Worldstone Chamber…). Town entries (30/0, 31/0) only work in towns. Without a Map entry the game puts arriving players wherever it likes.${townEntry ? ` Turning the town entry at (${townEntry.x}, ${townEntry.y}) into a Map entry makes players arrive there.` : ' Place one where players should arrive (Special tiles → Map entry).'}`,
+        cells: townEntry ? [{ x: townEntry.x, y: townEntry.y }] : undefined,
+        fixes: townEntry ? [{ kind: 'set-special', label: `Make the marker at (${townEntry.x}, ${townEntry.y}) the Map entry (30/11)`, cells: [{ ...townEntry, main: 30, sub: 11 }] }] : [],
+      });
+  }
 
   // --- Roof hiding ("pops") -----------------------------------------------------------------------------------------
   const pops = findPops(ds1);

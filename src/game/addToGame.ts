@@ -135,18 +135,48 @@ export function appendOwnType(types: TxtTableDoc, fromRow: number, name: string,
   return { types: appended.doc, typeRow: appended.row, typeId, slots };
 }
 
-/** Suggested world position for a new level in an act: past every level there, like the game's Act 5 extras (4000+). */
-export function freeOffset(levels: TxtTableDoc, act: number): { x: number; y: number } {
-  let right = 1000;
-  for (const r of dataRows(levels)) {
-    const id = num(getCell(levels, r, 'Id'));
-    if (levelAct(id) !== act) continue;
-    const x = num(getCell(levels, r, 'OffsetX'));
-    if (x < 0 || num(getCell(levels, r, 'Depend'))) continue;
-    const w = Math.max(...['SizeX', 'SizeX(N)', 'SizeX(H)'].map((c) => num(getCell(levels, r, c))));
-    right = Math.max(right, x + Math.max(0, w));
-  }
-  return { x: Math.ceil((right + 100) / 500) * 500, y: 1000 };
+/**
+ * How far out a level can sit in its act's world. D2Client keeps automap positions in 16 bits: a unit's marker is at
+ * its isometric position ((x - y) * 16, (x + y) * 8 in sub-tiles) / 10, and it halts ("Unrecoverable internal error",
+ * D2Client automap line 965-967) when that leaves -32768…32767. In tiles: |x - y| ≤ 4095 and x + y ≤ 8191, for every
+ * corner of the level. The game's and PD2's own levels stay inside (PD2's farthest: x - y 4043, x + y 8098).
+ */
+export const AUTOMAP_MAX_DIFF = 4095;
+export const AUTOMAP_MAX_SUM = 8191;
+
+/** Whether a level at (x, y) sized w×h tiles stays inside the automap's range (less `margin` tiles). */
+export function automapFits(x: number, y: number, w: number, h: number, margin = 0): boolean {
+  return x >= 0 && y >= 0 && x + w - y <= AUTOMAP_MAX_DIFF - margin && y + h - x <= AUTOMAP_MAX_DIFF - margin && x + w + y + h <= AUTOMAP_MAX_SUM - margin;
+}
+
+/** A level's fixed place in its act's world (Levels OffsetX/OffsetY and its largest size), or null when placed by the game. */
+function levelBox(levels: TxtTableDoc, row: number): { x: number; y: number; w: number; h: number } | null {
+  const x = num(getCell(levels, row, 'OffsetX'));
+  const y = num(getCell(levels, row, 'OffsetY'));
+  const w = Math.max(...['SizeX', 'SizeX(N)', 'SizeX(H)'].map((c) => num(getCell(levels, row, c))));
+  const h = Math.max(...['SizeY', 'SizeY(N)', 'SizeY(H)'].map((c) => num(getCell(levels, row, c))));
+  return x >= 0 && y >= 0 && !num(getCell(levels, row, 'Depend')) && w > 0 ? { x, y, w, h } : null;
+}
+
+/**
+ * Suggested world position for a level of `size` in an act: clear of every other level there (by 100 tiles) and
+ * 100 tiles inside the automap's range (no farther out than PD2's own levels), as far out as that allows, like the game's own extra levels. `except` is the level's own
+ * row when moving it.
+ */
+export function freeOffset(levels: TxtTableDoc, act: number, size: { w: number; h: number } = { w: 200, h: 200 }, except = -1): { x: number; y: number } {
+  const gap = 100;
+  const boxes = dataRows(levels)
+    .filter((r) => r !== except && levelAct(num(getCell(levels, r, 'Id'))) === act)
+    .map((r) => levelBox(levels, r))
+    .filter((b): b is NonNullable<typeof b> => !!b);
+  let best: { x: number; y: number } | null = null;
+  for (let y = 0; y <= AUTOMAP_MAX_SUM; y += 50)
+    for (let x = 0; x <= AUTOMAP_MAX_SUM; x += 50) {
+      if (!automapFits(x, y, size.w, size.h, 100)) continue;
+      if (boxes.some((b) => x < b.x + b.w + gap && b.x < x + size.w + gap && y < b.y + b.h + gap && b.y < y + size.h + gap)) continue;
+      if (!best || x + y > best.x + best.y || (x + y === best.x + best.y && x > best.x)) best = { x, y };
+    }
+  return best ?? { x: 1000, y: 1000 };
 }
 
 export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc }, input: AddToGameInput): AddToGamePlan | string {
@@ -254,7 +284,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     touched.add('Levels.txt');
     const tilesAct = typeAct(types, typeId) ?? levelAct(input.levelId);
     const pal = input.palAct ?? tilesAct;
-    const off = freeOffset(levels, 4);
+    const off = freeOffset(levels, 4, { w: input.width - 1, h: input.height - 1 }, row);
     const layers = dataRows(levels).map((r) => num(getCell(levels, r, 'Layer')));
     const shorten = (s: string) => s.slice(0, MAX_LEVEL_STRING);
     if (name.length > MAX_LEVEL_STRING) warnings.push(`The name is cut to ${MAX_LEVEL_STRING} characters in LevelName/LevelWarp (the game's limit).`);
@@ -270,7 +300,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
       set('Levels.txt', row, label, `SizeX${s}`, sizeX, 'the map is one cell bigger than the level');
       set('Levels.txt', row, label, `SizeY${s}`, sizeY, 'the map is one cell bigger than the level');
     }
-    set('Levels.txt', row, label, 'OffsetX', String(off.x), 'a free spot in Act 5, away from the other levels');
+    set('Levels.txt', row, label, 'OffsetX', String(off.x), "a free spot in Act 5, away from the other levels and inside the automap's range");
     set('Levels.txt', row, label, 'OffsetY', String(off.y));
     set('Levels.txt', row, label, 'Depend', '0');
     set('Levels.txt', row, label, 'DrlgType', '2', 'a preset level: its map comes from LvlPrest');
@@ -662,22 +692,33 @@ export function verifyInGame(
     for (const c of ['LevelName', 'LevelWarp', 'EntryFile'])
       if (getCell(levels, lRow, c).length > MAX_LEVEL_STRING)
         out.push({ severity: 'warning', title: `Level ${levelId}: ${c} is longer than ${MAX_LEVEL_STRING} characters (the game cuts it)`, columns: [{ table: 'Levels', col: c }] });
+    const me = levelBox(levels, lRow);
+    const moveTo = () => freeOffset(levels, levelAct(levelId), me ?? undefined, lRow);
+    // Too far out for the automap (see AUTOMAP_MAX_DIFF): the game halts once a unit's automap marker is placed there.
+    // Judged by the level's middle, where its players and NPCs are: the Arcane Sanctuary's empty far corner is past the
+    // line, and it works.
+    const mid = me && { x: me.x + Math.floor(me.w / 2), y: me.y + Math.floor(me.h / 2) };
+    if (me && mid && !automapFits(mid.x, mid.y, 0, 0)) {
+      const off = moveTo();
+      out.push({
+        severity: 'error',
+        title: `Level ${levelId} is too far out in the act's world (${me.x}, ${me.y}), so the game crashes after a few steps`,
+        detail: `The automap stores positions in 16 bits: OffsetX − OffsetY must stay within ±${AUTOMAP_MAX_DIFF} tiles and OffsetX + OffsetY up to ${AUTOMAP_MAX_SUM} (at this level's middle: ${mid.x - mid.y} and ${mid.x + mid.y}). Past that, D2Client halts ("Unrecoverable internal error") as soon as a player, NPC or object is put on the automap. The game's and PD2's own levels stay inside.`,
+        columns: [{ table: 'Levels', col: 'OffsetX' }],
+        fix: cellFix('Levels.txt', levels, `Move it to a free spot inside the range (${off.x}, ${off.y})`, [
+          { row: lRow, col: 'OffsetX', value: String(off.x) },
+          { row: lRow, col: 'OffsetY', value: String(off.y) },
+        ]),
+      });
+    }
     // Overlap with other fixed-position levels of the same act.
-    const box = (row: number) => {
-      const x = num(getCell(levels, row, 'OffsetX'));
-      const y = num(getCell(levels, row, 'OffsetY'));
-      const w = Math.max(...['SizeX', 'SizeX(N)', 'SizeX(H)'].map((c) => num(getCell(levels, row, c))));
-      const h = Math.max(...['SizeY', 'SizeY(N)', 'SizeY(H)'].map((c) => num(getCell(levels, row, c))));
-      return x >= 0 && y >= 0 && !num(getCell(levels, row, 'Depend')) && w > 0 ? { x, y, w, h } : null;
-    };
-    const me = box(lRow);
     if (me)
       for (const other of dataRows(levels)) {
         const id = num(getCell(levels, other, 'Id'));
         if (other === lRow || levelAct(id) !== levelAct(levelId)) continue;
-        const b = box(other);
+        const b = levelBox(levels, other);
         if (b && me.x < b.x + b.w && b.x < me.x + me.w && me.y < b.y + b.h && b.y < me.y + me.h) {
-          const off = freeOffset(levels, levelAct(levelId));
+          const off = moveTo();
           out.push({
             severity: 'warning',
             title: `Level ${levelId} overlaps level ${id} "${getCell(levels, other, 'Name')}" in the act's world`,

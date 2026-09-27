@@ -259,7 +259,7 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
     } else {
       levelId = nextRecord(levels);
       // New levels are Act 5 in the game (it takes the act from the number); keep it clear of the other levels there.
-      const off = freeOffset(levels, levelAct(levelId));
+      const off = freeOffset(levels, levelAct(levelId), { w: num(rowValue(levelIn, 'SizeX')) || 200, h: num(rowValue(levelIn, 'SizeY')) || 200 });
       const layer = Math.max(0, ...dataRows(levels).map((r) => num(getCell(levels!, r, 'Layer')))) + 1;
       levels = appendFrom(levels, levelIn, {
         Id: String(levelId),
