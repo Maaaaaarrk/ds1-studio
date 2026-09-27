@@ -14,6 +14,8 @@ import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sam
 import type { Tool, Visibility } from './state';
 import { specialTileInfo } from '../game/specialTiles';
 import { Minimap } from './Minimap';
+import { hideRect, popTargets, triggerRect, type PopArea } from '../game/pops';
+import type { Ds1 } from '../formats/ds1';
 
 export interface HoverInfo {
   cellX: number;
@@ -77,6 +79,11 @@ interface Props {
   centerOn?: { x: number; y: number; signal: number } | null;
   /** Label of a special tile (e.g. where a warp leads); defaults to what the tile is. */
   specialLabel?: (main: number, sub: number) => string;
+  /**
+   * Roof/wall hide areas ("pops"): drawn when `show`; with `inside`, the tiles they hide are left out, as the game
+   * shows them while a player is inside. `hidden` = "wallLayer:x:y" of those tiles.
+   */
+  pops?: { areas: PopArea[]; popPad: number; show: boolean; inside: boolean; hidden: Set<string> };
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -141,6 +148,7 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
 
 export function MapView(props: Props) {
   const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, sprites, fitSignal, focus } = props;
+  const popsInside = props.pops?.inside ? props.pops.hidden : null;
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
@@ -304,6 +312,7 @@ export function MapView(props: Props) {
       if (it.kind === 'wall') flushObjects(it.cellX + it.cellY - 1);
       else if (it.kind === 'roof' || it.kind === 'special') flushObjects(Infinity);
       if (!isVisible(it, visibility)) continue;
+      if (popsInside && (it.kind === 'wall' || it.kind === 'roof' || it.kind === 'lowerWall') && popsInside.has(`${it.layer}:${it.cellX}:${it.cellY}`)) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
       if (focus) {
         if (sameItem(it, focus.item)) flags |= InstanceFlag.Highlight;
@@ -316,11 +325,11 @@ export function MapView(props: Props) {
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus]);
+  }, [scene, visibility, hover, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus, popsInside]);
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops]);
 
   // Input.
   useEffect(() => {
@@ -528,6 +537,49 @@ function diamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 1, h
   ctx.lineTo(x2, y2);
   ctx.lineTo(x3, y3);
   ctx.closePath();
+}
+
+/** Colours for hide areas, one per group (areas of a group hide together). */
+const POP_COLORS = ['110, 220, 255', '255, 170, 90', '150, 255, 140', '255, 120, 200', '200, 170, 255', '255, 230, 110'];
+
+/**
+ * Roof/wall hide areas: the trigger area (where the player must stand, PopPad included) filled, the area whose tiles
+ * can hide outlined, the tiles that hide marked, and a label.
+ */
+function drawPops(ctx: CanvasRenderingContext2D, pops: NonNullable<Props['pops']>, ds1: Ds1, px: number) {
+  for (const a of pops.areas) {
+    const c = POP_COLORS[(a.group - 1 + POP_COLORS.length) % POP_COLORS.length];
+    const t = triggerRect(a, pops.popPad);
+    ctx.fillStyle = `rgba(${c}, 0.14)`;
+    ctx.strokeStyle = `rgba(${c}, 0.95)`;
+    ctx.lineWidth = 2 * px;
+    ctx.beginPath();
+    diamond(ctx, t.x, t.y, t.w, t.h);
+    ctx.fill();
+    ctx.stroke();
+    const h = hideRect(a);
+    ctx.setLineDash([6 * px, 5 * px]);
+    ctx.lineWidth = 1.5 * px;
+    ctx.beginPath();
+    diamond(ctx, h.x0, h.y0, h.x1 - h.x0 + 1, h.y1 - h.y0 + 1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(${c}, 0.8)`;
+    ctx.beginPath();
+    for (const tile of popTargets(ds1, a)) diamond(ctx, tile.x + 0.3, tile.y + 0.3, 0.4, 0.4);
+    ctx.stroke();
+    const [x, y] = cellToWorld(a.x0 + t.w / 2, a.y0 + t.h / 2);
+    const size = Math.max(12 * px, 15);
+    ctx.font = `700 ${size}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    const text = `Hide area ${a.main}: tiles #${a.target} fade${a.markers.length !== 2 ? ` (${a.markers.length} markers!)` : ''}`;
+    ctx.lineWidth = 3 * px;
+    ctx.strokeStyle = 'rgba(0, 10, 20, 0.85)';
+    ctx.strokeText(text, x, y - size);
+    ctx.fillStyle = `rgba(${c}, 1)`;
+    ctx.fillText(text, x, y - size);
+    ctx.textAlign = 'start';
+  }
 }
 
 interface WalkChunk {
@@ -803,6 +855,8 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     }
     ctx.setLineDash([]);
   }
+
+  if (s.pops?.show) drawPops(ctx, s.pops, ds1, px);
 
   // Special tiles (warps, entry points…): invisible in game, so marked and labelled here (at any zoom).
   if (v.specials && scene.specials.length) {

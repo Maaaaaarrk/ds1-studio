@@ -133,6 +133,30 @@ export async function syncLevelTables(fs: LayeredFs, mapPath: string, dt1s: stri
   return writes;
 }
 
+/**
+ * Sets the map's LvlPrest.txt Pops (how many roof/wall hide areas the game reads) and PopPad (their trigger padding in
+ * sub-tiles) on every row that lists it. Empty when nothing changes.
+ */
+export async function setPopSettings(fs: LayeredFs, mapPath: string, pops: number, popPad: number): Promise<TableWrite[]> {
+  const prest = await loadTable(fs, 'LvlPrest.txt');
+  if (!prest) throw new Error('LvlPrest.txt not found');
+  const rows = presetRowsFor(prest, mapPath);
+  if (!rows.length) throw new Error('This map is not in LvlPrest.txt yet: use Data → Add to game first.');
+  let p = prest;
+  const summary: string[] = [];
+  for (const r of rows)
+    for (const [col, value] of [
+      ['Pops', pops],
+      ['PopPad', popPad],
+    ] as const) {
+      const old = getCell(p, r, col);
+      if (num(old) === value && old !== '') continue;
+      p = setCell(p, r, col, String(value));
+      summary.push(`"${getCell(p, r, 'Name')}": ${col} ${old || '(empty)'} → ${value}`);
+    }
+  return summary.length ? [{ table: 'LvlPrest.txt', path: `${EXCEL}LvlPrest.txt`, bytes: serializeTxtTable(p), summary }] : [];
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Importing a map's table rows into someone else's tables.
 

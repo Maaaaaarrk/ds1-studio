@@ -296,6 +296,15 @@
   <h2 id="s-special"><span class="num">2.7</span>Special tiles</h2>
   <p>Special tiles are invisible in game: they mark warps, where players arrive in town or on a map, the corpse and town-portal spots. DS1 Studio draws a labelled marker on each, e.g. <i>Town entry 1</i>, <i>Map entry</i>, <i>Corpse location</i>. Warps show where they lead, e.g. <i>Warp · link 1 → Catacombs Level 1</i>; see <a href="#ch-warps">Warps: connecting maps</a>.</p>
 
+  <h3 id="s-pops">Roof hiding</h3>
+  <p>When a player walks into a building, the game fades its roof. This is set by a <b>hide area</b>: two special tiles (main index 8–29) at opposite corners of the inside, whose sub index is the <i>main index</i> of the tiles that fade. Every wall-layer tile with that number in the area, plus one cell around it, fades while the player stands inside. The trigger is the rectangle, grown or shrunk toward the south and east by LvlPrest's <code>PopPad</code> (in sub-tiles; the game's houses use −4). The game ignores hide areas unless LvlPrest's <code>Pops</code> counts them.</p>
+  <ul>
+    <li><b>View → Hide areas</b> (<kbd>H</kbd>) fills the area the player must stand in, outlines the area whose tiles can fade, and marks those tiles.</li>
+    <li><b>View → As if inside</b> (<kbd>Shift</kbd>+<kbd>H</kbd>) hides those tiles, as the game shows the map while a player is inside.</li>
+    <li><b>Map → Roof hiding</b>: select the inside of a building (the floor players walk on), open it, tick what should fade (roofs are ticked for you), and click <b>Add hide area</b>. DS1 Studio places the corner markers and sets <code>Pops</code>/<code>PopPad</code>. The dialog also lists and removes existing areas.</li>
+    <li>The <a href="#s-check">Compatibility check</a> reports hide areas the game would ignore (<code>Pops</code> 0 or too small) and markers it would merge into one rectangle, such as the same number used for two buildings.</li>
+  </ul>
+
   <h2 id="s-stacked"><span class="num">2.8</span>Overlapping (stacked) tiles</h2>
   <figure class="medium"><img src="img/stacked.png" alt="Stacked tiles" /><figcaption>Shift + wheel picks one tile out of several that overlap (the chosen one is outlined).</figcaption></figure>
   <p>Trees over trees, a wall over a floor: when several tiles overlap under the mouse, hold <kbd>Shift</kbd> and turn the mouse wheel to step through them one at a time. Only that tile's layer is selected, so Copy, Cut and Delete leave the others alone; <kbd>Esc</kbd> selects all layers again. Clicking a tile also shows it in its DT1 in the <a href="#s-palette">Tiles panel</a>.</p>
@@ -658,6 +667,7 @@
         <tr><td>Automap preview</td><td><kbd>A</kbd></td></tr>
         <tr><td>Object markers / sprites / NPC paths</td><td><kbd>M</kbd> / <kbd>N</kbd> / <kbd>P</kbd></td></tr>
         <tr><td>Minimap</td><td><kbd>K</kbd></td></tr>
+        <tr><td>Roof hide areas / as if inside</td><td><kbd>H</kbd> / <kbd>Shift</kbd>+<kbd>H</kbd></td></tr>
       </table>
       <h3>Layers (show / hide)</h3>
       <table>

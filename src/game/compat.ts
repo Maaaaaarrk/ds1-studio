@@ -7,6 +7,7 @@ import { GameData, TileLibrary } from './GameData';
 import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
 import { duplicateDt1s } from './duplicateDt1s';
+import { findPops, popProblems } from './pops';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
@@ -274,6 +275,18 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
       detail: 'The map has no special tiles (orientation 10/11), which mark where players arrive (town entries, warps, portals). Players entering from another level may be placed at the map edge or not at all.',
     });
   else out.push({ severity: 'ok', area: 'Map', title: `${specials.length} entry/warp marker tiles`, cells: specials });
+
+  // --- Roof hiding ("pops") -----------------------------------------------------------------------------------------
+  const pops = findPops(ds1);
+  for (const p of popProblems(ds1, pops, prestRow ? Number(prestRow['Pops']) || 0 : null))
+    out.push({
+      severity: p.severity,
+      area: 'Map',
+      title: p.text,
+      cells: p.area?.markers.map((m) => ({ x: m.x, y: m.y })),
+      columns: p.area ? undefined : [{ table: 'LvlPrest', col: 'Pops' }],
+      fixes: p.area ? undefined : [{ kind: 'open-table', label: 'Open LvlPrest.txt (or use Map → Roof hiding → Set Pops)', table: 'LvlPrest.txt', key: prestRow?.['Name'] }],
+    });
 
   // --- Objects -----------------------------------------------------------------------------------------------------
   const walk = walkability(ds1, scene);

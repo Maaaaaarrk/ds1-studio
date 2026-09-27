@@ -28,6 +28,9 @@ export interface Visibility {
   automap: boolean;
   /** Overview of the whole map in a corner of the view. */
   minimap: boolean;
+  /** Roof/wall hide areas ("pops"), and showing the map as if a player stood in them (their tiles hidden). */
+  pops: boolean;
+  popsInside: boolean;
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
@@ -48,6 +51,8 @@ export const DEFAULT_VISIBILITY: Visibility = {
   rooms: false,
   automap: false,
   minimap: true,
+  pops: false,
+  popsInside: false,
 };
 
 export const ORIENTATION_NAMES: Record<number, string> = {

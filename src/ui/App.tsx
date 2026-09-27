@@ -47,6 +47,8 @@ import {
   FileInput,
   Grid2x2Plus,
   Blend,
+  House,
+  EyeOff,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
@@ -76,7 +78,8 @@ import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
-import { syncLevelTables } from '../game/levelTables';
+import { setPopSettings, syncLevelTables } from '../game/levelTables';
+import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
@@ -89,6 +92,7 @@ import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { ActSafeDialog } from './ActSafeDialog';
+import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
@@ -226,7 +230,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -514,6 +518,16 @@ export function App() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` invalidates the scene after in-place edits
   const scene = useMemo(() => (map ? buildScene(map.ds1, map.lib) : null), [map, revision]);
+  // Roof/wall hide areas ("pops") and, for "As if inside", the tiles they hide.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const popAreas = useMemo(() => (map ? findPops(map.ds1) : []), [map, revision]);
+  const popPreset = map?.resolution.source === 'lvlprest' && map.resolution.preset ? map.resolution.preset : null;
+  const popView = useMemo(() => {
+    if (!map || (!visibility.pops && !visibility.popsInside)) return undefined;
+    const hidden = new Set<string>();
+    if (visibility.popsInside) for (const a of popAreas) for (const t of popTargets(map.ds1, a)) hidden.add(`${t.layer}:${t.x}:${t.y}`);
+    return { areas: popAreas, popPad: popPreset?.popPad ?? 0, show: visibility.pops, inside: visibility.popsInside, hidden };
+  }, [map, popAreas, popPreset, visibility.pops, visibility.popsInside]);
 
   // Preview under the cursor: the pending paste, or the paint brush.
   const pasteRect = useMemo(
@@ -1683,6 +1697,8 @@ export function App() {
       },
       'edit.replace': () => doc && setDialog('replace'),
       'view.minimap': vis((v) => ({ ...v, minimap: !v.minimap })),
+      'view.pops': vis((v) => ({ ...v, pops: !v.pops })),
+      'view.popsInside': vis((v) => ({ ...v, popsInside: !v.popsInside })),
       'tool.erase': () => setTool('erase'),
       'tool.pick': () => setTool('pick'),
       'tool.object': () => setTool('object'),
@@ -1908,6 +1924,8 @@ export function App() {
             { label: 'Automap', icon: <MapIcon />, onClick: () => setVisibility((v) => ({ ...v, automap: !v.automap })), active: visibility.automap, size: 'sm', shortcut: kb['view.automap'], title: 'Preview the in-game automap and see/change the AutoMap.txt piece of each tile' },
             { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: kb['view.sprites'] },
             { label: 'Minimap', icon: <MapPinned />, onClick: () => setVisibility((v) => ({ ...v, minimap: !v.minimap })), active: visibility.minimap, size: 'sm', shortcut: kb['view.minimap'], title: 'Overview of the whole map in the corner: click it to move there' },
+            { label: 'Hide areas', icon: <House />, onClick: () => setVisibility((v) => ({ ...v, pops: !v.pops })), active: visibility.pops, size: 'sm', shortcut: kb['view.pops'], title: 'Show where roofs (or other tiles) fade when a player walks in, and which tiles fade' },
+            { label: 'As if inside', icon: <EyeOff />, onClick: () => setVisibility((v) => ({ ...v, popsInside: !v.popsInside })), active: visibility.popsInside, size: 'sm', shortcut: kb['view.popsInside'], title: 'Hide the tiles of every hide area, as the game does while a player is inside' },
           ],
         },
         { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' }] },
@@ -1950,6 +1968,7 @@ export function App() {
           items: [
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
             { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+            { label: 'Roof hiding', icon: <House />, onClick: () => setDialog('pops'), disabled: noMap, title: 'Make roofs (or other tiles) disappear when a player walks into a building' },
             { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
             { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],
@@ -2093,6 +2112,7 @@ export function App() {
             automap={automapView}
             centerOn={centerOn}
             specialLabel={specialLabel}
+            pops={popView}
           />
         ) : (
           <div className="empty-stage">
@@ -2515,7 +2535,53 @@ export function App() {
           <p className="small">{automapData ? 'Pick the AutoMap.txt level for this map in the Automap panel first.' : 'Loading AutoMap.txt and MaxiMap.dc6…'}</p>
         </Modal>
       ))}
- {dialog === 'actsafe' && map && (
+ {dialog === 'pops' && map && doc && (
+        <PopsDialog
+          map={map}
+          areas={popAreas}
+          preset={popPreset ? { pops: popPreset.pops, popPad: popPreset.popPad } : null}
+          selection={selection}
+          canSave={canWrite}
+          onCreate={async (rect, targets, popPad) => {
+            const plan = planPops(doc.ds1, rect, targets);
+            if (plan.error) throw new Error(plan.error);
+            doc.mutate((d) => applyPopPlan(d, rect, plan), `Add hide area (${plan.markers.map((m) => `#${m.target}`).join(', ')})`);
+            bump();
+            setVisibility((v) => ({ ...v, pops: true }));
+            let note = '';
+            if (popPreset) {
+              // Never lower Pops: a LvlPrest row can list up to six maps (File1-6), and another may have more areas.
+              const writes = await setPopSettings(data.gd.fs, map.path, Math.max(popPreset.pops, findPops(doc.ds1).length), popPad);
+              if (writes.length) {
+                await writeFiles(writes);
+                await reloadTables();
+                note = ` · ${writes.flatMap((w) => w.summary).join('; ')}`;
+              }
+            } else note = ' · Data → Add to game sets Pops for it';
+            setDialog(null);
+            notify(`Hide area added: ${plan.markers.length * 2} corner markers${note}. Save the map, then check it with View → As if inside.`);
+          }}
+          onRemove={async (areas: PopArea[]) => {
+            doc.mutate((d) => removePops(d, areas), `Remove hide area ${areas.map((a) => a.main).join(', ')}`);
+            bump();
+          }}
+          onSetTables={async (pops, popPad) => {
+            const writes = await setPopSettings(data.gd.fs, map.path, pops, popPad);
+            if (writes.length) {
+              await writeFiles(writes);
+              await reloadTables();
+              notify(`Updated ${writes.flatMap((w) => w.summary).join('; ')}`);
+            }
+          }}
+          onShow={(a) => {
+            setSelection({ x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 });
+            setVisibility((v) => ({ ...v, pops: true }));
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'actsafe' && map && (
         <ActSafeDialog
           map={map}
           gd={data.gd}
@@ -2566,6 +2632,7 @@ export function App() {
           width={doc.ds1.width}
           height={doc.ds1.height}
           usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p)}
+          popCount={popAreas.length}
           onApply={applyTableWrites}
           onClose={() => {
             setDialog(null);

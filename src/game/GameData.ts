@@ -20,6 +20,9 @@ export interface PresetInfo {
   name: string;
   levelId: number;
   dt1Mask: number;
+  /** How many roof/wall hide areas ("pops") the game reads from the map, and their trigger padding in sub-tiles. */
+  pops: number;
+  popPad: number;
 }
 
 export type Dt1Source = 'lvlprest' | 'guessed' | 'embedded' | 'manual';
@@ -103,6 +106,8 @@ export class GameData {
         name: row['Name'],
         levelId: Number(row['LevelId']),
         dt1Mask: Number(row['Dt1Mask']) >>> 0,
+        pops: Number(row['Pops']) || 0,
+        popPad: Number(row['PopPad']) || 0,
       };
       for (let i = 1; i <= 6; i++) {
         const f = row[`File${i}`];

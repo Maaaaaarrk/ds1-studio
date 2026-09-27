@@ -702,3 +702,11 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .actsafe-samples { grid-column: 1 / -1; display: grid; grid-template-columns: 40px repeat(4, 90px); gap: 4px 8px; align-items: center; }
 .actsafe-samples .thumb-img { --thumb-h: 48px; background-color: #0b0c0f; border-radius: 4px; }
 .actsafe-callout { display: block; margin: 8px 0; line-height: 1.5; } .actsafe-callout .btn { margin-top: 6px; }
+
+/* Roof hiding */
+.pops-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.pops-row > span { flex: 1; }
+.pops-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 38vh; overflow: auto; margin: 6px 0; }
+.pops-candidate { display: flex; flex-direction: column; gap: 3px; padding: 6px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.pops-candidate.on { border-color: var(--accent); background: rgba(212, 168, 79, 0.08); }
+.pops-candidate .thumb-img { --thumb-h: 64px; }

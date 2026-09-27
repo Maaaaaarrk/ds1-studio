@@ -68,6 +68,11 @@ downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` pac
   preset's `Dt1Mask`, and the right act palette. When two loaded DT1s have the same tile, the one listed later in
   `LvlTypes.txt` replaces it, as in the game (mods use this to swap tiles).
 - Special tiles (warps, town and map entries, corpse and portal spots) are invisible in game: DS1 Studio labels them.
+- **Roof hiding**: roofs (or any wall-layer tiles) that fade while a player is inside a building. **View → Hide
+  areas** (<kbd>H</kbd>) shows where the player must stand and which tiles fade, **As if inside** (<kbd>Shift</kbd>+<kbd>H</kbd>)
+  shows the map the way the game draws it then, and **Map → Roof hiding** makes a new area from your selection: tick
+  what should fade, and the corner markers and LvlPrest's Pops/PopPad are set for you. The compatibility check
+  catches areas the game would ignore or merge.
   **Warps show where they lead** ("Warp · link 1 → Catacombs Level 1", from Levels.txt): select one to open the
   map it leads to, or change the level it connects to (and add the way back) without touching the .txt files.
 - Floors, walls, roofs, shadows, lower walls, animated tiles, special tiles, objects and NPCs with their real sprites
@@ -290,6 +295,7 @@ your computer.
 | Object sprites | <kbd>N</kbd> |
 | NPC paths | <kbd>P</kbd> |
 | Minimap | <kbd>K</kbd> |
+| Roof hide areas / as if inside | <kbd>H</kbd> / <kbd>Shift</kbd>+<kbd>H</kbd> |
 
 **Layers** (show / hide)
 

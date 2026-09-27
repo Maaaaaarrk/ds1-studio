@@ -33,6 +33,8 @@ interface RegisterProps {
   height: number;
   /** DT1 paths the map's placed tiles come from (normalized). */
   usedDt1s: string[];
+  /** Roof/wall hide areas ("pops") in the map: LvlPrest's Pops must count them or the game ignores them. */
+  popCount?: number;
   onApply: (writes: TableWrite[]) => Promise<void>;
   onClose: () => void;
   /** Pre-filled choices (e.g. right after importing a map). */
@@ -40,7 +42,7 @@ interface RegisterProps {
 }
 
 /** Creates the LvlPrest (and optionally Levels/LvlTypes) rows that make the game load this map. */
-export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onApply, onClose, initial }: RegisterProps) {
+export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onClose, initial }: RegisterProps) {
   const [tables, setTables] = useState<{ prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc } | null>(null);
   const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'existing');
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
@@ -135,15 +137,21 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onAppl
       Files: '1',
       File1: rel,
       Dt1Mask: String(mask >>> 0),
+      // The game's own houses use a trigger 4 sub-tiles smaller than the marked area (PopPad -4).
+      ...(popCount ? { Pops: String(popCount), PopPad: '-4' } : {}),
     };
     if (already >= 0) {
       prest = setCell(prest, already, 'LevelId', String(targetLevel));
       prest = setCell(prest, already, 'Dt1Mask', String(mask >>> 0));
       summary['LvlPrest.txt'].push(`Update "${getCell(prest, already, 'Name')}": LevelId ${targetLevel}, Dt1Mask ${mask >>> 0}`);
+      if (popCount > num(getCell(prest, already, 'Pops'))) {
+        prest = setCell(prest, already, 'Pops', String(popCount));
+        summary['LvlPrest.txt'].push(`Pops ${popCount} (the map's roof hide areas)`);
+      }
     } else {
       for (const k of Object.keys(values)) if (!has(prest, k)) delete values[k];
       prest = appendRow(prest, values);
-      summary['LvlPrest.txt'].push(`New preset "${name}" (Def ${def}) → level ${targetLevel}, File1 ${rel}, Dt1Mask ${mask >>> 0}`);
+      summary['LvlPrest.txt'].push(`New preset "${name}" (Def ${def}) → level ${targetLevel}, File1 ${rel}, Dt1Mask ${mask >>> 0}${popCount ? `, Pops ${popCount} / PopPad -4 (roof hide areas)` : ''}`);
     }
 
     const push = (table: string, doc: TxtTableDoc, changed: boolean) => {
@@ -153,7 +161,7 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onAppl
     push('Levels.txt', levels, mode === 'new');
     push('LvlTypes.txt', types, summary['LvlTypes.txt'].length > 0);
     return writes;
-  }, [tables, mode, levelId, name, levelRows, usedDt1s, rel, width, height]);
+  }, [tables, mode, levelId, name, levelRows, usedDt1s, rel, width, height, popCount]);
 
   return (
     <Modal title="Add map to game" onClose={onClose}>

@@ -24,6 +24,11 @@ export function specialTileInfo(main: number, sub: number): { label: string; hel
       help: `Level link: the warp to the level in this level's Vis${main} column (Levels.txt). Sub-index ${sub}.`,
     };
   }
+  if (main >= 8 && main <= 29)
+    return {
+      label: `Hide area ${main} · hides #${sub}`,
+      help: `Corner of a hide area ("pop"): while a player is inside the rectangle between the two ${main}/… markers, wall-layer tiles with main index ${sub} there (usually roofs) fade out. See Map → Roof hiding.`,
+    };
   return { label: `Special ${main}/${sub}`, help: `Special tile ${main}/${sub}: a marker the game uses internally (not drawn in game).` };
 }
 
