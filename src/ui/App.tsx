@@ -2293,6 +2293,7 @@ export function App() {
             specialLabel={specialLabel}
             pops={popView}
             walkMarks={walkMarks}
+            walkBrush={visibility.walkable ? { size: walkBrush.size, mode: walkBrush.mode } : null}
           />
         ) : (
           <div className="empty-stage">

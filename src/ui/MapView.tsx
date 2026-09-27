@@ -10,7 +10,7 @@ import { blendFlag, InstanceFlag, MapRenderer, type Camera, type Instance } from
 import type { SpriteAnimation } from '../game/spriteAnim';
 import { AUTOMAP_SCALE, automapCellOrigin, type AutomapPiece } from '../game/automap';
 import type { SpriteFrame } from '../formats/dc6';
-import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, sameItem, type DrawItem, type Scene } from '../render/scene';
+import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, worldToSubTile, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
 import { specialTileInfo } from '../game/specialTiles';
 import { Minimap } from './Minimap';
@@ -87,6 +87,11 @@ interface Props {
   pops?: { areas: PopArea[]; popPad: number; show: boolean; inside: boolean; hidden: Set<string> };
   /** Sub-tiles being painted in walkability mode (keys sy * 65536 + sx), and whether they get blocked or cleared. */
   walkMarks?: { keys: ReadonlySet<number>; mode: 'block' | 'clear' } | null;
+  /**
+   * Walkability mode's brush: the cursor shows its footprint on the sub-tile grid instead of a whole cell, and strokes
+   * report every new sub-tile the cursor reaches (not just new cells).
+   */
+  walkBrush?: { size: 1 | 3 | 5 | 'cell'; mode: 'block' | 'clear' } | null;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -166,8 +171,10 @@ export function MapView(props: Props) {
   // Built once per scene, not per frame: a 150×150 map has 562,500 sub-tiles.
   const walk = useMemo(() => (visibility.walkable ? walkPaths(walkability(map.ds1, scene, map.lib), map.ds1.width, map.ds1.height) : null), [visibility.walkable, map, scene]);
   const resizeDrag = useRef<{ side: Side; delta: ResizeDelta } | null>(null);
-  const latest = useRef({ ...props, walk, resizeDrag, automapImage });
-  latest.current = { ...props, walk, resizeDrag, automapImage };
+  /** The sub-tile under the cursor in walkability mode (drawn as the brush's footprint). */
+  const walkCursor = useRef<[number, number] | null>(null);
+  const latest = useRef({ ...props, walk, resizeDrag, automapImage, walkCursor });
+  latest.current = { ...props, walk, resizeDrag, automapImage, walkCursor };
 
   // Animation clock in game ticks (25 per second, like the game). Animated floors advance every 2.5 ticks (10 fps);
   // objects at their own rate. Without animated objects the clock only needs the floors' 10 fps.
@@ -319,7 +326,7 @@ export function MapView(props: Props) {
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
       if (focus) {
         if (sameItem(it, focus.item)) flags |= InstanceFlag.Highlight;
-      } else if (hover && tool !== 'object' && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
+      } else if (hover && tool !== 'object' && !props.walkBrush && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
       const tile = it.frames && visibility.animate ? it.frames[floorFrame % it.frames.length] : it.tile;
       push(tile, it.x, it.y, flags);
     }
@@ -328,11 +335,11 @@ export function MapView(props: Props) {
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus, popsInside]);
+  }, [scene, visibility, hover, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus, popsInside, !!props.walkBrush]);
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush]);
 
   // Input.
   useEffect(() => {
@@ -396,7 +403,18 @@ export function MapView(props: Props) {
         dirty.current = true;
       }
       const [cx, cy] = toCell(ev);
-      if (stroke && (cx !== stroke[0] || cy !== stroke[1])) {
+      if (latest.current.walkBrush) {
+        // Walkability: follow the cursor sub-tile by sub-tile (the brush footprint, and strokes within a cell).
+        const [fx, fy] = worldToSubTile(...toWorld(ev));
+        const sub: [number, number] = [Math.round(fx), Math.round(fy)];
+        const was = walkCursor.current;
+        if (!was || was[0] !== sub[0] || was[1] !== sub[1]) {
+          walkCursor.current = sub;
+          dirty.current = true;
+          if (stroke) latest.current.onStroke('move', [[cx, cy]], toWorld(ev));
+        }
+        if (stroke) stroke = [cx, cy];
+      } else if (stroke && (cx !== stroke[0] || cy !== stroke[1])) {
         latest.current.onStroke('move', cellLine(stroke, [cx, cy]).slice(1), toWorld(ev));
         stroke = [cx, cy];
       }
@@ -450,7 +468,13 @@ export function MapView(props: Props) {
       latest.current.onZoom(zoom / dpr());
       dirty.current = true;
     };
-    const leave = () => latest.current.hover && latest.current.onHover(null);
+    const leave = () => {
+      if (walkCursor.current) {
+        walkCursor.current = null;
+        dirty.current = true;
+      }
+      if (latest.current.hover) latest.current.onHover(null);
+    };
     const typing = (t: EventTarget | null) =>
       t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
     const keydown = (ev: KeyboardEvent) => {
@@ -753,7 +777,12 @@ function renderAutomap(width: number, height: number, a: NonNullable<Props['auto
   return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing, suggested };
 }
 
-type OverlayState = Props & { automapImage: AutomapImage | null; walk: WalkPaths | null; resizeDrag: { current: { side: Side; delta: ResizeDelta } | null } };
+type OverlayState = Props & {
+  automapImage: AutomapImage | null;
+  walk: WalkPaths | null;
+  resizeDrag: { current: { side: Side; delta: ResizeDelta } | null };
+  walkCursor: { current: [number, number] | null };
+};
 
 function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   const ctx = canvas.getContext('2d')!;
@@ -1045,7 +1074,52 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     }
   }
 
-  if (hover && tool !== 'object') {
+  const wc = s.walkCursor.current;
+  if (s.walkBrush && wc) {
+    // The brush's footprint on the sub-tile grid: one diamond per sub-tile it paints, outlined as one shape.
+    const { width: W, height: Hh } = ds1;
+    const cells: [number, number][] = [];
+    if (s.walkBrush.size === 'cell') {
+      const [bx, by] = [Math.floor(wc[0] / 5) * 5, Math.floor(wc[1] / 5) * 5];
+      for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) cells.push([bx + dx, by + dy]);
+    } else {
+      const r = (s.walkBrush.size - 1) / 2;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) cells.push([wc[0] + dx, wc[1] + dy]);
+    }
+    const inMap = cells.filter(([x, y]) => x >= 0 && y >= 0 && x < W * 5 && y < Hh * 5);
+    if (inMap.length) {
+      const set = new Set(inMap.map(([x, y]) => y * 65536 + x));
+      const color = s.walkBrush.mode === 'block' ? [255, 176, 40] : [110, 230, 140];
+      ctx.beginPath();
+      for (const [x, y] of inMap) {
+        const [cx, cy] = subTileToWorld(x, y);
+        ctx.moveTo(cx, cy - 8);
+        ctx.lineTo(cx + 16, cy);
+        ctx.lineTo(cx, cy + 8);
+        ctx.lineTo(cx - 16, cy);
+        ctx.closePath();
+      }
+      ctx.fillStyle = `rgba(${color.join(',')}, 0.28)`;
+      ctx.fill();
+      // Outline: the edges of the footprint only (a sub-tile's corners are at ±16/±8 from its centre).
+      ctx.beginPath();
+      for (const [x, y] of inMap) {
+        const [cx, cy] = subTileToWorld(x, y);
+        const [n, e, so, w] = [[cx, cy - 8], [cx + 16, cy], [cx, cy + 8], [cx - 16, cy]] as const;
+        const edge = (a: readonly number[], b: readonly number[]) => {
+          ctx.moveTo(a[0], a[1]);
+          ctx.lineTo(b[0], b[1]);
+        };
+        if (!set.has((y - 1) * 65536 + x)) edge(n, e);
+        if (!set.has(y * 65536 + x + 1)) edge(e, so);
+        if (!set.has((y + 1) * 65536 + x)) edge(so, w);
+        if (!set.has(y * 65536 + x - 1)) edge(w, n);
+      }
+      ctx.lineWidth = 1.5 * px;
+      ctx.strokeStyle = `rgba(${color.join(',')}, 0.95)`;
+      ctx.stroke();
+    }
+  } else if (hover && tool !== 'object') {
     ctx.beginPath();
     diamond(ctx, hover.cellX, hover.cellY);
     ctx.lineWidth = 2 * px;
