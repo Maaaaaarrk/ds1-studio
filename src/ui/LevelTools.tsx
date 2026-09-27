@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCell, parseTxtTable, type TxtTableDoc } from '../formats/txtTable';
-import { dataRows, planAddToGame, typeAct } from '../game/addToGame';
+import { dataRows, planAddToGame, recordOrderFix, typeAct, type TableFix } from '../game/addToGame';
 import type { LayeredFs } from '../vfs/vfs';
 import { normalizePath } from '../vfs/vfs';
 import { Modal } from './Dialogs';
@@ -35,6 +35,8 @@ interface RegisterProps {
   /** Roof/wall hide areas ("pops") in the map: LvlPrest's Pops must count them or the game ignores them. */
   popCount?: number;
   onApply: (writes: TableWrite[]) => Promise<void>;
+  /** Writes a table fix and reloads the game tables, keeping the dialog open. */
+  onFix: (writes: TableWrite[]) => Promise<void>;
   onClose: () => void;
   /** Pre-filled choices (e.g. right after importing a map). */
   initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string };
@@ -44,13 +46,14 @@ interface RegisterProps {
  * Add map to game: the Levels / LvlPrest / LvlTypes rows that make the game load this map (see game/addToGame.ts for
  * the rules). Shows every field it sets, old → new and why, before anything is written.
  */
-export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onClose, initial }: RegisterProps) {
+export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onFix, onClose, initial }: RegisterProps) {
   const [tables, setTables] = useState<{ prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc } | null>(null);
   const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'new');
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
   const [name, setName] = useState(() => initial?.name ?? mapPath.split('/').pop()!.replace(/\.ds1$/i, ''));
   const [pal, setPal] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
   // The file's own spelling when known (an imported map), so the table names it exactly as it is on disk.
   const exact = initial?.path && normalizePath(initial.path) === normalizePath(mapPath) ? initial.path : mapPath;
   const rel = exact.replace(/^data\/global\/tiles\//i, '');
@@ -59,7 +62,22 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
     void Promise.all([load(fs, 'LvlPrest.txt'), load(fs, 'Levels.txt'), load(fs, 'LvlTypes.txt')]).then(([prest, levels, types]) => {
       if (prest && levels && types) setTables({ prest, levels, types });
     });
-  }, [fs]);
+  }, [fs, reload]);
+
+  // Tables whose rows are out of order (e.g. a row inserted mid-table by an older version): fixable by moving rows.
+  const orderFixes = useMemo(() => {
+    if (!tables) return [];
+    const out: (TableFix | string)[] = [];
+    for (const [t, doc, col] of [
+      ['Levels.txt', tables.levels, 'Id'],
+      ['LvlPrest.txt', tables.prest, 'Def'],
+      ['LvlTypes.txt', tables.types, 'Id'],
+    ] as const) {
+      const f = recordOrderFix(t, doc, col);
+      if (f) out.push(f);
+    }
+    return out;
+  }, [tables]);
 
   const levelRows = useMemo(
     () =>
@@ -144,6 +162,38 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
             act the tiles were drawn for, as the game&apos;s own Act 5 levels that reuse other acts&apos; tiles do.
           </p>
         </>
+      )}
+      {orderFixes.length > 0 && (
+        <div className="imp-callout small">
+          <span>
+            <b>The game&apos;s tables are out of order.</b> The game reads Levels.txt, LvlPrest.txt and LvlTypes.txt by row position, so every row after a
+            misplaced one is read as the wrong level. Fix this first:
+          </span>
+          {orderFixes.map((f, i) =>
+            typeof f === 'string' ? (
+              <span key={i} className="error-text">
+                {f}
+              </span>
+            ) : (
+              <button
+                key={i}
+                className="btn small primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onFix(f.writes);
+                    setReload((n) => n + 1);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {f.label}
+              </button>
+            ),
+          )}
+        </div>
       )}
       {typeof plan === 'string' ? (
         <p className={`small ${tables && chosen ? 'error-text' : 'muted'}`}>{plan}</p>

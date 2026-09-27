@@ -31,6 +31,7 @@ export type Fix = { label: string } & (
   | { kind: 'open-table'; table: string; key?: string }
   | { kind: 'add-dt1s'; paths: string[] }
   | { kind: 'remove-dt1s'; paths: string[] }
+  | { kind: 'table-write'; writes: { table: string; path: string; bytes: Uint8Array; summary: string[] }[] }
   | { kind: 'clear-cells'; cells: { layer: 'floor' | 'wall' | 'shadow'; index: number; x: number; y: number }[] }
   | { kind: 'sync-tables' }
   | { kind: 'register' }
@@ -186,7 +187,17 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     const [p2, l2, t2] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt'), loadTable(gd.fs, 'LvlTypes.txt')]);
     if (p2 && l2 && t2)
       for (const issue of verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1))
-        out.push({ ...issue, area: issue.columns?.[0]?.table === 'Levels' ? 'Level' : 'Tables', fixes: [{ kind: 'register', label: 'Add to game… (sets these fields as the game needs them)' }] });
+        out.push({
+          severity: issue.severity,
+          title: issue.title,
+          detail: issue.detail,
+          columns: issue.columns,
+          area: issue.columns?.[0]?.table === 'Levels' ? 'Level' : 'Tables',
+          fixes: [
+            ...(issue.fix ? [{ kind: 'table-write' as const, label: issue.fix.label, writes: issue.fix.writes }] : []),
+            { kind: 'open-table' as const, label: `Open ${issue.columns?.[0]?.table ?? 'LvlPrest'}.txt`, table: `${issue.columns?.[0]?.table ?? 'LvlPrest'}.txt` },
+          ],
+        });
     const levelId = Number(prestRow['LevelId']);
     const mask = Number(prestRow['Dt1Mask']) >>> 0;
     if (!levelId) {

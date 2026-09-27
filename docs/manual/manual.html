@@ -573,7 +573,7 @@
     <tr><td><code>FillBlanks</code> 1, <code>Scan</code> 1, <code>AutoMap</code> 0, <code>Files</code> 1. <code>Populate</code>/<code>Outdoors</code>/<code>KillEdge</code> as the copied level's preset. <code>Pops</code>/<code>PopPad</code> for <a href="#s-pops">roof hiding</a>.</td><td><code>Scan</code> finds warps and special tiles. <code>AutoMap</code> 1 would reveal the whole automap on entry, as in towns.</td></tr>
     <tr><td>Tile and map paths are at most 41 characters.</td><td>The game adds <code>DATA\GLOBAL\TILES\</code> in front, in a 60-byte buffer. The game's own longest path is 40.</td></tr>
   </table>
-  <p>The <a href="#s-check">Compatibility check</a> checks the same rules for any map already in the game. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>. Set the DS1 header to Act 5 (the check offers it), so the map's object numbers are read as Act 5 objects.</p>
+  <p>The <a href="#s-check">Compatibility check</a> checks the same rules for any map already in the game, and offers one-click fixes: rows out of order (put back in Id order; no Id changes), a preset pointing at a missing level, the level size, act, palette, an overlapping position, the file count and a copied quest requirement. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>. Set the DS1 header to Act 5 (the check offers it), so the map's object numbers are read as Act 5 objects.</p>
 
   <h2 id="s-cube"><span class="num">9.3</span>Cube recipe</h2>
   <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Data → Cube recipe.</figcaption></figure>

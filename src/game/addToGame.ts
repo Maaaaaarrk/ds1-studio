@@ -143,7 +143,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     ['LvlTypes.txt', types, 'Id'],
   ] as const) {
     const bad = dataRows(doc).findIndex((r, i) => getCell(doc, r, col).trim() !== String(i));
-    if (bad >= 0) return `${t}: record ${bad} has ${col} ${getCell(doc, dataRows(doc)[bad], col) || '(empty)'}. The game reads these tables by row position, so ${col} must count up 0, 1, 2… Fix the table first (Data → Data tables).`;
+    if (bad >= 0) return `${t}: record ${bad} has ${col} ${getCell(doc, dataRows(doc)[bad], col) || '(empty)'}. The game reads these tables by row position, so ${col} must count up 0, 1, 2… Use the fix above to put the rows back in order.`;
   }
 
   const levelRow = rowOfRecord(levels, input.levelId);
@@ -348,6 +348,80 @@ export interface TableIssue {
   title: string;
   detail?: string;
   columns?: { table: string; col: string }[];
+  /** A safe one-click fix: the table(s) as they should be. */
+  fix?: TableFix;
+}
+
+export interface TableFix {
+  label: string;
+  writes: TableWrite[];
+}
+
+type TableName = 'Levels.txt' | 'LvlPrest.txt' | 'LvlTypes.txt';
+
+/** A fix that sets cells of one table. */
+export function cellFix(table: TableName, doc: TxtTableDoc, label: string, cells: { row: number; col: string; value: string }[]): TableFix {
+  let d = doc;
+  const summary: string[] = [];
+  for (const c of cells) {
+    if (!has(d, c.col) || getCell(d, c.row, c.col) === c.value) continue;
+    summary.push(`"${getCell(d, c.row, 'Name')}": ${c.col} ${getCell(d, c.row, c.col) || '(empty)'} → ${c.value}`);
+    d = setCell(d, c.row, c.col, c.value);
+  }
+  return { label, writes: [{ table, path: `${EXCEL}${table}`, bytes: serializeTxtTable(d), summary }] };
+}
+
+/**
+ * Puts a table's rows back in Id/Def order, when that is all that's wrong: every number 0…n-1 is there exactly once, so
+ * no Id changes and nothing that refers to one breaks. The "Expansion" line and blank lines stay where they are.
+ * null = already in order; a string = why it can't be fixed by reordering.
+ */
+export function recordOrderFix(table: TableName, doc: TxtTableDoc, col: string): TableFix | string | null {
+  const rows = dataRows(doc);
+  const ids = rows.map((r) => getCell(doc, r, col).trim());
+  if (ids.every((id, i) => id === String(i))) return null;
+  const nums = ids.map((id) => (/^\d+$/.test(id) ? Number(id) : NaN));
+  const seen = new Set<number>();
+  const dupes = nums.filter((n) => !Number.isNaN(n) && (seen.has(n) || !seen.add(n)));
+  const missing = rows.map((_, i) => i).filter((i) => !seen.has(i));
+  if (nums.some(Number.isNaN) || dupes.length || missing.length)
+    return `The ${col}s aren't simply out of order (${[
+      nums.some(Number.isNaN) ? 'some are empty or not numbers' : '',
+      dupes.length ? `used twice: ${[...new Set(dupes)].slice(0, 5).join(', ')}` : '',
+      missing.length ? `missing: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}` : '',
+    ]
+      .filter(Boolean)
+      .join('; ')}), so they can't be fixed by moving rows. Fix them in Data → Data tables.`;
+  // Records sorted by id; every other line (the "Expansion" separator, blank lines) stays just before the record that
+  // followed it, or at the end.
+  const isRecord = new Set(rows);
+  const before = new Map<number, string[][]>();
+  const tail: string[][] = [];
+  let pending: string[][] = [];
+  doc.rows.forEach((row, i) => {
+    if (!isRecord.has(i)) return void pending.push(row);
+    if (pending.length) before.set(Number(getCell(doc, i, col)), pending);
+    pending = [];
+  });
+  tail.push(...pending);
+  const byId = new Map(rows.map((r) => [Number(getCell(doc, r, col)), doc.rows[r]]));
+  const out: string[][] = [];
+  for (let i = 0; i < rows.length; i++) out.push(...(before.get(i) ?? []), byId.get(i)!);
+  out.push(...tail);
+  const moved = rows.filter((r, i) => getCell(doc, r, col).trim() !== String(i));
+  const fixed = { ...doc, rows: out };
+  const first = rows.findIndex((r, i) => getCell(doc, r, col).trim() !== String(i));
+  return {
+    label: `Put ${table}'s rows back in ${col} order (${moved.length} rows move, no ${col} changes)`,
+    writes: [
+      {
+        table,
+        path: `${EXCEL}${table}`,
+        bytes: serializeTxtTable(fixed),
+        summary: [`Rows put back in ${col} order from record ${first} (${moved.length} moved); every ${col} stays the same`],
+      },
+    ],
+  };
 }
 
 /**
@@ -364,14 +438,19 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
   ] as const) {
     const rows = dataRows(doc);
     const bad = rows.findIndex((r, i) => getCell(doc, r, col).trim() !== String(i));
-    if (bad >= 0)
+    if (bad >= 0) {
+      const fix = recordOrderFix(`${t}.txt`, doc, col);
       out.push({
         severity: 'error',
         title: `${t}.txt: row ${bad} has ${col} ${getCell(doc, rows[bad], col) || '(empty)'}, not ${bad}`,
-        detail: `The game reads ${t}.txt by row position (the "Expansion" line and blank lines don't count), so ${col} must count up 0, 1, 2… A row inserted or removed shifts every one after it.`,
+        detail: `The game reads ${t}.txt by row position (the "Expansion" line and blank lines don't count), so ${col} must count up 0, 1, 2… A row inserted or removed shifts every one after it, so the game uses the wrong row for each of them.${typeof fix === 'string' ? ` ${fix}` : ''}`,
         columns: [{ table: t, col }],
+        fix: fix && typeof fix !== 'string' ? fix : undefined,
       });
+    }
   }
+  // Until the rows are in order, every lookup below would read the wrong row.
+  if (out.length) return out;
   const want = normalizePath(mapRel);
   const pRows = dataRows(prest).filter((r) => [1, 2, 3, 4, 5, 6].some((i) => normalizePath(getCell(prest, r, `File${i}`)) === want));
   for (const r of pRows) {
@@ -389,11 +468,25 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
         title: `${label}: Files is ${filesCol} but only ${files} File column${files === 1 ? ' is' : 's are'} set`,
         detail: 'The game picks one of the first Files maps at random; an empty one fails to load.',
         columns: [{ table: 'LvlPrest', col: 'Files' }],
+        fix: cellFix('LvlPrest.txt', prest, `Set Files to ${files}`, [{ row: r, col: 'Files', value: String(files) }]),
       });
     const levelId = num(getCell(prest, r, 'LevelId'));
     if (!levelId) continue;
     const lRow = rowOfRecord(levels, levelId);
-    if (lRow < 0) continue; // reported by the level check
+    if (lRow < 0) {
+      // A level with the preset's name is probably the one meant.
+      const pName = getCell(prest, r, 'Name').trim().toLowerCase();
+      const byName = dataRows(levels).find((x) => [getCell(levels, x, 'Name'), getCell(levels, x, 'LevelName')].some((n) => n.trim().toLowerCase() === pName));
+      const id = byName !== undefined ? getCell(levels, byName, 'Id') : null;
+      out.push({
+        severity: 'error',
+        title: `${label} builds level ${levelId}, which Levels.txt doesn't have`,
+        detail: `Levels.txt has ${dataRows(levels).length} levels (0-${dataRows(levels).length - 1}).${id !== null ? ` Level ${id} "${getCell(levels, byName!, 'Name')}" has this preset's name.` : ''}`,
+        columns: [{ table: 'LvlPrest', col: 'LevelId' }],
+        fix: id !== null ? cellFix('LvlPrest.txt', prest, `Point it at level ${id} "${getCell(levels, byName!, 'Name')}"`, [{ row: r, col: 'LevelId', value: id }]) : undefined,
+      });
+      continue;
+    }
     const lName = getCell(levels, lRow, 'Name');
     const drlg = num(getCell(levels, lRow, 'DrlgType'));
     if (drlg !== 2) {
@@ -422,6 +515,15 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
           title: `Level ${levelId} size ${[...new Set(sizes)].join(' / ')} doesn't match the map (${need})`,
           detail: 'The level size (Levels SizeX/SizeY, per difficulty) is the DS1 size minus one, as in every game preset level. Too small cuts the map off; too big leaves blank space.',
           columns: [{ table: 'Levels', col: 'SizeX' }],
+          fix: cellFix(
+            'Levels.txt',
+            levels,
+            `Set the level size to ${need} (all difficulties)`,
+            ['', '(N)', '(H)'].flatMap((s) => [
+              { row: lRow, col: `SizeX${s}`, value: String(ds1.width - 1) },
+              { row: lRow, col: `SizeY${s}`, value: String(ds1.height - 1) },
+            ]),
+          ),
         });
     }
     const act = num(getCell(levels, lRow, 'Act'));
@@ -431,6 +533,7 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
         title: `Level ${levelId} says Act ${act + 1}, but the game treats it as Act ${levelAct(levelId) + 1}`,
         detail: 'The game takes the act from the level number (1-39 Act 1, 40-74 Act 2, 75-102 Act 3, 103-108 Act 4, 109 and up Act 5), not from the Act column.',
         columns: [{ table: 'Levels', col: 'Act' }],
+        fix: cellFix('Levels.txt', levels, `Set Act to ${levelAct(levelId)} (Act ${levelAct(levelId) + 1})`, [{ row: lRow, col: 'Act', value: String(levelAct(levelId)) }]),
       });
     const tilesAct = typeAct(types, num(getCell(levels, lRow, 'LevelType')));
     const pal = num(getCell(levels, lRow, 'Pal'));
@@ -440,9 +543,20 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
         title: `Level ${levelId} uses the Act ${pal + 1} palette but its tiles are Act ${tilesAct + 1} tiles`,
         detail: `Pal picks the colours. Tiles drawn for another act show wrong colours (often red or purple). Set Pal to ${tilesAct}, as the game's own Act 5 levels that reuse other acts' tiles do.`,
         columns: [{ table: 'Levels', col: 'Pal' }],
+        fix: cellFix('Levels.txt', levels, `Set Pal to ${tilesAct} (Act ${tilesAct + 1} colours)`, [{ row: lRow, col: 'Pal', value: String(tilesAct) }]),
       });
     const quest = getCell(levels, lRow, 'QuestFlag').trim();
-    if (quest && quest !== '0') out.push({ severity: 'info', title: `Level ${levelId} needs quest flag ${quest} to enter`, columns: [{ table: 'Levels', col: 'QuestFlag' }] });
+    if (quest && quest !== '0')
+      out.push({
+        severity: 'info',
+        title: `Level ${levelId} needs quest flag ${quest} to enter`,
+        detail: 'Players can only enter after that quest (a level copied from another one keeps its requirement). Fine if intended.',
+        columns: [{ table: 'Levels', col: 'QuestFlag' }],
+        fix: cellFix('Levels.txt', levels, 'Remove the quest requirement', [
+          { row: lRow, col: 'QuestFlag', value: '' },
+          { row: lRow, col: 'QuestFlagEx', value: '' },
+        ]),
+      });
     for (const c of ['LevelName', 'LevelWarp', 'EntryFile'])
       if (getCell(levels, lRow, c).length > MAX_LEVEL_STRING)
         out.push({ severity: 'warning', title: `Level ${levelId}: ${c} is longer than ${MAX_LEVEL_STRING} characters (the game cuts it)`, columns: [{ table: 'Levels', col: c }] });
@@ -460,13 +574,20 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
         const id = num(getCell(levels, other, 'Id'));
         if (other === lRow || levelAct(id) !== levelAct(levelId)) continue;
         const b = box(other);
-        if (b && me.x < b.x + b.w && b.x < me.x + me.w && me.y < b.y + b.h && b.y < me.y + me.h)
+        if (b && me.x < b.x + b.w && b.x < me.x + me.w && me.y < b.y + b.h && b.y < me.y + me.h) {
+          const off = freeOffset(levels, levelAct(levelId));
           out.push({
             severity: 'warning',
             title: `Level ${levelId} overlaps level ${id} "${getCell(levels, other, 'Name')}" in the act's world`,
             detail: 'Levels of one act share one world; OffsetX/OffsetY must keep them apart.',
             columns: [{ table: 'Levels', col: 'OffsetX' }],
+            fix: cellFix('Levels.txt', levels, `Move it to a free spot (${off.x}, ${off.y})`, [
+              { row: lRow, col: 'OffsetX', value: String(off.x) },
+              { row: lRow, col: 'OffsetY', value: String(off.y) },
+            ]),
           });
+          break;
+        }
       }
     // Level type files this preset loads.
     const tRow = rowOfRecord(types, num(getCell(levels, lRow, 'LevelType')));

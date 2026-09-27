@@ -1527,6 +1527,12 @@ export function App() {
             await applyDt1s(libs.filter((p) => !drop.has(normalizePath(p))));
             return recheck();
           }
+          case 'table-write': {
+            await writeFiles(fix.writes);
+            await reloadTables();
+            notify(`Updated ${fix.writes.map((w) => `${w.table}: ${w.summary.join('; ')}`).join(' · ')} (the old file is kept as .bak)`);
+            return recheck();
+          }
           case 'sync-tables': {
             const writes = await syncLevelTables(gd.fs, map.path, libs, map.resolution.lvlType?.id);
             if (writes.length) {
@@ -2634,6 +2640,11 @@ export function App() {
           usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p)}
           popCount={popAreas.length}
           onApply={applyTableWrites}
+          onFix={async (writes) => {
+            await writeFiles(writes);
+            await reloadTables();
+            notify(`Updated ${writes.map((w) => `${w.table}: ${w.summary.join('; ')}`).join(' · ')} (the old file is kept as .bak)`);
+          }}
           onClose={() => {
             setDialog(null);
             setRegisterInitial(undefined);

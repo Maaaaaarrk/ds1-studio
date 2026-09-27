@@ -74,6 +74,47 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(titles).toMatch(/overlaps level 136 "Act 5 - Pandemonium Finale"/);
   });
 
+  it('offers to put a table back in order when a row was inserted mid-table, without changing any Id', async () => {
+    const { cloneRow, setCell, appendRow } = await import('../src/formats/txtTable');
+    const { recordOrderFix, appendAt } = await import('../src/game/addToGame');
+    const tpl = rowOfRecord(tables.levels, 38);
+    // What the old Add to game did: a copy of level 38, numbered 137, inserted right after it.
+    const broken = setCell(cloneRow(tables.levels, tpl), tpl + 1, 'Id', '137');
+    // What it should have done: the same row at the end.
+    const values = Object.fromEntries(tables.levels.columns.map((c, i) => [c, tables.levels.rows[tpl][i] ?? '']));
+    const right = appendAt(tables.levels, { ...values, Id: '137' }).doc;
+    const fix = recordOrderFix('Levels.txt', broken, 'Id');
+    if (!fix || typeof fix === 'string') throw new Error(String(fix));
+    const fixed = parseTxtTable(fix.writes[0].bytes);
+    expect(fixed.rows.map((r) => r.join('\t'))).toEqual(right.rows.map((r) => r.join('\t')));
+    expect(dataRows(fixed).every((r, i) => getCell(fixed, r, 'Id') === String(i))).toBe(true);
+    expect(fix.label).toMatch(/99 rows move, no Id changes/);
+    // The verifier offers it.
+    const rel = 'Act1/Tristram/Tri_Town4.ds1';
+    expect(verifyInGame({ ...tables, levels: broken }, rel, await ds1Of(rel))[0].fix?.label).toBe(fix.label);
+    // Duplicated or missing Ids can't be fixed by moving rows: explained instead.
+    expect(recordOrderFix('Levels.txt', setCell(tables.levels, rowOfRecord(tables.levels, 5), 'Id', '4'), 'Id')).toMatch(/used twice: 4.*missing: 5/);
+    expect(recordOrderFix('Levels.txt', tables.levels, 'Id')).toBeNull();
+  });
+
+  it('offers fixes for a wrong level size and a preset pointing at a level that does not exist', async () => {
+    const { setCell } = await import('../src/formats/txtTable');
+    const rel = 'Act1/Tristram/Tri_Town4.ds1';
+    const ds1 = await ds1Of(rel);
+    const L = rowOfRecord(tables.levels, 38);
+    const levels = setCell(tables.levels, L, 'SizeX', '44');
+    const size = verifyInGame({ ...tables, levels }, rel, ds1).find((i) => /size/.test(i.title))!;
+    const fixedLevels = parseTxtTable(size.fix!.writes[0].bytes);
+    expect(['', '(N)', '(H)'].map((s) => `${getCell(fixedLevels, L, `SizeX${s}`)}x${getCell(fixedLevels, L, `SizeY${s}`)}`)).toEqual(['43x48', '43x48', '43x48']);
+    // A preset named like a level but pointing past the end of Levels.txt.
+    const P = dataRows(tables.prest).find((r) => getCell(tables.prest, r, 'LevelId') === '38')!;
+    let prest = setCell(tables.prest, P, 'LevelId', '999');
+    prest = setCell(prest, P, 'Name', 'Act 1 - Tristram');
+    const missing = verifyInGame({ ...tables, prest }, rel, ds1).find((i) => /doesn't have/.test(i.title))!;
+    expect(missing.fix?.label).toBe('Point it at level 38 "Act 1 - Tristram"');
+    expect(getCell(parseTxtTable(missing.fix!.writes[0].bytes), P, 'LevelId')).toBe('38');
+  });
+
   it('a new level: appended as the next record, every field set, and it passes the checks', async () => {
     const rel = 'Expansion/Town/townWest.ds1';
     const ds1 = await ds1Of(rel);
