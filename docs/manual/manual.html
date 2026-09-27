@@ -318,7 +318,7 @@
   <figure class="medium"><img src="img/paint-modes.png" alt="Tools and paint modes" /><figcaption>Tools, the Paint / erase modes and the active layer.</figcaption></figure>
   <table>
     <tr><th>Tool</th><th>Key</th><th>What it does</th></tr>
-    <tr><td>Select</td><td><kbd>V</kbd></td><td>Click a cell to inspect and edit it in the <a href="#s-cell">Cell panel</a>; drag to select an area (<a href="#s-select">3.4</a>).</td></tr>
+    <tr><td>Select</td><td><kbd>V</kbd></td><td>Click a cell to inspect and edit it in the <a href="#s-cell">Cell panel</a>; drag to select an area; <kbd>Shift</kbd>+click or <kbd>Shift</kbd>+drag adds to it (<a href="#s-select">3.4</a>).</td></tr>
     <tr><td>Paint</td><td><kbd>B</kbd></td><td>Paints the tile chosen in the <a href="#s-palette">Tiles panel</a> on the active layer.</td></tr>
     <tr><td>Erase</td><td><kbd>E</kbd></td><td>Clears cells on the active layer.</td></tr>
     <tr><td>Pick</td><td><kbd>I</kbd></td><td>Click a tile on the map to paint with it.</td></tr>
@@ -354,7 +354,7 @@
 
   <h2 id="s-select"><span class="num">3.4</span>Selecting, copying and moving</h2>
   <figure><img src="img/selection.png" alt="A selection" /><figcaption>A selection with the Selection panel on the right.</figcaption></figure>
-  <p>With <b>Select</b> (<kbd>V</kbd>), drag over the map to select cells, or press <kbd>Ctrl</kbd>+<kbd>A</kbd> for the whole map. The <b>Selection</b> panel then offers:</p>
+  <p>With <b>Select</b> (<kbd>V</kbd>), drag over the map to select cells, or press <kbd>Ctrl</kbd>+<kbd>A</kbd> for the whole map. Hold <kbd>Shift</kbd> to add to the selection: <kbd>Shift</kbd>+click adds one cell, <kbd>Shift</kbd>+drag adds a rectangle, so you can select any shape (an L-shaped room, a winding path). Everything below then works on just the selected cells. The <b>Selection</b> panel then offers:</p>
   <ul>
     <li><b>Fill</b> the active layer with the brush (or random mix); <b>Clear</b> the active layer; <b>Clear everything</b> (all layers and the objects standing there, <kbd>Shift</kbd>+<kbd>Delete</kbd>).</li>
     <li><b>Copy</b> (<kbd>Ctrl</kbd>+<kbd>C</kbd>), <b>Cut</b> (<kbd>Ctrl</kbd>+<kbd>X</kbd>) and <b>Paste</b> (<kbd>Ctrl</kbd>+<kbd>V</kbd>, then click where it goes). Objects and NPCs in the selection come along, so <b>Cut then Paste moves an area with everything in it</b> — even the whole map.</li>

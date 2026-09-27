@@ -1,7 +1,7 @@
 import { decodeCell, encodeCell, isEmptyCell, parseDs1, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { normalizePath } from '../vfs/vfs';
-import type { CellRect, Clipboard } from './clipboard';
+import { selectionMask, type CellRect, type CellSelection, type Clipboard } from './clipboard';
 import type { GameData, TileLibrary } from './GameData';
 import type { LayerKind, LayerRef, MapDocument } from './MapDocument';
 import { isBuiltinPath } from './specialTiles';
@@ -98,8 +98,9 @@ export function capturePreset(ds1: Ds1, lib: TileLibrary, r: CellRect, name: str
 }
 
 /** Selection → preset, from an open document. */
-export function presetFromSelection(doc: MapDocument, lib: TileLibrary, r: CellRect, name: string, category: string): Preset {
-  return capturePreset(doc.ds1, lib, r, name, category);
+/** A preset of the selection: its bounding rectangle, with only the selected cells (and their objects) when irregular. */
+export function presetFromSelection(doc: MapDocument, lib: TileLibrary, r: CellSelection, name: string, category: string): Preset {
+  return capturePreset(doc.ds1, lib, r, name, category, selectionMask(r) ?? undefined);
 }
 
 /** A preset as a clipboard for the paste tool (cells + objects). */

@@ -3,7 +3,7 @@ import type { Ds1Object } from '../formats/ds1';
 import type { Dt1Tile } from '../formats/dt1';
 import type { Sprite } from '../game/sprites';
 import type { ResizeDelta } from '../formats/ds1ops';
-import type { CellRect } from '../game/clipboard';
+import { cellKey, type CellRect, type CellSelection } from '../game/clipboard';
 import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { blendFlag, InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
@@ -55,7 +55,7 @@ interface Props {
   /** Show edge handles that resize the map by dragging. */
   resizeMode: boolean;
   onResize: (delta: ResizeDelta) => void;
-  selection: CellRect | null;
+  selection: CellSelection | null;
   /** Footprint of a pending paste, drawn as an outline. */
   pasteRect: CellRect | null;
   onHover: (h: HoverInfo | null) => void;
@@ -901,10 +901,30 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     [pasteRect, 'rgba(110, 190, 255, 0.08)', 'rgba(130, 200, 255, 0.95)'],
   ] as const) {
     if (!rect) continue;
+    const cells = 'cells' in rect ? rect.cells : undefined;
     ctx.beginPath();
-    diamond(ctx, rect.x0, rect.y0, rect.x1 - rect.x0 + 1, rect.y1 - rect.y0 + 1);
+    if (cells) for (const k of cells) diamond(ctx, k % 65536, Math.floor(k / 65536));
+    else diamond(ctx, rect.x0, rect.y0, rect.x1 - rect.x0 + 1, rect.y1 - rect.y0 + 1);
     ctx.fillStyle = fill;
     ctx.fill();
+    // An irregular selection is outlined along its outer edges only.
+    if (cells) {
+      ctx.beginPath();
+      const edge = (a: [number, number], b: [number, number]) => {
+        const [ax, ay] = cellToWorld(...a);
+        const [bx, by] = cellToWorld(...b);
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+      };
+      for (const k of cells) {
+        const x = k % 65536;
+        const y = Math.floor(k / 65536);
+        if (!cells.has(cellKey(x, y - 1))) edge([x, y], [x + 1, y]);
+        if (!cells.has(cellKey(x + 1, y))) edge([x + 1, y], [x + 1, y + 1]);
+        if (!cells.has(cellKey(x, y + 1))) edge([x, y + 1], [x + 1, y + 1]);
+        if (!cells.has(cellKey(x - 1, y))) edge([x, y], [x, y + 1]);
+      }
+    }
     ctx.setLineDash([6 * px, 4 * px]);
     ctx.lineWidth = 1.5 * px;
     ctx.strokeStyle = stroke;

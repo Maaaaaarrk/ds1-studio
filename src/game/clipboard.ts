@@ -1,4 +1,4 @@
-import { isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
+import { EMPTY_CELL, isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { normalizePath } from '../vfs/vfs';
 import type { TileLibrary } from './GameData';
 import { layerKey, MapDocument, type Brush, type CellEdit, type LayerRef } from './MapDocument';
@@ -25,6 +25,49 @@ export interface Clipboard {
   tileSources?: Record<string, string>;
 }
 
+/**
+ * A selection: its bounding rectangle, and for irregular shapes (Shift+click and Shift+drag add cells and rectangles)
+ * the cells in it. Anything that only needs a rectangle uses the bounding one; cell by cell work (copy, cut, delete,
+ * fill, re-roll, find & replace) takes just the selected cells.
+ */
+export interface CellSelection extends CellRect {
+  /** Selected cells as cellKey(x, y); absent = the whole rectangle. */
+  cells?: ReadonlySet<number>;
+}
+
+export const cellKey = (x: number, y: number) => y * 65536 + x;
+
+/** Whether (x, y) is selected (inside the rectangle and, for an irregular selection, one of its cells). */
+export function inSelection(s: CellSelection, x: number, y: number): boolean {
+  return x >= s.x0 && x <= s.x1 && y >= s.y0 && y <= s.y1 && (!s.cells || s.cells.has(cellKey(x, y)));
+}
+
+/** How many cells are selected. */
+export function selectionCount(s: CellSelection): number {
+  return s.cells ? s.cells.size : (s.x1 - s.x0 + 1) * (s.y1 - s.y0 + 1);
+}
+
+/**
+ * The selection with rectangle `r` added (Shift+click adds one cell, Shift+drag a rectangle). Stays a plain rectangle
+ * when the result fills its bounding box.
+ */
+export function addToSelection(s: CellSelection | null, r: CellRect): CellSelection {
+  if (!s) return { ...r };
+  const box = { x0: Math.min(s.x0, r.x0), y0: Math.min(s.y0, r.y0), x1: Math.max(s.x1, r.x1), y1: Math.max(s.y1, r.y1) };
+  const cells = new Set<number>();
+  for (let y = s.y0; y <= s.y1; y++) for (let x = s.x0; x <= s.x1; x++) if (inSelection(s, x, y)) cells.add(cellKey(x, y));
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) cells.add(cellKey(x, y));
+  return cells.size === (box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1) ? box : { ...box, cells };
+}
+
+/** The selection's cells as a mask over its bounding rectangle, row by row (null for a plain rectangle). */
+export function selectionMask(s: CellSelection): boolean[] | null {
+  if (!s.cells) return null;
+  const out: boolean[] = [];
+  for (let y = s.y0; y <= s.y1; y++) for (let x = s.x0; x <= s.x1; x++) out.push(s.cells.has(cellKey(x, y)));
+  return out;
+}
+
 export function rectFrom(a: [number, number], b: [number, number]): CellRect {
   return { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
 }
@@ -39,21 +82,24 @@ export function rectSize(r: CellRect): [number, number] {
   return [r.x1 - r.x0 + 1, r.y1 - r.y0 + 1];
 }
 
-function* cellsIn(r: CellRect): Generator<[number, number]> {
-  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) yield [x, y];
+/** The selected cells (all of a plain rectangle's), row by row. */
+function* cellsIn(r: CellSelection): Generator<[number, number]> {
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) if (inSelection(r, x, y)) yield [x, y];
 }
 
-export function copyRect(doc: MapDocument, r: CellRect): Clipboard {
+/** Copies the selection's bounding rectangle; cells outside an irregular selection copy as empty (they don't paste). */
+export function copyRect(doc: MapDocument, r: CellSelection): Clipboard {
   const [width, height] = rectSize(r);
-  const inside = (o: Ds1Object) => {
-    const cx = Math.floor(o.x / 5);
-    const cy = Math.floor(o.y / 5);
-    return cx >= r.x0 && cx <= r.x1 && cy >= r.y0 && cy <= r.y1;
-  };
+  const inside = (o: Ds1Object) => inSelection(r, Math.floor(o.x / 5), Math.floor(o.y / 5));
+  const box: [number, number][] = [];
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) box.push([x, y]);
   return {
     width,
     height,
-    layers: doc.layers().map((layer) => ({ layer, cells: [...cellsIn(r)].map(([x, y]) => doc.cell(layer, x, y)) })),
+    layers: doc.layers().map((layer) => ({
+      layer,
+      cells: box.map(([x, y]) => (inSelection(r, x, y) ? doc.cell(layer, x, y) : layer.kind === 'wall' ? { ...EMPTY_CELL, orientation: 0, orientationHigh: 0 } : EMPTY_CELL)),
+    })),
     objects: doc.ds1.objects.filter(inside).map((o) => ({
       ...o,
       x: o.x - r.x0 * 5,
@@ -73,11 +119,11 @@ export function pasteObjects(doc: MapDocument, clip: Clipboard, x: number, y: nu
     .filter((o) => doc.inBounds(Math.floor(o.x / 5), Math.floor(o.y / 5)));
 }
 
-export function clearEdits(doc: MapDocument, r: CellRect, layers: LayerRef[]): CellEdit[] {
+export function clearEdits(doc: MapDocument, r: CellSelection, layers: LayerRef[]): CellEdit[] {
   return layers.flatMap((layer) => [...cellsIn(r)].map(([x, y]) => ({ layer, x, y, cell: MapDocument.painted(layer, doc.cell(layer, x, y), null) })));
 }
 
-export function fillEdits(doc: MapDocument, r: CellRect, layer: LayerRef, brush: Brush): CellEdit[] {
+export function fillEdits(doc: MapDocument, r: CellSelection, layer: LayerRef, brush: Brush): CellEdit[] {
   return [...cellsIn(r)].map(([x, y]) => ({ layer, x, y, cell: MapDocument.painted(layer, doc.cell(layer, x, y), brush) }));
 }
 

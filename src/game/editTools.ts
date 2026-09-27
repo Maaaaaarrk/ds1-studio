@@ -1,5 +1,5 @@
 import { isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
-import type { CellRect } from './clipboard';
+import { inSelection, type CellSelection } from './clipboard';
 import { MapDocument, type Brush, type CellEdit, type LayerRef } from './MapDocument';
 
 /**
@@ -24,7 +24,8 @@ export function keyOf(layer: LayerRef, cell: AnyCell): TileKey | null {
 const sameKey = (a: TileKey | null, b: TileKey | null) => (a === null || b === null ? a === b : a.orientation === b.orientation && a.main === b.main && a.sub === b.sub);
 export const keyText = (k: TileKey) => `${k.main}/${k.sub}`;
 
-const inRect = (r: CellRect | null, x: number, y: number) => !r || (x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1);
+/** Whether (x, y) is in `r` (a selection's cells when irregular); null = anywhere. */
+const inRect = (r: CellSelection | null, x: number, y: number) => !r || inSelection(r, x, y);
 
 /** A tile to paint: the brush, or a random one of a mix (each cell picks its own). */
 export function brushFor(mix: Brush[], random: () => number = Math.random): Brush | null {
@@ -36,7 +37,7 @@ export function brushFor(mix: Brush[], random: () => number = Math.random): Brus
  * Cells connected to (x, y) on `layer` (edge neighbours) holding the same tile, or all empty when it is empty,
  * kept inside `within` when given.
  */
-export function floodRegion(doc: MapDocument, layer: LayerRef, x: number, y: number, within: CellRect | null = null): [number, number][] {
+export function floodRegion(doc: MapDocument, layer: LayerRef, x: number, y: number, within: CellSelection | null = null): [number, number][] {
   const { width, height } = doc.ds1;
   if (!doc.inBounds(x, y) || !inRect(within, x, y)) return [];
   const target = keyOf(layer, doc.cell(layer, x, y));
@@ -68,14 +69,15 @@ export function paintEdits(doc: MapDocument, layer: LayerRef, cells: [number, nu
     .map(([x, y]) => ({ layer, x, y, cell: MapDocument.painted(layer, doc.cell(layer, x, y), mix?.length ? brushFor(mix, random) : null) }));
 }
 
-export function rectCells(r: CellRect): [number, number][] {
+/** The cells of a rectangle, or of a selection (just its cells when irregular). */
+export function rectCells(r: CellSelection): [number, number][] {
   const out: [number, number][] = [];
-  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) out.push([x, y]);
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) if (inSelection(r, x, y)) out.push([x, y]);
   return out;
 }
 
 /** Every use of `from` on the given layers (inside `within` when given). */
-export function findTile(doc: MapDocument, layers: LayerRef[], from: TileKey, within: CellRect | null = null): { layer: LayerRef; x: number; y: number }[] {
+export function findTile(doc: MapDocument, layers: LayerRef[], from: TileKey, within: CellSelection | null = null): { layer: LayerRef; x: number; y: number }[] {
   const out: { layer: LayerRef; x: number; y: number }[] = [];
   const { width, height } = doc.ds1;
   for (const layer of layers)
@@ -85,7 +87,7 @@ export function findTile(doc: MapDocument, layers: LayerRef[], from: TileKey, wi
 }
 
 /** Replaces every use of `from` with `to` (keeping each cell's other properties). */
-export function replaceEdits(doc: MapDocument, layers: LayerRef[], from: TileKey, to: TileKey, within: CellRect | null = null): CellEdit[] {
+export function replaceEdits(doc: MapDocument, layers: LayerRef[], from: TileKey, to: TileKey, within: CellSelection | null = null): CellEdit[] {
   return findTile(doc, layers, from, within).map(({ layer, x, y }) => ({ layer, x, y, cell: MapDocument.painted(layer, doc.cell(layer, x, y), to) }));
 }
 
@@ -94,7 +96,7 @@ export function replaceEdits(doc: MapDocument, layers: LayerRef[], from: TileKey
  * already used in the selection, weighted by how often each is used. Mixes up visible repeats without bringing in
  * tiles that weren't there.
  */
-export function rerollEdits(doc: MapDocument, r: CellRect, layers: LayerRef[], random: () => number = Math.random): CellEdit[] {
+export function rerollEdits(doc: MapDocument, r: CellSelection, layers: LayerRef[], random: () => number = Math.random): CellEdit[] {
   const edits: CellEdit[] = [];
   for (const layer of layers) {
     const cells = rectCells(r).map(([x, y]) => ({ x, y, key: keyOf(layer, doc.cell(layer, x, y)) }));
@@ -116,8 +118,6 @@ export function rerollEdits(doc: MapDocument, r: CellRect, layers: LayerRef[], r
 }
 
 /** True when an object stands on a cell of `r`. */
-export function objectInRect(o: Ds1Object, r: CellRect): boolean {
-  const cx = Math.floor(o.x / 5);
-  const cy = Math.floor(o.y / 5);
-  return cx >= r.x0 && cx <= r.x1 && cy >= r.y0 && cy <= r.y1;
+export function objectInRect(o: Ds1Object, r: CellSelection): boolean {
+  return inSelection(r, Math.floor(o.x / 5), Math.floor(o.y / 5));
 }

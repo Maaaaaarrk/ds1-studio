@@ -56,7 +56,7 @@ import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../format
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
-import { clampRect, clearEdits, clipboardSources, copyRect, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, type CellRect, type Clipboard } from '../game/clipboard';
+import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
@@ -143,6 +143,12 @@ function brushOrientation(layer: LayerRef, brush: Brush): number {
   return layer.kind === 'floor' ? Orientation.Floor : layer.kind === 'shadow' ? Orientation.Shadow : brush.orientation;
 }
 
+/** "12×8" for a rectangle, "37 of 12×8" for an irregular selection (its cells and bounding box). */
+function selectionLabel(s: CellSelection): string {
+  const [w, h] = rectSize(s);
+  return s.cells ? `${selectionCount(s)} of ${w}×${h}` : `${w}×${h}`;
+}
+
 export function App() {
   const [data, setData] = useState<DataState>({ status: 'connecting' });
   const [map, setMap] = useState<OpenMap | null>(null);
@@ -221,7 +227,7 @@ export function App() {
     setSidePanel('tiles');
     setPaletteFocus((f) => ({ tile, seq: (f?.seq ?? 0) + 1 }));
   }, []);
-  const [selection, setSelection] = useState<CellRect | null>(null);
+  const [selection, setSelection] = useState<CellSelection | null>(null);
   /**
    * Tiles stacked under the last Shift+wheel / click point, frontmost first, and which one is chosen (-1 = none:
    * the selection covers every layer). While one is chosen, copy/cut/delete only touch its layer.
@@ -249,6 +255,8 @@ export function App() {
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
+  /** Shift+click / Shift+drag with the Select tool: the selection being added to (null = a new selection). */
+  const selectBase = useRef<CellSelection | null>(null);
   /** The tile tool to return to when Tab leaves object editing. */
   const lastTileTool = useRef<Tool>('select');
   const keys = useKeybindings();
@@ -719,15 +727,22 @@ export function App() {
             focusTile(hit.tile, layerOfItem(hit));
             if (hits.length > 1) notify(`${hits.length} tiles overlap here: Shift+wheel to pick one layer`);
           }
-          setSelection(clampRect(rectFrom(selectAnchor.current, selectAnchor.current), doc.ds1.width, doc.ds1.height));
+          // Shift adds to the selection: a cell per click, a rectangle per drag (irregular shapes).
+          selectBase.current = mods?.shift && selection ? selection : null;
+          const r = clampRect(rectFrom(selectAnchor.current, selectAnchor.current), doc.ds1.width, doc.ds1.height);
+          if (selectBase.current) setStack(null);
+          setSelection(selectBase.current && r ? addToSelection(selectBase.current, r) : r);
           return;
         }
         if (cell && selectAnchor.current) {
           const r = clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height);
-          if (!r || !isSingleCell(r)) setStack(null);
-          setSelection(r);
+          if (!r || !isSingleCell(r) || selectBase.current) setStack(null);
+          setSelection(selectBase.current ? (r ? addToSelection(selectBase.current, r) : selectBase.current) : r);
         }
-        if (phase === 'end') selectAnchor.current = null;
+        if (phase === 'end') {
+          selectAnchor.current = null;
+          selectBase.current = null;
+        }
         return;
       }
       if (tool === 'pick') {
@@ -759,7 +774,7 @@ export function App() {
         const cell = cells[0];
         if (phase !== 'start' || !cell) return;
         // Inside the selection, the fill stays within it.
-        const within = selection && cell[0] >= selection.x0 && cell[0] <= selection.x1 && cell[1] >= selection.y0 && cell[1] <= selection.y1 ? selection : null;
+        const within = selection && inSelection(selection, cell[0], cell[1]) ? selection : null;
         const region = floodRegion(doc, activeLayer, cell[0], cell[1], within);
         if (doc.apply(paintEdits(doc, activeLayer, region, tiles), `${tool === 'paint' ? 'Fill' : 'Erase'} area${where}`)) {
           bump();
@@ -781,7 +796,7 @@ export function App() {
       if (!doc || !selection) return;
       const raw = copyRect(doc, selection);
       const clip = map ? { ...raw, ...clipboardSources(raw, map.lib) } : raw;
-      const [w, h] = rectSize(selection);
+      const size = selectionLabel(selection);
       if (onlyLayer) {
         // One tile of a stack (Shift+wheel): just its layer, no objects.
         setClipboard({ ...clip, layers: clip.layers.filter((l) => layerKey(l.layer) === layerKey(onlyLayer)), objects: undefined });
@@ -791,8 +806,8 @@ export function App() {
       }
       setClipboard(clip);
       const objects = clip.objects?.length ?? 0;
-      if (cut) clearArea(selection, true, `Cut ${w}×${h}`);
-      notify(`${cut ? 'Cut' : 'Copied'} ${w}×${h} cells (all layers${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${cut ? ': paste to move them' : ''}`);
+      if (cut) clearArea(selection, true, `Cut ${size}`);
+      notify(`${cut ? 'Cut' : 'Copied'} ${size} cells (all layers${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${cut ? ': paste to move them' : ''}`);
     },
     [doc, selection, notify, onlyLayer], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -821,7 +836,7 @@ export function App() {
    * Clears `r`: the active layer, or (everything) every tile layer plus the objects and NPCs standing in it, so a
    * cut takes everything with it. One undo step.
    */
-  function clearArea(r: CellRect, everything: boolean, label: string) {
+  function clearArea(r: CellSelection, everything: boolean, label: string) {
     if (!doc) return;
     const edits = clearEdits(doc, r, everything ? doc.layers() : [activeLayer]);
     const inside = everything ? doc.ds1.objects.filter((o) => objectInRect(o, r)).length : 0;
@@ -842,8 +857,8 @@ export function App() {
   const clearSelection = useCallback(
     (allLayers: boolean) => {
       if (!doc || !selection) return;
-      const [w, h] = rectSize(selection);
-      clearArea(selection, allLayers, allLayers ? `Clear ${w}×${h}` : `Clear ${layerLabel(activeLayer)} ${w}×${h}`);
+      const size = selectionLabel(selection);
+      clearArea(selection, allLayers, allLayers ? `Clear ${size}` : `Clear ${layerLabel(activeLayer)} ${size}`);
     },
     [doc, selection, activeLayer], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -1461,7 +1476,7 @@ export function App() {
   );
   const saveSelectionPreset = useCallback(async () => {
     if (!doc || !map || !selection) return;
-    const name = window.prompt('Preset name', `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${rectSize(selection).join('×')}`);
+    const name = window.prompt('Preset name', `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${selection.cells ? `${selectionCount(selection)} cells` : rectSize(selection).join('×')}`);
     if (!name) return;
     const category = window.prompt('Category', 'My presets') || 'My presets';
     await savePreset(presetFromSelection(doc, map.lib, selection, name, category));

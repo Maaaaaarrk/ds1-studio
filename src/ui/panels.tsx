@@ -11,7 +11,7 @@ import type { Palette } from '../formats/palette';
 import type { LevelLinks } from '../game/warps';
 import type { Bindings } from './keybindings';
 import { GameData } from '../game/GameData';
-import { rectSize, type CellRect } from '../game/clipboard';
+import { rectSize, selectionCount, type CellRect, type CellSelection } from '../game/clipboard';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import type { MapOverride, OpenMap } from '../game/openMap';
 import type { Scene } from '../render/scene';
@@ -518,7 +518,7 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
 }
 
 interface SelectionPanelProps {
-  selection: CellRect;
+  selection: CellSelection;
   activeLayer: LayerRef;
   brush: Brush | null;
   canPaste: boolean;
@@ -537,9 +537,10 @@ interface SelectionPanelProps {
 
 export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill, onClear, onCopy, onPaste, onDeselect, onReroll, onReplace, objectCount, onlyLayer }: SelectionPanelProps) {
   const [w, h] = rectSize(selection);
+  const shape = selection.cells ? `${selectionCount(selection)} cells in ${w} × ${h}` : `${w} × ${h}`;
   const what = onlyLayer ? layerLabel(onlyLayer) : `all tile layers${objectCount ? ` and ${objectCount} object${objectCount === 1 ? '' : 's'}` : ''}`;
   return (
-    <Panel title="Selection" extra={`${w} × ${h} · from ${selection.x0}, ${selection.y0}`}>
+    <Panel title="Selection" extra={`${shape} · from ${selection.x0}, ${selection.y0}`}>
       {onlyLayer && <p className="small accent-text">Only {layerLabel(onlyLayer)} (Shift+wheel to step through the stacked tiles, Esc for all layers)</p>}
       <div className="button-grid">
         <button className="btn" disabled={!brush} onClick={onFill} title="Fill the selection with the brush tile on the active layer">
