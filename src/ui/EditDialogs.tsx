@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { parseDt1, type Dt1 } from '../formats/dt1';
+import { sharedTiles, tileKeys } from '../game/duplicateDt1s';
 import type { Palette } from '../formats/palette';
 import type { CellRect } from '../game/clipboard';
 import { findTile, keyText, replaceEdits, type TileKey } from '../game/editTools';
@@ -435,6 +437,8 @@ export interface ImportDs1Choice {
   register: boolean;
   /** Tile libraries imported with the map; `replaces` = the library the map names that this one provides. */
   dt1s: { path: string; bytes: Uint8Array; replaces?: string }[];
+  /** Libraries the map names to take out of its list (the extra copy of a library it names twice). */
+  drop: string[];
 }
 
 /**
@@ -442,12 +446,14 @@ export interface ImportDs1Choice {
  * map names is listed as already there, provided by a picked file, or missing, and missing ones can be found by
  * picking DT1 files or folders. Then (optionally) add it to the game.
  */
-export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onImport, onClose }: {
+export function ImportDs1Dialog({ file, info, needs, exists, readDt1, busy, pickDt1s, onImport, onClose }: {
   file: { name: string };
   info: { width: number; height: number; act: number } | string;
   /** The tile libraries the map names (its embedded file list). */
   needs: NeededDt1[];
   exists: (path: string) => boolean;
+  /** Reads a DT1 from the game or mod (to compare libraries). */
+  readDt1: (path: string) => Promise<Dt1 | null>;
   busy: boolean;
   /** Picks DT1 files or folders and reads them. */
   pickDt1s: (mode: 'files' | 'folders') => Promise<ImportDt1File[]>;
@@ -465,7 +471,8 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
   const dt1Folder = (folder ?? name).trim();
   const path = `data/global/tiles/expansion/Map/${name.trim()}.ds1`;
   const auto = useMemo(() => matchDt1s(needs.map((n) => (n.found ? { ...n, rel: '\u0000' } : n)), picked.map((f) => ({ ...f, ok: typeof f.info !== 'string' }))), [needs, picked]);
-  const source = needs.map((n, i) => (n.found ? null : i in manual ? manual[i] : auto[i]));
+  // A library the game or mod has can still be replaced by a picked file of the same name (chosen by hand).
+  const source = needs.map((n, i) => (i in manual ? manual[i] : n.found ? null : auto[i]));
   const missing = needs.filter((n, i) => !n.found && source[i] === null);
   const usedFiles = new Set(source.filter((x): x is number => x !== null));
   const unmatched = picked.map((_, i) => i).filter((i) => !usedFiles.has(i) && typeof picked[i].info !== 'string');
@@ -482,6 +489,43 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
   const targetOf = (needIndex: number) => importedDt1Path(dt1Folder, needs[needIndex].rel);
   const extraTarget = (fi: number) => importedDt1Path(dt1Folder, `${picked[fi].folder ? `${picked[fi].folder}/` : ''}${picked[fi].name}`);
   const valid = picked.map((f, i) => ({ f, i })).filter(({ f }) => typeof f.info !== 'string');
+  const fileName = (p: string) => p.split('/').pop()!.toLowerCase();
+
+  // Libraries the map names twice (a DT1 and a copy of it in another folder): the game picks tile variants among
+  // both, so the map shows a random mix of them. Compared by the tiles they provide.
+  const [keys, setKeys] = useState<(Set<number> | null)[]>([]);
+  const sourceKey = source.join(',');
+  useEffect(() => {
+    let live = true;
+    void Promise.all(
+      needs.map(async (n, i) => {
+        const src = source[i];
+        try {
+          if (src !== null) return tileKeys(parseDt1(picked[src].bytes));
+          if (n.found) {
+            const d = await readDt1(n.path);
+            return d ? tileKeys(d) : null;
+          }
+        } catch {
+          // unreadable: not compared
+        }
+        return null;
+      }),
+    ).then((k) => live && setKeys(k));
+    return () => {
+      live = false;
+    };
+  }, [needs, picked, sourceKey, readDt1]); // eslint-disable-line react-hooks/exhaustive-deps
+  const twice = useMemo(() => {
+    const out: { earlier: number; later: number }[] = [];
+    for (let i = 0; i < needs.length; i++)
+      for (let j = i + 1; j < needs.length; j++) if (keys[i] && keys[j] && sharedTiles(keys[i]!, keys[j]!)) out.push({ earlier: i, later: j });
+    return out;
+  }, [keys, needs]);
+  const [dropTwice, setDropTwice] = useState(true);
+  const drop = dropTwice ? [...new Set(twice.map((t) => t.earlier))] : [];
+  // Picked DT1s left over that share a name with a library the map already has: importing them too gives it two copies.
+  const sameNameAs = (fi: number) => needs.findIndex((n, i) => source[i] === null && n.found && fileName(n.path) === picked[fi].name.toLowerCase());
   return (
     <Modal title="Import DS1" onClose={onClose} wide>
       <p className="small">
@@ -514,6 +558,17 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
           </button>
         </div>
       )}
+      {typeof info !== 'string' && needs.length > 0 && needs.every((n) => n.found) && (
+        <div className="imp-callout done">
+          <span className="small">Your game and mod have every library the map names. You can still import your own versions of them with the map:</span>
+          <button className="btn small" disabled={picking} onClick={() => void add('files')}>
+            Add DT1 files…
+          </button>
+          <button className="btn small" disabled={picking} onClick={() => void add('folders')}>
+            Add folders…
+          </button>
+        </div>
+      )}
       <div className="imp-list">
         {needs.map((n, i) => {
           const src = source[i];
@@ -523,8 +578,26 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
               <span className="imp-name mono small" title={n.path}>
                 {n.rel}
               </span>
-              {n.found ? (
-                <span className="small muted">in your game / mod</span>
+              {n.found && !valid.some(({ f }) => f.name.toLowerCase() === fileName(n.path)) ? (
+                <span className="small muted">in your game / mod{drop.includes(i) ? ' · left out (copy)' : ''}</span>
+              ) : n.found ? (
+                <span className="imp-pick">
+                  <select
+                    value={src ?? ''}
+                    onChange={(e) => setManual((m) => ({ ...m, [i]: e.target.value === '' ? null : Number(e.target.value) }))}
+                    title="Use the one your game or mod has, or replace it with a picked DT1 of the same name"
+                  >
+                    <option value="">in your game / mod{drop.includes(i) ? ' · left out (copy)' : ''}</option>
+                    {valid
+                      .filter(({ f }) => f.name.toLowerCase() === fileName(n.path))
+                      .map(({ f, i: fi }) => (
+                        <option key={fi} value={fi}>
+                          use {f.folder ? `${f.folder}/` : ''}
+                          {f.name} instead
+                        </option>
+                      ))}
+                  </select>
+                </span>
               ) : (
                 <span className="imp-pick">
                   <select
@@ -547,6 +620,21 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
         })}
         {!needs.length && <p className="muted small pad">The map doesn&apos;t name any tile libraries (it will use its level type&apos;s).</p>}
       </div>
+      {twice.length > 0 && (
+        <div className="imp-callout small">
+          <span>
+            <b>
+              The map names {twice.length} tile librar{twice.length === 1 ? 'y' : 'ies'} twice
+            </b>{' '}
+            — {twice.length <= 3 ? `${twice.map((t) => `${needs[t.earlier].rel} and ${needs[t.later].rel}`).join('; ')} provide` : 'pairs of them in different folders provide'} the same tiles. Where a tile has random variants
+            the game picks among both copies, so the map would show a random mix of them (odd colours on some cells, for example).
+          </span>
+          <label>
+            <input type="checkbox" checked={dropTwice} onChange={(e) => setDropTwice(e.target.checked)} /> keep one copy of each: leave out the first-listed ones
+            (marked “left out (copy)” above)
+          </label>
+        </div>
+      )}
       {picked.some((f) => typeof f.info === 'string') && (
         <p className="warn-text small">
           Left out (can&apos;t be read): {picked.filter((f) => typeof f.info === 'string').map((f) => f.name).join(', ')}
@@ -573,6 +661,13 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
               />{' '}
               {picked[fi].folder ? `${picked[fi].folder}/` : ''}
               {picked[fi].name} <span className="muted">→ {extraTarget(fi).replace(/^data\/global\/tiles\//, '')}</span>
+              {sameNameAs(fi) >= 0 && (
+                <span className="warn-text">
+                  {' '}
+                  · same name as {needs[sameNameAs(fi)].rel}, which the map already uses: importing both gives it two copies (a random mix). Choose it on that
+                  library&apos;s line to use it instead.
+                </span>
+              )}
             </label>
           ))}
         </details>
@@ -607,9 +702,10 @@ export function ImportDs1Dialog({ file, info, needs, exists, busy, pickDt1s, onI
               path,
               register,
               dt1s: [
-                ...needs.flatMap((n, i) => (source[i] === null || n.found ? [] : [{ path: targetOf(i), bytes: picked[source[i]!].bytes, replaces: n.path }])),
+                ...needs.flatMap((n, i) => (source[i] === null || drop.includes(i) ? [] : [{ path: targetOf(i), bytes: picked[source[i]!].bytes, replaces: n.path }])),
                 ...[...extras].map((fi) => ({ path: extraTarget(fi), bytes: picked[fi].bytes })),
               ],
+              drop: drop.map((i) => needs[i].path),
             })
           }
         >

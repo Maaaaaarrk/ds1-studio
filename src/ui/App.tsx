@@ -1327,6 +1327,8 @@ export function App() {
     [importing, map, writeFiles, applyDt1s, reloadTables, notify],
   );
 
+  const readImportDt1 = useCallback((p: string) => (gd ? gd.dt1(p) : Promise.resolve(null)), [gd]);
+
   const importDs1 = useCallback(
     async (c: ImportDs1Choice) => {
       if (!importing || importing.kind !== 'ds1' || !gd) return;
@@ -1335,8 +1337,14 @@ export function App() {
       try {
         // Point the map at the tile libraries imported with it (its embedded list), so they are what it loads.
         let bytes = importing.bytes;
-        if (c.dt1s.length) {
+        if (c.dt1s.length || c.drop.length) {
           const d = parseDs1(bytes);
+          // Leave out the extra copy of a library the map names twice.
+          const dropped = new Set(c.drop.map(normalizePath));
+          d.files = d.files.filter((f) => {
+            const p = ds1FileToDt1Path(f);
+            return !p || !dropped.has(normalizePath(p));
+          });
           const provided = new Map(c.dt1s.filter((x) => x.replaces).map((x) => [x.replaces!, x.path]));
           d.files = d.files.map((f) => {
             const p = ds1FileToDt1Path(f);
@@ -2368,6 +2376,7 @@ export function App() {
           info={importing.info}
           needs={importing.needs}
           exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
+          readDt1={readImportDt1}
           busy={importBusy}
           pickDt1s={async (mode) => {
             const found = await importMany('dt1', mode);

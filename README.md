@@ -158,6 +158,10 @@ tree groups.
   them. A single act's palette can still be picked. Clicking a tile opens it in a zoom window you can move, resize
   from any edge and zoom right down to single pixels. The preview is exact, and the copy can replace the original in
   your map with the tables updated for you.
+- **Make act-safe** (Map tab): tiles drawn for one act show odd colours (often red or purple) in a map of another act,
+  in game too. This converts a whole map's DT1s to the Act 0 colours, judged in the act each was drawn for, with a
+  now/after preview. A map that loads **two copies of the same tiles** (an original and an act-safe copy, say) shows a
+  random mix of them; this dialog, the compatibility check and *Import DS1* spot that and keep one copy.
 - **Tile settings (ini)**: everything a DT1 Tools `.ini` holds for each tile — kind, main/sub index, rarity/frame,
   animated, footstep sound, roof height, direction — edited in plain form fields with an explanation on hover, for
   one tile or many at once. The **sub-tile flags** (walkability, line of sight, missiles, teleport…) are painted
