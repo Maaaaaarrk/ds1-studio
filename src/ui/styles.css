@@ -703,6 +703,11 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .actsafe-samples .thumb-img { --thumb-h: 48px; background-color: #0b0c0f; border-radius: 4px; }
 .actsafe-callout { display: block; margin: 8px 0; line-height: 1.5; } .actsafe-callout .btn { margin-top: 6px; }
 
+/* Cube recipe */
+.cr-risk { margin: 6px 0; line-height: 1.5; }
+.cr-risk label { display: block; margin-top: 4px; }
+.cr-ours { margin: 8px 0; }
+
 /* Add to game */
 .reg-changes { max-height: 46vh; overflow: auto; }
 .reg-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }

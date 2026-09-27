@@ -577,7 +577,15 @@
 
   <h2 id="s-cube"><span class="num">9.3</span>Cube recipe</h2>
   <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Data → Cube recipe.</figcaption></figure>
-  <p>Creates a map item and a Horadric Cube recipe that makes it. Pick the base item and the ingredients from lists with icons, or type your own item code (checked against the game's items). Linking the item to the level needs a mod plugin, such as PD2's map system.</p>
+  <p>Creates a new item and a Horadric Cube recipe that makes it. Pick the template item and the ingredients from lists with icons, or type your own item code (checked against the game's items). DS1 Studio takes care of the rules that otherwise crash or break the game:</p>
+  <ul>
+    <li><b>Placement:</b> the new item is added at the <b>end</b> of <code>Misc.txt</code>. Items are numbered by their position, so one inserted in the middle renumbers every item after it.</li>
+    <li><b>No duplicate recipes:</b> a recipe with the same ingredients as an existing one is refused. The cube only runs the first match, so the new one would never work.</li>
+    <li><b>Never a random drop:</b> the new item gets <code>spawnable 0</code>, and references to the template's code (<code>normcode</code>…) are changed to the new code.</li>
+    <li><b>Safe templates only:</b> elixirs aren't offered; a copy of one crashed the game when hovered. Items of a type the base game doesn't have, like PD2's maps, need a tick first. The mod's own code handles those types and only knows the mod's own item codes.</li>
+  </ul>
+  <div class="note"><b>PD2 maps</b> A new item code is not a new PD2 map: PD2's map system only knows its own map items. To open your map with a PD2 map item, give one of PD2's map levels your map with <a href="#s-addgame">Add to game</a> → <i>replace the map of an existing preset level</i>.</div>
+  <p>Recipes and items DS1 Studio made are listed under <b>Made by DS1 Studio</b> in the dialog, where you can remove them. Remove an item only when no character holds it: a character with an item whose code is gone may not load.</p>
 
   <h2 id="s-check"><span class="num">9.4</span>Compatibility check</h2>
   <figure class="medium"><img src="../media/compatibility.png" alt="Compatibility check" /><figcaption>Home → Compatibility.</figcaption></figure>

@@ -208,9 +208,12 @@ again replaces the editor's earlier rows instead of piling them up.
   act from its number (new levels are Act 5), `Pal` for the tiles' colours, the level size from the map, a free spot
   and automap layer, and tile paths the game can hold. The compatibility check verifies the same for any map and offers
   one-click fixes (e.g. rows out of order put back in Id order without changing any Id).
-- **Cube recipe:** creates a map item and a Horadric Cube recipe for it (the item-to-level link needs a mod plugin,
-  e.g. PD2's map system). Pick the base item and the cube ingredients from lists with icons, or type a custom code
-  (checked against the game's items); every field has a plain-language explanation.
+- **Cube recipe:** creates a new item and a Horadric Cube recipe for it. Pick the template item and the cube
+  ingredients from lists with icons, or type a custom code (checked against the game's items); every field has a
+  plain-language explanation. The item is added at the end of `Misc.txt` (so no other item is renumbered) and never
+  drops at random; a recipe that clashes with an existing one is refused; elixirs (which crash when a copy is hovered)
+  aren't offered, and mod-specific item types like PD2's maps need confirming first — a new code is not a new PD2 map.
+  Recipes and items it made are listed in the dialog and can be removed.
 - **Compatibility check:** missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry
   markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled
   `.bin` reminders — each with one-click fixes: add the DT1s that contain the missing tiles, update LvlTypes/Dt1Mask,

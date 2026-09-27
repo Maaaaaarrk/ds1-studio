@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parseDc6 } from '../formats/dc6';
 import { palettePath, parsePalette, type Palette } from '../formats/palette';
-import { appendRow, cloneRow, colIndex, parseTxtTable, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
+import { colIndex, parseTxtTable, type TxtTableDoc } from '../formats/txtTable';
+import { planCubeItem, removeRows, studioItems, studioRecipes, templateRisk } from '../game/cubeRecipe';
 import type { LayeredFs } from '../vfs/vfs';
 import { Modal } from './Dialogs';
 import { HelpTip } from './HelpTip';
@@ -12,7 +13,7 @@ const EXCEL = 'data/global/excel/';
 /** Plain-language help for every field (the "?" tips). */
 const HELP = {
   template:
-    'The existing item your map item is copied from. The copy keeps its picture, size and how it behaves in your inventory — only its name and code change. Pick one of your mod’s map items so the new one works the same way.',
+    'The existing item the new one is copied from. The copy keeps its picture, size and how it behaves in your inventory — only its name and code change. Elixirs are not offered: a copy of one crashed the game when hovered.',
   name: 'What you call the new item. It is written into Misc.txt so you can find it again; the name players see in game still comes from the template’s text until you add your own string.',
   code: 'Every item has a short unique code (3 or 4 letters/numbers) that the game uses to tell items apart — cube recipes, drops and your mod’s map system all refer to the item by it. DS1 Studio picks an unused one for you; choose “Custom item” to type your own.',
   customCode: 'Type 3 or 4 letters or numbers that no other item uses (checked as you type). Your mod’s map system will look for this code to know which map the item opens.',
@@ -164,6 +165,8 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: Props) {
   const [adding, setAdding] = useState(false);
   const [advanced, setAdvanced] = useState('');
   const [busy, setBusy] = useState(false);
+  const [acceptMod, setAcceptMod] = useState(false);
+  const [nobodyHolds, setNobodyHolds] = useState(false);
 
   useEffect(() => {
     void Promise.all([load(fs, 'Misc.txt'), load(fs, 'Weapons.txt'), load(fs, 'Armor.txt'), load(fs, 'CubeMain.txt')]).then(([misc, weapons, armor, cube]) =>
@@ -172,14 +175,16 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: Props) {
     void fs.read(palettePath(0)).then((b) => b && setPalette(parsePalette(b)));
   }, [fs]);
 
-  const miscItems = useMemo(() => catalog(tables?.misc ?? null, 'Misc'), [tables]);
-  const allItems = useMemo(() => [...miscItems, ...catalog(tables?.weapons ?? null, 'Weapons'), ...catalog(tables?.armor ?? null, 'Armor')], [tables, miscItems]);
+  const allMisc = useMemo(() => catalog(tables?.misc ?? null, 'Misc'), [tables]);
+  // Templates: never ones known to crash (see game/cubeRecipe.ts).
+  const typeOf = (i: Item) => (tables?.misc ? [tables.misc.rows[i.row][colIndex(tables.misc, 'type')] ?? '', tables.misc.rows[i.row][colIndex(tables.misc, 'type2')] ?? ''] : ['', '']);
+  const miscItems = useMemo(() => allMisc.filter((i) => templateRisk(...(typeOf(i) as [string, string]))?.kind !== 'blocked'), [allMisc]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allItems = useMemo(() => [...allMisc, ...catalog(tables?.weapons ?? null, 'Weapons'), ...catalog(tables?.armor ?? null, 'Armor')], [tables, allMisc]);
   const used = useMemo(() => new Set(allItems.map((i) => i.code.toLowerCase())), [allItems]);
   const isMapItem = (i: Item) => /map/i.test(i.name) || /map/i.test(i.type);
-  // Start with the mod's first map item as the template, and a sensible default recipe.
+  // A sensible default recipe; the template is the user's choice (no guessing).
   useEffect(() => {
-    if (!miscItems.length || template) return;
-    setTemplate(miscItems.find(isMapItem) ?? null);
+    if (!miscItems.length) return;
     const byCode = (c: string) => allItems.find((i) => i.code === c);
     const defaults = ['tbk', 'isc'].filter((c) => byCode(c)).map((code) => ({ code, qty: 1 }));
     if (!ingredients.length) setIngredients(defaults);
@@ -197,55 +202,34 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: Props) {
           : used.has(code.toLowerCase())
             ? `“${code}” is already used by ${allItems.find((i) => i.code.toLowerCase() === code.toLowerCase())?.name}.`
             : null;
-  const nameOf = (c: string) => allItems.find((i) => i.code === c)?.name ?? c;
   const inputStrings = [
     ...ingredients.map((g) => `"${g.code}${g.qty > 1 ? `,qty=${g.qty}` : ''}"`),
     ...(advanced.trim() ? (advanced.match(/"[^"]*"|[^,\s][^,]*/g) ?? []).map((s) => (s.startsWith('"') ? s.trim() : `"${s.trim()}"`)) : []),
   ];
 
+  const risk = template ? templateRisk(...(typeOf(template) as [string, string])) : null;
   const plan = useMemo((): TableWrite[] | string => {
     if (!tables?.misc || !tables.cube) return 'Loading the item and cube tables…';
     if (!template) return 'Pick a template item.';
     if (codeProblem) return codeProblem;
-    if (!inputStrings.length) return 'Add at least one ingredient.';
-    if (inputStrings.length > 7) return 'The cube holds at most 7 kinds of ingredient.';
-    const misc = tables.misc;
-    let m = cloneRow(misc, template.row);
-    const row = template.row + 1;
-    m = setCell(m, row, 'name', itemName);
-    if (colIndex(m, '*name') >= 0) m = setCell(m, row, '*name', itemName);
-    m = setCell(m, row, 'code', code);
-    const cube = tables.cube;
-    const values: Record<string, string> = {
-      description: `${itemName} [map:${mapName.toLowerCase()}] (DS1 Studio)`,
-      enabled: '1',
-      version: '100',
-      // numinputs = the total number of items in the cube (quantities included).
-      numinputs: String(
-        ingredients.reduce((n, g) => n + g.qty, 0) +
-          inputStrings.slice(ingredients.length).reduce((n, p) => n + (Number(/qty=(\d+)/.exec(p)?.[1]) || 1), 0),
-      ),
-      output: code,
-    };
-    inputStrings.forEach((p, i) => (values[`input ${i + 1}`] = p.replace(/^"|"$/g, '')));
-    for (const k of Object.keys(values)) if (colIndex(cube, k) < 0) delete values[k];
-    const c = appendRow(cube, values);
-    return [
-      { table: 'Misc.txt', path: `${EXCEL}Misc.txt`, bytes: serializeTxtTable(m), summary: [`New item “${itemName}” (code ${code}), copied from “${template.name}”`] },
-      {
-        table: 'CubeMain.txt',
-        path: `${EXCEL}CubeMain.txt`,
-        bytes: serializeTxtTable(c),
-        summary: [`Recipe: ${[...ingredients.map((g) => `${g.qty > 1 ? `${g.qty}× ` : ''}${nameOf(g.code)}`), ...(advanced.trim() ? [advanced.trim()] : [])].join(' + ')} → ${itemName}`],
-      },
-    ];
-  }, [tables, template, codeProblem, inputStrings.join('|'), itemName, code, mapName]); // eslint-disable-line react-hooks/exhaustive-deps
+    const numinputs =
+      ingredients.reduce((n, g) => n + g.qty, 0) + inputStrings.slice(ingredients.length).reduce((n, p) => n + (Number(/qty=(\d+)/.exec(p)?.[1]) || 1), 0);
+    return planCubeItem(
+      { misc: tables.misc, cube: tables.cube },
+      { templateRow: template.row, name: itemName, code, inputs: inputStrings, numinputs, mapName, acceptModType: acceptMod },
+    );
+  }, [tables, template, codeProblem, inputStrings.join('|'), itemName, code, mapName, acceptMod]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ours = useMemo(() => (tables?.cube && tables.misc ? { recipes: studioRecipes(tables.cube), items: studioItems(tables.misc) } : { recipes: [], items: [] }), [tables]);
 
   return (
     <Modal title="Cube recipe for this map" onClose={onClose} wide>
       <p className="muted small">
-        Makes a new map item and a Horadric Cube recipe that creates it. Which map the item opens is decided by your mod&apos;s map system (for PD2, its
-        map items) using the item&apos;s code.
+        Makes a new item and a Horadric Cube recipe that creates it. The item is added at the end of Misc.txt (never in the middle, which would
+        renumber every item after it), never drops at random, and a recipe with the same ingredients as an existing one is refused.
+      </p>
+      <p className="small warn-text">
+        A new item code is not a new PD2 map: PD2&apos;s map system only knows its own map items. To open your map with a PD2 map item, give one of
+        PD2&apos;s map levels your map instead (Data → Add to game → replace the map of an existing preset level).
       </p>
       <div className="cr-cols">
         <section className="cr-card">
@@ -266,12 +250,25 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: Props) {
             fs={fs}
             palette={palette}
             selected={template ? `${template.table}.${template.row}` : null}
-            onPick={setTemplate}
+            onPick={(i) => {
+              setTemplate(i);
+              setAcceptMod(false);
+            }}
             groups={[
               { label: 'Map items', test: isMapItem },
               { label: 'Other items', test: (i) => !isMapItem(i) },
             ]}
           />
+          {risk && (
+            <div className="small warn-text cr-risk">
+              {risk.text}
+              {risk.kind === 'mod-type' && (
+                <label>
+                  <input type="checkbox" checked={acceptMod} onChange={(e) => setAcceptMod(e.target.checked)} /> my mod supports new items of this type
+                </label>
+              )}
+            </div>
+          )}
           <label className="cr-field">
             <span>
               Item name <HelpTip text={HELP.name} />
@@ -378,6 +375,44 @@ export function CubeRecipeDialog({ fs, mapName, onApply, onClose }: Props) {
           ))
         )}
       </div>
+      {(ours.recipes.length > 0 || ours.items.length > 0) && tables?.cube && tables.misc && (
+        <details className="cr-ours">
+          <summary className="small">
+            Made by DS1 Studio: {ours.recipes.length} recipe{ours.recipes.length === 1 ? '' : 's'}, {ours.items.length} item{ours.items.length === 1 ? '' : 's'}
+          </summary>
+          {ours.recipes.map((r) => (
+            <div key={`r${r.row}`} className="pops-row small">
+              <span>
+                Recipe “{r.description}” → <span className="mono">{r.output}</span>
+              </span>
+              <button className="btn small" disabled={busy} onClick={() => void onApply([removeRows('CubeMain.txt', tables.cube!, [r.row], () => `recipe “${r.description}”`)])}>
+                Remove recipe
+              </button>
+            </div>
+          ))}
+          {ours.items.length > 0 && (
+            <label className="small warn-text">
+              <input type="checkbox" checked={nobodyHolds} onChange={(e) => setNobodyHolds(e.target.checked)} /> no character holds these items (a character that
+              does may not load once its item&apos;s code is gone)
+            </label>
+          )}
+          {ours.items.map((it) => (
+            <div key={`i${it.row}`} className="pops-row small">
+              <span>
+                Item “{it.name}” <span className="mono">{it.code}</span>
+                {ours.recipes.some((r) => r.output === it.code) ? ' (a recipe still makes it: remove that first)' : ''}
+              </span>
+              <button
+                className="btn small"
+                disabled={busy || !nobodyHolds || ours.recipes.some((r) => r.output === it.code)}
+                onClick={() => void onApply([removeRows('Misc.txt', tables.misc!, [it.row], () => `item “${it.name}” (${it.code})`)])}
+              >
+                Remove item
+              </button>
+            </div>
+          ))}
+        </details>
+      )}
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           Cancel
