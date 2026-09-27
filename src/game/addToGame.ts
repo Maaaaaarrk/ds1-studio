@@ -56,6 +56,9 @@ export function tilePathProblem(rel: string): string | null {
     : null;
 }
 
+/** The game's towns (the only levels whose LvlPrest AutoMap is 1). */
+export const TOWNS = new Set([1, 40, 75, 103, 109]);
+
 export const levelAct = (id: number) => (id >= 109 ? 4 : id >= 103 ? 3 : id >= 75 ? 2 : id >= 40 ? 1 : 0);
 
 export interface FieldChange {
@@ -481,6 +484,16 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
         detail: 'Every preset level of the game has FillBlanks 1 (empty cells of the map are filled in).',
         columns: flags.map((c) => ({ table: 'LvlPrest', col: c })),
         fix: cellFix('LvlPrest.txt', prest, `Set ${flags.join(' and ')} to 1`, flags.map((c) => ({ row: r, col: c, value: '1' }))),
+      });
+    // AutoMap 1 reveals the whole automap when the level is built — the game does that only for its towns. For other
+    // levels it halts D2Client while entering (seen in PD2 1.13c: D2Common InitLevel → D2Client RevealAutomapRoom).
+    if (!TOWNS.has(levelId) && getCell(prest, r, 'AutoMap').trim() === '1')
+      out.push({
+        severity: 'error',
+        title: `${label}: AutoMap is 1, so the game crashes when a player enters`,
+        detail: 'AutoMap 1 reveals the whole automap as the level is built. The game does that only for its five towns; for any other level it halts while entering (D2Client, while revealing the automap). Every other preset level has AutoMap 0.',
+        columns: [{ table: 'LvlPrest', col: 'AutoMap' }],
+        fix: cellFix('LvlPrest.txt', prest, 'Set AutoMap to 0', [{ row: r, col: 'AutoMap', value: '0' }]),
       });
     const lRow = rowOfRecord(levels, levelId);
     if (lRow < 0) {

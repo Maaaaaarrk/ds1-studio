@@ -115,6 +115,18 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(getCell(parseTxtTable(missing.fix!.writes[0].bytes), P, 'LevelId')).toBe('38');
   });
 
+  it('flags AutoMap 1 on a level that is not a town (it crashes the game on entry), with a fix', async () => {
+    const { setCell } = await import('../src/formats/txtTable');
+    const rel = 'Act1/Tristram/Tri_Town4.ds1';
+    const P = dataRows(tables.prest).find((r) => getCell(tables.prest, r, 'LevelId') === '38')!;
+    const issue = verifyInGame({ ...tables, prest: setCell(tables.prest, P, 'AutoMap', '1') }, rel, await ds1Of(rel)).find((i) => /AutoMap/.test(i.title))!;
+    expect(issue.severity).toBe('error');
+    expect(getCell(parseTxtTable(issue.fix!.writes[0].bytes), P, 'AutoMap')).toBe('0');
+    // Towns keep theirs.
+    const town = dataRows(tables.prest).find((r) => getCell(tables.prest, r, 'LevelId') === '1')!;
+    expect(getCell(tables.prest, town, 'AutoMap')).toBe('1');
+  });
+
   it('a new level: appended as the next record, every field set, and it passes the checks', async () => {
     const rel = 'Expansion/Town/townWest.ds1';
     const ds1 = await ds1Of(rel);
