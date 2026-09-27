@@ -456,7 +456,7 @@ function PiecePanel({
         )}
       </div>
       <div className="ame-actions">
-        <button className="btn small" onClick={() => onSet([])} title="Write an entry with no piece: the automap draws nothing here on purpose">
+        <button className="btn small" onClick={() => onSet([])} title="Leave this tile off the automap: no AutoMap.txt row for it, as the game does for tiles it does not draw">
           Hide on automap
         </button>
         <button className="btn small" onClick={onSuggest} title="The piece this level/act normally uses for this kind of tile">

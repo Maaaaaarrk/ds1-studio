@@ -521,7 +521,8 @@ export function effectiveCels(t: AutomapTable, level: string, edits: Map<string,
  * Writes pending edits into AutoMap.txt: per tile code and style, consecutive sequences with the same pieces become
  * one row, placed in front of the level's other rows so the game's first-match lookup uses them. Rows this editor
  * wrote before for the same sequences are replaced rather than piled up; everything else is left alone. A tile
- * with no pieces gets a row whose cels are all -1: deliberately not on the automap.
+ * with no pieces ("hidden") gets no row: that is how the game leaves tiles off the automap (neither the base game's
+ * AutoMap.txt nor PD2's has a row without a piece), and its earlier DS1 Studio rows are removed.
  */
 export function applyAutomapEdits(doc: TxtTableDoc, level: string, edits: AutomapEdit[]): { doc: TxtTableDoc; rows: number } {
   const cols = celColumns(doc);
@@ -539,6 +540,10 @@ export function applyAutomapEdits(doc: TxtTableDoc, level: string, edits: Automa
     const sorted = [...new Map(list.map((e) => [e.sub, e])).values()].sort((a, b) => a.sub - b.sub);
     covered.set(k, new Set(sorted.map((e) => e.sub)));
     for (let i = 0; i < sorted.length; ) {
+      if (!sorted[i].cels.length) {
+        i++; // hidden: no row
+        continue;
+      }
       let j = i;
       const sig = sorted[i].cels.join(',');
       while (j + 1 < sorted.length && sorted[j + 1].sub === sorted[j].sub + 1 && sorted[j + 1].cels.join(',') === sig) j++;
@@ -553,7 +558,6 @@ export function applyAutomapEdits(doc: TxtTableDoc, level: string, edits: Automa
         line[c.type] = cel !== undefined ? 'DS1 Studio' : '';
         line[c.cel] = cel !== undefined ? String(cel) : '-1';
       });
-      if (!sorted[i].cels.length) line[cols[0].type] = 'DS1 Studio (hidden)';
       lines.push(line);
       i = j + 1;
     }
