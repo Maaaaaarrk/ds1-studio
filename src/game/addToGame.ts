@@ -472,6 +472,16 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
       });
     const levelId = num(getCell(prest, r, 'LevelId'));
     if (!levelId) continue;
+    // Every whole-level preset of the game has FillBlanks 1 (fill empty cells); Scan varies (the Monastery has 0).
+    const flags = (['FillBlanks'] as const).filter((c) => has(prest, c) && getCell(prest, r, c).trim() !== '1');
+    if (flags.length)
+      out.push({
+        severity: 'warning',
+        title: `${label}: ${flags.map((c) => `${c} is ${getCell(prest, r, c).trim() || 'empty'}`).join(', ')}`,
+        detail: 'Every preset level of the game has FillBlanks 1 (empty cells of the map are filled in).',
+        columns: flags.map((c) => ({ table: 'LvlPrest', col: c })),
+        fix: cellFix('LvlPrest.txt', prest, `Set ${flags.join(' and ')} to 1`, flags.map((c) => ({ row: r, col: c, value: '1' }))),
+      });
     const lRow = rowOfRecord(levels, levelId);
     if (lRow < 0) {
       // A level with the preset's name is probably the one meant.

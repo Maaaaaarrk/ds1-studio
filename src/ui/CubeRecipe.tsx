@@ -176,6 +176,8 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
   const [nameLevel, setNameLevel] = useState(true);
   const [palette, setPalette] = useState<Palette | null>(null);
   const [mode, setMode] = useState<'template' | 'custom'>('template');
+  /** What the item is for: a map item that opens this map, or an ordinary item (opens nothing). */
+  const [kind, setKind] = useState<'map' | 'other'>('map');
   const [template, setTemplate] = useState<Item | null>(null);
   const [itemName, setItemName] = useState(`${mapName} Map`);
   const [customCode, setCustomCode] = useState('');
@@ -265,7 +267,8 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
   const templateOpens = template ? opensOf(template) : null;
   const plan = useMemo((): TableWrite[] | string => {
     if (!tables?.misc || !tables.cube) return 'Loading the item and cube tables…';
-    if (!template) return 'Pick a template item.';
+    if (!template) return kind === 'map' ? 'Pick the map item to copy.' : 'Pick a template item.';
+    if (kind === 'map' && opensOf(template) === null) return 'Pick one of the map items: only they can open this map.';
     if (codeProblem) return codeProblem;
     const numinputs =
       ingredients.reduce((n, g) => n + g.qty, 0) + inputStrings.slice(ingredients.length).reduce((n, p) => n + (Number(/qty=(\d+)/.exec(p)?.[1]) || 1), 0);
@@ -282,7 +285,7 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
         map: mapLevel ? { levelId: mapLevel.id, levelTitle: nameLevel ? levelTitle : '' } : undefined,
       },
     );
-  }, [tables, template, codeProblem, inputStrings.join('|'), itemName, code, mapName, acceptMod, mapLevel, nameLevel, levelTitle]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tables, template, codeProblem, inputStrings.join('|'), itemName, code, mapName, acceptMod, mapLevel, nameLevel, levelTitle, kind]); // eslint-disable-line react-hooks/exhaustive-deps
   const ours = useMemo(() => (tables?.cube && tables.misc ? { recipes: studioRecipes(tables.cube), items: studioItems(tables.misc) } : { recipes: [], items: [] }), [tables]);
 
   return (
@@ -308,7 +311,36 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
       )}
       <div className="cr-cols">
         <section className="cr-card">
-          <div className="cr-card-title">1 · The map item</div>
+          <div className="cr-card-title">1 · The item</div>
+          <div className="chips">
+            <button
+              className={`chip${kind === 'map' ? ' active' : ''}`}
+              onClick={() => {
+                setKind('map');
+                if (template && opensOf(template) === null) setTemplate(null);
+              }}
+              title="A copy of one of your mod's map items that opens the map you have open"
+            >
+              Map item that opens this map
+            </button>
+            <button
+              className={`chip${kind === 'other' ? ' active' : ''}`}
+              onClick={() => {
+                setKind('other');
+                if (template && opensOf(template) !== null) setTemplate(null);
+              }}
+              title="Any other item: the cube makes it, but it doesn't open anything"
+            >
+              Other item (opens nothing)
+            </button>
+          </div>
+          {kind === 'map' && !miscItems.some((i) => opensOf(i) !== null) && tables && (
+            <p className="small warn-text">
+              Your mod has no map items (items that open a level through their len column, like PD2&apos;s maps), so there is nothing to copy that
+              could open this map.
+            </p>
+          )}
+          {kind === 'other' && <p className="small muted">The cube makes this item, but using it does not open this map (or anything else).</p>}
           <div className="chips">
             <button className={`chip${mode === 'template' ? ' active' : ''}`} onClick={() => setMode('template')}>
               From a template
@@ -321,7 +353,7 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
             Template item <HelpTip text={HELP.template} />
           </div>
           <ItemPicker
-            items={miscItems}
+            items={miscItems.filter((i) => (kind === 'map') === (opensOf(i) !== null))}
             fs={fs}
             palette={palette}
             selected={template ? `${template.table}.${template.row}` : null}
@@ -329,10 +361,6 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
               setTemplate(i);
               setAcceptMod(false);
             }}
-            groups={[
-              { label: 'Map items (open a level)', test: (i) => opensOf(i) !== null },
-              { label: 'Other items', test: (i) => opensOf(i) === null },
-            ]}
           />
           {templateOpens !== null && (
             <div className="small cr-risk ok-text">
