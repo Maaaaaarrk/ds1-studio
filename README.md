@@ -210,7 +210,7 @@ DT1s go into free slots and `Dt1Mask` is recomputed against their tables. Import
   <img alt="Help" src="docs/media/help-menu.png">
 </p>
 
-**Help** has **Check for updates**, **About** (version and build), **Report a bug** (opens a pre-filled GitHub issue
+**Help** has **Check for updates**, **About** (version and build), **Suggest a feature**, **Report a bug** (opens a pre-filled GitHub issue
 with your version, system and map), the user guide and the shortcuts.
 
 ---
@@ -316,8 +316,9 @@ picker · <kbd>[</kbd> / <kbd>]</kbd> brush size · <kbd>Alt</kbd>+click picks a
 
 ## Reporting bugs & ideas
 
-Use **Help → Report a bug** in the app (it fills in your version and system), or
-[open an issue](https://github.com/RoofooEvazan/ds1-studio/issues/new/choose). Screenshots help a lot.
+Got an idea? Click **Suggest a feature** in the top bar. Found a problem? Use **Help → Report a bug**. Both open a
+pre-filled GitHub issue with your version and system (and the map you have open). You can also
+[open an issue](https://github.com/RoofooEvazan/ds1-studio/issues/new/choose) directly. Screenshots help a lot.
 
 ## Building from source
 

@@ -93,6 +93,29 @@ export function platformName(): string {
 }
 
 /** A pre-filled "new issue" link: the reporter adds what happened and submits; GitHub notifies the maintainer. */
+/** A pre-filled GitHub "feature request" (same layout as .github/ISSUE_TEMPLATE/feature_request.md). */
+export function featureRequestUrl(context: { map?: string | null }): string {
+  const body = [
+    '### What would you like to do?',
+    '',
+    '<!-- The task or problem, in your own words. Screenshots or example maps help: paste them straight into this box. -->',
+    '',
+    '### How would it work?',
+    '',
+    '<!-- Where would you find it, what would you click, what should happen? Rough ideas are fine. -->',
+    '',
+    '### Anything else?',
+    '',
+    '',
+    '### Environment',
+    `- DS1 Studio ${APP_VERSION} (${GIT_COMMIT}, built ${BUILD_DATE})`,
+    `- ${isTauri ? 'Desktop app' : 'Browser'} on ${platformName()}`,
+    context.map ? `- Map open: \`${context.map}\`` : '- Map open: (none)',
+  ].join('\n');
+  const q = new URLSearchParams({ title: '[Idea] ', body, labels: 'enhancement' });
+  return `${REPO_URL}/issues/new?${q}`;
+}
+
 export function bugReportUrl(context: { map?: string | null; title?: string }): string {
   const body = [
     '### What happened?',

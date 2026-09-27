@@ -43,6 +43,7 @@ import {
   SquareDashed,
   PaintBucket,
   MapPinned,
+  Lightbulb,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
@@ -82,7 +83,7 @@ import { ObjectGallery } from './ObjectGallery';
 import type { SpriteAnimation } from '../game/spriteAnim';
 import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
-import { bugReportUrl, checkForUpdate, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
+import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
@@ -1791,6 +1792,7 @@ export function App() {
         {
           label: 'Support',
           items: [
+            { label: 'Suggest a feature', icon: <Lightbulb />, onClick: () => void openExternal(featureRequestUrl({ map: map?.path })), title: 'Open a pre-filled feature request on GitHub' },
             { label: 'Report a bug', icon: <Bug />, onClick: () => void openExternal(bugReportUrl({ map: map?.path })), title: 'Open a pre-filled bug report on GitHub' },
             { label: 'User guide', icon: <BookOpen />, onClick: () => void openExternal(`${REPO_URL}#readme`), title: 'Features, shortcuts and how-tos' },
             { label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' },
@@ -1810,17 +1812,22 @@ export function App() {
           </>
         }
         right={
-          map ? (
-            <>
-              <span className="topbar-title">
-                {title}
-                {doc?.dirty && <span className="dirty-dot" title="Unsaved changes" />}
-              </span>
-              <span className="topbar-path">{map.path}</span>
-            </>
-          ) : (
-            <span className="muted">No map open</span>
-          )
+          <>
+            <button className="topbar-idea" onClick={() => void openExternal(featureRequestUrl({ map: map?.path }))} title="Suggest a feature: opens a pre-filled idea on GitHub">
+              <Lightbulb size={14} /> Suggest a feature
+            </button>
+            {map ? (
+              <>
+                <span className="topbar-title">
+                  {title}
+                  {doc?.dirty && <span className="dirty-dot" title="Unsaved changes" />}
+                </span>
+                <span className="topbar-path">{map.path}</span>
+              </>
+            ) : (
+              <span className="muted">No map open</span>
+            )}
+          </>
         }
       />
 

@@ -657,3 +657,5 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .cell-flags-bar > span { flex: 1 1 100%; }
 .mcp-setup { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; border-top: 1px solid var(--border); padding-top: 8px; margin: 6px 0; }
 .mcp-code { margin: 0; width: 100%; box-sizing: border-box; padding: 6px 8px; background: #000; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-all; user-select: text; }
+.topbar-idea { flex-shrink: 0; align-self: center; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--accent); background: rgba(232, 184, 76, 0.1); color: var(--accent); font-size: 12px; cursor: pointer; }
+.topbar-idea:hover { background: rgba(232, 184, 76, 0.22); }
