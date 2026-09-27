@@ -13,6 +13,7 @@ import {
   missingTablesWarning,
   planImport,
   readMapPackage,
+  recipeSuggestion,
   tableCoverage,
   type PackageManifest,
 } from '../src/game/mapPackage';
@@ -69,9 +70,28 @@ describe('AutoMap rows and the tables a map needs (synthetic)', () => {
     const row = (table: string) => ({ table, key: 'Name', columns: ['Name'], row: ['x'] });
     const cov = tableCoverage([row('LvlPrest'), row('Levels'), row('Levels'), row('LvlTypes'), row('data/global/excel/AutoMap.txt')]);
     expect(cov.map((c) => [c.table, c.rows])).toEqual([['LvlPrest', 1], ['Levels', 2], ['LvlTypes', 1], ['CubeMain', 0], ['AutoMap', 1]]);
-    expect(missingTablesWarning(cov)).toMatch(/^No CubeMain rows came with this map, so your own table is used as it is\..*can crash/);
-    expect(missingTablesWarning(tableCoverage([]))).toMatch(/^No LvlPrest, Levels, LvlTypes, CubeMain, AutoMap rows came/);
-    expect(missingTablesWarning(tableCoverage(['LvlPrest', 'Levels', 'LvlTypes', 'CubeMain', 'AutoMap'].map(row)))).toBe('');
+    // No cube recipe isn't a risk: the import makes a new one for the importer's tables.
+    expect(missingTablesWarning(cov)).toBe('');
+    const noAutomap = tableCoverage(['LvlPrest', 'Levels', 'LvlTypes'].map(row));
+    expect(missingTablesWarning(noAutomap)).toMatch(/^No AutoMap rows came with this map, so your own table is used as it is\..*can crash/);
+    expect(missingTablesWarning(tableCoverage([]))).toMatch(/^No LvlPrest, Levels, LvlTypes, AutoMap rows came/);
+  });
+
+  it("takes the package's cube recipe as a suggestion (its ingredients and item name) instead of merging it", async () => {
+    const cube = { table: 'CubeMain', key: 'description', columns: ['description', 'input 1', 'input 2', 'input 3', 'output'], row: ['guild3 Map [map:guild3] (DS1 Studio)', 'tbk', '"gem4,qty=3"', '', '"gu01,nor"'] };
+    const misc = { table: 'Misc', key: 'code', columns: ['name', 'code', 'len'], row: ['guild3 Map', 'gu01', '212'] };
+    expect(recipeSuggestion([cube, misc])).toEqual({ inputs: ['tbk', 'gem4,qty=3'], itemName: 'guild3 Map' });
+    expect(recipeSuggestion([misc])).toBeNull();
+    // Importing leaves CubeMain.txt and Misc.txt alone (their codes and level numbers are the maker's).
+    const tables = new Map([
+      ['data/global/excel/CubeMain.txt', async () => enc('description\tinput 1\toutput\r\nold\tx\ty\r\n')],
+      ['data/global/excel/Misc.txt', async () => enc('name\tcode\tlen\r\nsomething\tgu01\t7\r\n')],
+    ]);
+    const pkg = { manifest: { format: 'ds1studio-package', version: 1, created: '', map: 'data/global/tiles/x.ds1', files: [], txtRows: [cube, misc] } as unknown as PackageManifest, files: [] };
+    const plan = await planImport(pkg, new LayeredFs([new LooseSource('mod', tables)]));
+    expect(plan.txtWrites).toEqual([]);
+    expect(plan.txtMerges).toEqual([]);
+    expect(plan.recipe).toEqual({ inputs: ['tbk', 'gem4,qty=3'], itemName: 'guild3 Map' });
   });
 });
 

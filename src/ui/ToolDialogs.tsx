@@ -119,7 +119,7 @@ export function TableCoverageList({ coverage }: { coverage: TableCoverage[] }) {
 export function ExportPackageDialog({ mapPath, building, result, coverage, onBuild, onDs1Only, onClose }: ExportProps) {
   const [notes, setNotes] = useState('');
   const [base, setBase] = useState(true);
-  const missing = coverage?.filter((c) => !c.rows).map((c) => c.table) ?? [];
+  const missing = coverage?.filter((c) => !c.rows && c.table !== 'CubeMain').map((c) => c.table) ?? [];
   return (
     <Modal title="Export map" onClose={onClose}>
       <p className="muted small">
@@ -173,12 +173,16 @@ interface ImportProps {
   pkg: MapPackage;
   plan: ImportPlan;
   canWrite: boolean;
-  onImport: () => Promise<void>;
+  /** `makeRecipe`: open the map and the Cube recipe tool afterwards, to make a recipe and map item for it. */
+  onImport: (makeRecipe: boolean) => Promise<void>;
   onClose: () => void;
 }
 
 export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: ImportProps) {
   const [busy, setBusy] = useState(false);
+  // A recipe needs the map to be a level: its LvlPrest row (else Add to game first).
+  const isLevel = plan.coverage.some((c) => c.table === 'LvlPrest' && c.rows > 0);
+  const [makeRecipe, setMakeRecipe] = useState(true);
   const count = (a: string) => plan.writes.filter((w) => w.action === a).length;
   useEffect(() => setBusy(false), [pkg]);
   return (
@@ -194,6 +198,16 @@ export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: 
       <div className="field-label">The map's rows from the game's tables</div>
       <TableCoverageList coverage={plan.coverage} />
       {missingTablesWarning(plan.coverage) && <p className="small warn-text">{missingTablesWarning(plan.coverage)}</p>}
+      <div className="field-label">Getting there in game</div>
+      <p className="muted small">
+        The maker&apos;s cube recipe and map item aren&apos;t copied: their item code, the level number it opens and its name belong to the maker&apos;s tables.
+        Instead DS1 Studio makes a new recipe and map item for your tables (a free code, this map&apos;s level here, its name){plan.recipe ? ', starting from the maker\'s ingredients' : ''}.
+      </p>
+      <label className="mini-check">
+        <input type="checkbox" checked={makeRecipe && isLevel} disabled={!isLevel} onChange={(e) => setMakeRecipe(e.target.checked)} /> make a cube recipe
+        and map item for it next {plan.recipe?.inputs.length ? <span className="muted">({plan.recipe.inputs.join(' + ')})</span> : null}
+      </label>
+      {!isLevel && <p className="small muted">The package doesn&apos;t make the map a level: use Map → Add to game after importing, then Map → Cube recipe.</p>}
       <div className="change-list">
         {plan.writes
           .filter((w) => w.action !== 'identical')
@@ -220,7 +234,7 @@ export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: 
           title={canWrite ? '' : 'No writable mod folder configured'}
           onClick={async () => {
             setBusy(true);
-            await onImport();
+            await onImport(makeRecipe && isLevel);
             setBusy(false);
           }}
         >

@@ -58,7 +58,7 @@ import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
-import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type TableCoverage } from '../game/mapPackage';
+import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
@@ -249,6 +249,8 @@ export function App() {
   /** The open map's rows in the tables a package carries (null while reading). */
   const [exportCoverage, setExportCoverage] = useState<TableCoverage[] | null>(null);
   const [importState, setImportState] = useState<{ pkg: MapPackage; plan: ImportPlan } | null>(null);
+  /** The imported package's recipe, to start the Cube recipe tool from after an import. */
+  const [recipeSuggestion, setRecipeSuggestion] = useState<RecipeSuggestion | null>(null);
   const [sprites, setSprites] = useState<Map<string, Sprite>>(() => new Map());
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
   const [desktopCfg, setDesktopCfg] = useState<DesktopConfig>({ modDirs: [], modMpqs: false });
@@ -367,12 +369,13 @@ export function App() {
   }, [doc]);
 
   const open = useCallback(
-    /** `confirmed`: the caller already asked about unsaved changes. */
-    async (path: string, confirmed = false) => {
-      if (!gd || (!confirmed && !confirmDiscard())) return;
+    /** `confirmed`: the caller already asked about unsaved changes. `using`: tables just reloaded (see reloadTables). */
+    async (path: string, confirmed = false, using?: GameData) => {
+      const g = using ?? gd;
+      if (!g || (!confirmed && !confirmDiscard())) return;
       setLoadingPath(path);
       try {
-        const m = await openMap(gd, path);
+        const m = await openMap(g, path);
         setMap(m);
         setDoc(new MapDocument(path, m.ds1));
         setRecentMapList(addRecentMap(path));
@@ -1029,12 +1032,14 @@ export function App() {
   );
 
   /** After table edits: reload the game tables and re-resolve the open map (keeping its edits). */
-  const reloadTables = useCallback(async () => {
+  /** Reloads the game's tables after a write; returns them for a map opened right after (the state updates later). */
+  const reloadTables = useCallback(async (): Promise<GameData | undefined> => {
     if (!gd || data.status !== 'ready') return;
     const next = await GameData.load(gd.fs);
     const files = gd.fs.list((p) => p.endsWith('.ds1') && p.startsWith('data/global/tiles/'));
     setData({ ...data, gd: next, files });
     if (map) setMap(await openMap(next, map.path, undefined, map.ds1));
+    return next;
   }, [gd, data, map]);
 
   const applyTableWrites = useCallback(
@@ -1403,8 +1408,8 @@ export function App() {
         }
         await writeFiles([...c.dt1s.map((x) => ({ path: x.path, bytes: x.bytes })), { path: c.path, bytes }]);
         setImporting(null);
-        await reloadTables();
-        await open(normalizePath(c.path), true);
+        const tables = await reloadTables();
+        await open(normalizePath(c.path), true, tables);
         if (c.register) {
           // Start "Add to game" from a level that uses the same tile set (a new level cloned from it).
           const m = await openMap(gd, normalizePath(c.path));
@@ -1674,19 +1679,29 @@ export function App() {
     setDialog('export');
     void collectMapTxtRows(gd.fs, doc.path).then((rows) => setExportCoverage(tableCoverage(rows)));
   }, [gd, doc]);
-  const finishImport = useCallback(async () => {
-    if (!importState) return;
-    try {
-      const files = importState.plan.writes.filter((w) => w.action !== 'identical');
-      await writeFiles([...files, ...importState.plan.txtWrites]);
-      await reloadTables();
-      setDialog(null);
-      notify(`Imported ${files.length} files${importState.plan.txtWrites.length ? ` and ${importState.plan.txtWrites.length} tables` : ''}`);
-      setImportState(null);
-    } catch (e) {
-      notify((e as Error).message, true);
-    }
-  }, [importState, writeFiles, reloadTables, notify]);
+  const finishImport = useCallback(
+    async (makeRecipe: boolean) => {
+      if (!importState) return;
+      try {
+        const files = importState.plan.writes.filter((w) => w.action !== 'identical');
+        await writeFiles([...files, ...importState.plan.txtWrites]);
+        const tables = await reloadTables();
+        setDialog(null);
+        notify(`Imported ${files.length} files${importState.plan.txtWrites.length ? ` and ${importState.plan.txtWrites.length} tables` : ''}`);
+        const { pkg, plan } = importState;
+        setImportState(null);
+        if (makeRecipe) {
+          // Open the imported map, then the Cube recipe tool for it: a recipe and map item made for these tables.
+          await open(normalizePath(pkg.manifest.map), false, tables);
+          setRecipeSuggestion(plan.recipe ?? { inputs: [], itemName: null });
+          setDialog('cube');
+        }
+      } catch (e) {
+        notify((e as Error).message, true);
+      }
+    },
+    [importState, writeFiles, reloadTables, notify, open],
+  );
 
   const undo = useCallback(() => {
     if (doc?.undo()) bump();
@@ -2714,9 +2729,13 @@ export function App() {
           fs={data.gd.fs}
           mapName={doc.path.split('/').pop()!.replace(/\.ds1$/i, '')}
           mapPath={doc.path}
+          suggested={recipeSuggestion}
           onApply={applyTableWrites}
           onAddToGame={() => setDialog('register')}
-          onClose={() => setDialog(null)}
+          onClose={() => {
+            setRecipeSuggestion(null);
+            setDialog(null);
+          }}
         />
       )}
       {dialog === 'check' && (

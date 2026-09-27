@@ -52,7 +52,7 @@ export const MAP_TABLES = [
   { table: 'LvlPrest', role: 'makes the game load this map for its level (the file, its Dt1Mask, roof hiding)' },
   { table: 'Levels', role: 'the level itself: size, act, palette, world position, loading-screen image, light, monsters' },
   { table: 'LvlTypes', role: 'the tile libraries (DT1s) the level loads' },
-  { table: 'CubeMain', role: 'the cube recipe that opens a portal to it (with its item from Misc.txt)' },
+  { table: 'CubeMain', role: 'the cube recipe that opens a portal to it: on import a new one is made (the package\'s is suggested)' },
   { table: 'AutoMap', role: "the automap pieces for the level type's tiles" },
 ] as const;
 
@@ -68,9 +68,12 @@ export function tableCoverage(rows: TxtRowEntry[]): TableCoverage[] {
   return MAP_TABLES.map((t) => ({ table: t.table, role: t.role, rows: rows.filter((r) => name(r.table) === t.table.toLowerCase()).length }));
 }
 
-/** The warning for tables a map arrives without (empty when it has rows from all of them). */
+/**
+ * The warning for tables a map arrives without (empty when it has rows from all of them). CubeMain isn't one: the
+ * import makes a new recipe for the importer's own tables instead of merging the package's (see ImportPlan.recipe).
+ */
 export function missingTablesWarning(coverage: TableCoverage[]): string {
-  const missing = coverage.filter((c) => !c.rows).map((c) => c.table);
+  const missing = coverage.filter((c) => !c.rows && c.table !== 'CubeMain').map((c) => c.table);
   if (!missing.length) return '';
   const one = missing.length === 1;
   return `No ${missing.join(', ')} rows came with this map, so your own ${one ? 'table is' : 'tables are'} used as ${one ? 'it is' : 'they are'}. If ${one ? "it doesn't" : "they don't"} match this map and its tile libraries (the level's size and world position, the level type's DT1s and Dt1Mask, the loading-screen image, the automap), the game can crash when the map loads or while walking in it. After importing, use Map → Add to game and run the Compatibility check.`;
@@ -332,6 +335,30 @@ export interface ImportPlan {
   txtWrites: { path: string; bytes: Uint8Array }[];
   /** Which of the map's tables came with the package (see MAP_TABLES). */
   coverage: TableCoverage[];
+  /**
+   * The package's cube recipe and map item, as a suggestion. They aren't merged: the item's code, the level it opens
+   * and its name strings belong to the maker's tables, so the import makes a new recipe with the Cube recipe tool.
+   */
+  recipe: RecipeSuggestion | null;
+}
+
+export interface RecipeSuggestion {
+  /** The recipe's inputs as CubeMain.txt writes them (quotes removed), e.g. `tbk`, `gem4,qty=3`. */
+  inputs: string[];
+  /** The map item's name in the package's Misc.txt. */
+  itemName: string | null;
+}
+
+/** The package's cube recipe and item (see ImportPlan.recipe). */
+export function recipeSuggestion(rows: TxtRowEntry[]): RecipeSuggestion | null {
+  const name = (t: string) => t.replace(/\.txt$/i, '').split('/').pop()!.toLowerCase();
+  const cube = rows.find((r) => name(r.table) === 'cubemain');
+  if (!cube) return null;
+  const cell = (r: TxtRowEntry, col: string) => (r.row[r.columns.indexOf(col)] ?? '').replace(/"/g, '').trim();
+  const inputs = [1, 2, 3, 4, 5, 6, 7].map((i) => cell(cube, `input ${i}`)).filter(Boolean);
+  const code = cell(cube, 'output').split(',')[0];
+  const item = rows.find((r) => name(r.table) === 'misc' && cell(r, 'code') === code);
+  return { inputs, itemName: item ? cell(item, 'name') || null : null };
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -377,7 +404,8 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
     }
   }
   for (const r0 of pkg.manifest.txtRows) {
-    if (LEVEL_TABLES.includes(tableName(r0.table))) continue;
+    // Level tables were merged above; the recipe and its item are made anew for this install (ImportPlan.recipe).
+    if (LEVEL_TABLES.includes(tableName(r0.table)) || ['cubemain', 'misc'].includes(tableName(r0.table))) continue;
     const r = tableName(r0.table) === 'automap' ? remapAutomapLevel(r0, typeIds) : remapLevelIds(r0, levelIds);
     const path = txtTablePath(r.table);
     const keyValue = r.row[r.columns.indexOf(r.key)] ?? '';
@@ -397,7 +425,7 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
     t.bytes = merged.bytes;
   }
   const txtWrites = [...tables.values()].filter((t) => !sameBytes(t.original, t.bytes)).map((t) => ({ path: t.path, bytes: t.bytes }));
-  return { writes, txtMerges, txtWrites, coverage: tableCoverage(pkg.manifest.txtRows) };
+  return { writes, txtMerges, txtWrites, coverage: tableCoverage(pkg.manifest.txtRows), recipe: recipeSuggestion(pkg.manifest.txtRows) };
 }
 
 export type TxtMergeAction = 'appended' | 'replaced' | 'unchanged';

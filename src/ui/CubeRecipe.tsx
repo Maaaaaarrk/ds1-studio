@@ -47,6 +47,8 @@ interface Props {
   mapName: string;
   /** The open map (data/global/tiles/...), to find the level a map item should open. */
   mapPath: string;
+  /** A recipe to start from (an imported package's): its ingredients and item name. */
+  suggested?: { inputs: string[]; itemName: string | null } | null;
   onApply: (writes: TableWrite[]) => Promise<void>;
   /** Opens Add to game (for a map that isn't a level yet). */
   onAddToGame: () => void;
@@ -162,7 +164,7 @@ function ItemPicker({ items, fs, palette, selected, onPick, groups, height = 220
  * makes it — without needing to know item codes or CubeMain syntax. Which level the item opens is up to the mod's
  * code (e.g. PD2's map system).
  */
-export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, onClose }: Props) {
+export function CubeRecipeDialog({ fs, mapName, mapPath, suggested, onApply, onAddToGame, onClose }: Props) {
   const [tables, setTables] = useState<{
     misc: TxtTableDoc | null;
     weapons: TxtTableDoc | null;
@@ -179,7 +181,7 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
   /** What the item is for: a map item that opens this map, or an ordinary item (opens nothing). */
   const [kind, setKind] = useState<'map' | 'other'>('map');
   const [template, setTemplate] = useState<Item | null>(null);
-  const [itemName, setItemName] = useState(`${mapName} Map`);
+  const [itemName, setItemName] = useState(suggested?.itemName ?? `${mapName} Map`);
   const [customCode, setCustomCode] = useState('');
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [adding, setAdding] = useState(false);
@@ -225,6 +227,19 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, onApply, onAddToGame, o
       setTemplate(maps.find((i) => i.type === common) ?? null);
     }
     const byCode = (c: string) => allItems.find((i) => i.code === c);
+    if (suggested?.inputs.length && !ingredients.length && !advanced) {
+      // An imported package's recipe: known items as ingredients, anything else ("gem4,qty=3", "rin,mag") as typed.
+      const known: Ingredient[] = [];
+      const other: string[] = [];
+      for (const input of suggested.inputs) {
+        const m = /^([a-z0-9]{3,4})(?:,qty=(\d+))?$/i.exec(input.trim());
+        if (m && byCode(m[1])) known.push({ code: m[1], qty: Number(m[2]) || 1 });
+        else other.push(input.trim());
+      }
+      setIngredients(known);
+      if (other.length) setAdvanced(other.join(', '));
+      return;
+    }
     const defaults = ['tbk', 'isc'].filter((c) => byCode(c)).map((code) => ({ code, qty: 1 }));
     if (!ingredients.length) setIngredients(defaults);
   }, [miscItems]); // eslint-disable-line react-hooks/exhaustive-deps
