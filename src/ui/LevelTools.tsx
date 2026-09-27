@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { appendRow, cloneRow, colIndex, getCell, parseTxtTable, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
+import { getCell, parseTxtTable, type TxtTableDoc } from '../formats/txtTable';
+import { dataRows, planAddToGame, typeAct } from '../game/addToGame';
 import type { LayeredFs } from '../vfs/vfs';
 import { normalizePath } from '../vfs/vfs';
 import { Modal } from './Dialogs';
@@ -13,8 +14,6 @@ async function load(fs: LayeredFs, name: string): Promise<TxtTableDoc | null> {
 }
 
 const num = (s: string) => Number(s) || 0;
-const has = (doc: TxtTableDoc, col: string) => colIndex(doc, col) >= 0;
-const setIf = (doc: TxtTableDoc, row: number, col: string, value: string) => (has(doc, col) ? setCell(doc, row, col, value) : doc);
 
 export interface TableWrite {
   table: string;
@@ -41,12 +40,16 @@ interface RegisterProps {
   initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string };
 }
 
-/** Creates the LvlPrest (and optionally Levels/LvlTypes) rows that make the game load this map. */
+/**
+ * Add map to game: the Levels / LvlPrest / LvlTypes rows that make the game load this map (see game/addToGame.ts for
+ * the rules). Shows every field it sets, old → new and why, before anything is written.
+ */
 export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onClose, initial }: RegisterProps) {
   const [tables, setTables] = useState<{ prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc } | null>(null);
-  const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'existing');
+  const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'new');
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
   const [name, setName] = useState(() => initial?.name ?? mapPath.split('/').pop()!.replace(/\.ds1$/i, ''));
+  const [pal, setPal] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   // The file's own spelling when known (an imported map), so the table names it exactly as it is on disk.
   const exact = initial?.path && normalizePath(initial.path) === normalizePath(mapPath) ? initial.path : mapPath;
@@ -61,162 +64,122 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
   const levelRows = useMemo(
     () =>
       tables
-        ? tables.levels.rows
-            .map((r, i) => ({ i, id: num(r[colIndex(tables.levels, 'Id')] ?? ''), name: getCell(tables.levels, i, 'LevelName') || getCell(tables.levels, i, 'Name') }))
-            .filter((l) => l.id > 0)
+        ? dataRows(tables.levels)
+            .map((r) => ({
+              id: num(getCell(tables.levels, r, 'Id')),
+              name: getCell(tables.levels, r, 'Name') || getCell(tables.levels, r, 'LevelName'),
+              drlg: num(getCell(tables.levels, r, 'DrlgType')),
+              type: num(getCell(tables.levels, r, 'LevelType')),
+            }))
+            .filter((l) => l.id > 0 && l.drlg > 0 && (mode === 'new' || l.drlg === 2))
         : [],
-    [tables],
+    [tables, mode],
   );
+  const chosen = levelRows.find((l) => l.id === levelId);
+  const autoPal = tables && chosen ? (typeAct(tables.types, chosen.type) ?? 4) : 4;
 
-  const plan = useMemo((): TableWrite[] | string => {
+  const plan = useMemo(() => {
     if (!tables) return 'Loading tables…';
-    let { prest, levels, types } = tables;
-    const writes: TableWrite[] = [];
-    const summary: Record<string, string[]> = { 'LvlPrest.txt': [], 'Levels.txt': [], 'LvlTypes.txt': [] };
+    if (!chosen) return mode === 'new' ? 'Pick the level to copy settings (monsters, lighting, music, tiles) from.' : 'Pick the preset level that should use this map.';
+    return planAddToGame(tables, { mode, levelId, name, mapRel: rel, width, height, usedDt1s, popCount, palAct: mode === 'new' ? (pal ?? autoPal) : undefined });
+  }, [tables, chosen, mode, levelId, name, rel, width, height, usedDt1s, popCount, pal, autoPal]);
 
-    const template = levelRows.find((l) => l.id === levelId);
-    if (!template) return 'Pick a level.';
-    let targetLevel = template.id;
-    let typeId = num(getCell(levels, template.i, 'LevelType'));
-
-    if (mode === 'new') {
-      const newId = Math.max(...levelRows.map((l) => l.id)) + 1;
-      levels = cloneRow(levels, template.i);
-      const row = template.i + 1;
-      levels = setCell(levels, row, 'Id', String(newId));
-      levels = setCell(levels, row, 'Name', name);
-      levels = setIf(levels, row, 'LevelName', name);
-      levels = setIf(levels, row, 'LevelWarp', name);
-      levels = setIf(levels, row, 'EntryFile', '');
-      levels = setIf(levels, row, 'DrlgType', '2'); // preset level
-      for (let i = 0; i < 8; i++) {
-        levels = setIf(levels, row, `Vis${i}`, '0');
-        levels = setIf(levels, row, `Warp${i}`, '-1');
-      }
-      levels = setIf(levels, row, 'Waypoint', '255');
-      for (const s of ['', '(N)', '(H)']) {
-        levels = setIf(levels, row, `SizeX${s}`, String(width));
-        levels = setIf(levels, row, `SizeY${s}`, String(height));
-      }
-      targetLevel = newId;
-      summary['Levels.txt'].push(`New level ${newId} "${name}" (cloned from ${template.id} ${template.name}; preset level, no connections yet)`);
-    }
-
-    // The level type must load every DT1 the map uses; add missing ones to free File slots.
-    const typeRow = types.rows.findIndex((r) => num(r[colIndex(types, 'Id')] ?? '') === typeId);
-    if (typeRow < 0) return `LvlTypes.txt has no type ${typeId}.`;
-    const slotPath = (i: number) => {
-      const v = getCell(types, typeRow, `File ${i}`);
-      return v && v !== '0' ? normalizePath(`data/global/tiles/${v}`) : '';
-    };
-    let mask = 0;
-    for (const dt1 of usedDt1s) {
-      let slot = [...Array(32).keys()].map((k) => k + 1).find((i) => slotPath(i) === dt1);
-      if (!slot) {
-        slot = [...Array(32).keys()].map((k) => k + 1).find((i) => !slotPath(i));
-        if (!slot) return `LvlTypes "${getCell(types, typeRow, 'Name')}" has no free File slot for ${dt1}.`;
-        const value = dt1.replace(/^data\/global\/tiles\//, '');
-        types = setCell(types, typeRow, `File ${slot}`, value);
-        summary['LvlTypes.txt'].push(`Type ${typeId} "${getCell(types, typeRow, 'Name')}": File ${slot} = ${value}`);
-      }
-      mask |= 1 << (slot - 1);
-    }
-
-    // LvlPrest row: clone one that belongs to a real level, then point it at this map.
-    const already = prest.rows.findIndex((r) => [1, 2, 3, 4, 5, 6].some((i) => normalizePath(r[colIndex(prest, `File${i}`)] ?? '') === normalizePath(rel)));
-    const def = Math.max(...prest.rows.map((r) => num(r[colIndex(prest, 'Def')] ?? ''))) + 1;
-    const values: Record<string, string> = {
-      Name: name,
-      Def: String(def),
-      LevelId: String(targetLevel),
-      Populate: '1',
-      Logicals: '1',
-      Animate: '1',
-      AutoMap: '1',
-      Scan: '1',
-      Files: '1',
-      File1: rel,
-      Dt1Mask: String(mask >>> 0),
-      // The game's own houses use a trigger 4 sub-tiles smaller than the marked area (PopPad -4).
-      ...(popCount ? { Pops: String(popCount), PopPad: '-4' } : {}),
-    };
-    if (already >= 0) {
-      prest = setCell(prest, already, 'LevelId', String(targetLevel));
-      prest = setCell(prest, already, 'Dt1Mask', String(mask >>> 0));
-      summary['LvlPrest.txt'].push(`Update "${getCell(prest, already, 'Name')}": LevelId ${targetLevel}, Dt1Mask ${mask >>> 0}`);
-      if (popCount > num(getCell(prest, already, 'Pops'))) {
-        prest = setCell(prest, already, 'Pops', String(popCount));
-        summary['LvlPrest.txt'].push(`Pops ${popCount} (the map's roof hide areas)`);
-      }
-    } else {
-      for (const k of Object.keys(values)) if (!has(prest, k)) delete values[k];
-      prest = appendRow(prest, values);
-      summary['LvlPrest.txt'].push(`New preset "${name}" (Def ${def}) → level ${targetLevel}, File1 ${rel}, Dt1Mask ${mask >>> 0}${popCount ? `, Pops ${popCount} / PopPad -4 (roof hide areas)` : ''}`);
-    }
-
-    const push = (table: string, doc: TxtTableDoc, changed: boolean) => {
-      if (changed) writes.push({ table, path: `${EXCEL}${table}`, bytes: serializeTxtTable(doc), summary: summary[table] });
-    };
-    push('LvlPrest.txt', prest, true);
-    push('Levels.txt', levels, mode === 'new');
-    push('LvlTypes.txt', types, summary['LvlTypes.txt'].length > 0);
-    return writes;
-  }, [tables, mode, levelId, name, levelRows, usedDt1s, rel, width, height, popCount]);
-
+  const byTable =
+    typeof plan === 'string'
+      ? []
+      : ['Levels.txt', 'LvlPrest.txt', 'LvlTypes.txt'].map((t) => ({ t, rows: plan.changes.filter((c) => c.table === t) })).filter((g) => g.rows.length);
   return (
-    <Modal title="Add map to game" onClose={onClose}>
+    <Modal title="Add map to game" onClose={onClose} wide>
       {initial?.note && <p className="small accent-text">{initial.note}</p>}
       <p className="muted small">
-        Makes the game load <span className="mono">{rel}</span>: a LvlPrest row (File1 <ColHelp table="LvlPrest" col="File1" />) pointing at it, with a
-        Dt1Mask <ColHelp table="LvlPrest" col="Dt1Mask" /> covering the tile libraries it uses; missing libraries go into free LvlTypes slots{' '}
-        <ColHelp table="LvlTypes" col="File 1" />.
+        Makes the game load <span className="mono">{rel}</span>: a level for it in Levels.txt, the LvlPrest row <ColHelp table="LvlPrest" col="File1" /> that
+        builds the level from this map, and the tile libraries it uses in its level type&apos;s LvlTypes slots <ColHelp table="LvlTypes" col="File 1" /> with the
+        matching Dt1Mask <ColHelp table="LvlPrest" col="Dt1Mask" />. Every field is listed below before anything is written.
       </p>
       <div className="form-row">
         <span>Level</span>
         <div className="inline">
           <label className="mini-check">
-            <input type="radio" checked={mode === 'existing'} onChange={() => setMode('existing')} /> use an existing level
+            <input type="radio" checked={mode === 'new'} onChange={() => setMode('new')} /> a new level, with settings copied from
           </label>
           <label className="mini-check">
-            <input type="radio" checked={mode === 'new'} onChange={() => setMode('new')} /> new level, cloned from
+            <input type="radio" checked={mode === 'existing'} onChange={() => setMode('existing')} /> replace the map of an existing preset level
           </label>
         </div>
       </div>
       <label className="form-row">
         <span>
-          {mode === 'new' ? 'Template' : 'Level'} <ColHelp table="LvlPrest" col="LevelId" />
+          {mode === 'new' ? 'Copy from' : 'Level'} <ColHelp table="LvlPrest" col="LevelId" />
         </span>
         <select value={levelId} onChange={(e) => setLevelId(Number(e.target.value))}>
           <option value={0}>Choose…</option>
           {levelRows.map((l) => (
             <option key={l.id} value={l.id}>
               {l.id} · {l.name}
+              {l.drlg === 2 ? '' : l.drlg === 1 ? ' (maze)' : ' (outdoors)'}
             </option>
           ))}
         </select>
       </label>
-      <label className="form-row">
-        <span>Name</span>
-        <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
-      </label>
-      <div className="change-list">
-        {typeof plan === 'string' ? (
-          <p className="muted small">{plan}</p>
-        ) : (
-          plan.map((w) => (
-            <div key={w.table}>
-              <div className="field-label">{w.table}</div>
-              {w.summary.map((s) => (
-                <div key={s} className="small">
-                  • {s}
-                </div>
+      {mode === 'new' && (
+        <>
+          <label className="form-row">
+            <span>Name</span>
+            <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} maxLength={60} />
+          </label>
+          <label className="form-row">
+            <span>
+              Colours <ColHelp table="Levels" col="Pal" />
+            </span>
+            <select value={pal ?? autoPal} onChange={(e) => setPal(Number(e.target.value))}>
+              {[0, 1, 2, 3, 4].map((a) => (
+                <option key={a} value={a}>
+                  Act {a + 1} palette{a === autoPal ? ' (the act the tiles are from)' : ''}
+                </option>
               ))}
-            </div>
-          ))
-        )}
-      </div>
+            </select>
+          </label>
+          <p className="muted small">
+            New levels are Act 5 levels in the game (it goes by the level number), so they use Act 5&apos;s objects, music and town. The palette follows the
+            act the tiles were drawn for, as the game&apos;s own Act 5 levels that reuse other acts&apos; tiles do.
+          </p>
+        </>
+      )}
+      {typeof plan === 'string' ? (
+        <p className={`small ${tables && chosen ? 'error-text' : 'muted'}`}>{plan}</p>
+      ) : (
+        <>
+          {plan.warnings.map((w) => (
+            <p key={w} className="small warn-text">
+              {w}
+            </p>
+          ))}
+          <div className="change-list reg-changes">
+            {byTable.map((g) => (
+              <div key={g.t}>
+                <div className="field-label">{g.t}</div>
+                <table className="reg-table small">
+                  <tbody>
+                    {g.rows.map((c, i) => (
+                      <tr key={i}>
+                        <td className="muted">{i === 0 || g.rows[i - 1].row !== c.row ? c.row : ''}</td>
+                        <td className="mono">{c.column}</td>
+                        <td className="mono">
+                          {c.from !== '' && <span className="muted">{c.from} → </span>}
+                          {c.to === '' ? <span className="muted">(empty)</span> : c.to}
+                        </td>
+                        <td className="muted">{c.why}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <p className="muted small">
-        {mode === 'new' && 'The new level has no connections yet: link it from another level (Levels Vis/Warp + LvlWarp) or open it with a cube recipe (Data → Cube recipe). '}
+        {mode === 'new' && 'The new level has no connections yet: link it from another level (select a warp tile → Change where it leads) or open it with a cube recipe (Data → Cube recipe). '}
         If your mod ships compiled .bin tables, rebuild them after applying (start the game once with -direct -txt).
       </p>
       <div className="modal-actions">
@@ -229,7 +192,7 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
           onClick={async () => {
             if (typeof plan === 'string') return;
             setBusy(true);
-            await onApply(plan);
+            await onApply(plan.writes);
             setBusy(false);
           }}
         >

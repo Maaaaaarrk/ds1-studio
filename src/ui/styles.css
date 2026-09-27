@@ -703,6 +703,12 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .actsafe-samples .thumb-img { --thumb-h: 48px; background-color: #0b0c0f; border-radius: 4px; }
 .actsafe-callout { display: block; margin: 8px 0; line-height: 1.5; } .actsafe-callout .btn { margin-top: 6px; }
 
+/* Add to game */
+.reg-changes { max-height: 46vh; overflow: auto; }
+.reg-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.reg-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.reg-table td:first-child { white-space: nowrap; }
+
 /* Roof hiding */
 .pops-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .pops-row > span { flex: 1; }

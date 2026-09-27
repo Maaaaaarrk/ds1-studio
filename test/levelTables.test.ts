@@ -66,22 +66,22 @@ describe('mergeMapRows (import)', () => {
     { table: 'LvlPrest', key: 'Name', columns: ['Name', 'Def', 'LevelId', 'File1', 'Dt1Mask'], row: ['Imported', '10', levelId, 'Act1/Test/new.ds1', '1'] },
   ];
 
-  it('gives clashing ids new ones and computes the mask against the local slots', async () => {
+  it('appends rows as the next records (the game reads by row) and computes the mask against the local slots', async () => {
     const fs = tables();
     const { writes, levelIds } = await mergeMapRows(fs, 'data/global/tiles/Act1/Test/new.ds1', pkgRows('5', 'Imported Type'), [tile('Act1/Test/b.dt1'), tile('Act1/Test/z.dt1')]);
     const byTable = Object.fromEntries(writes.map((w) => [w.table, parseTxtTable(w.bytes)]));
     const types = byTable['LvlTypes.txt'];
     expect(getCell(types, 1, 'Name')).toBe('Imported Type');
-    expect(getCell(types, 1, 'Id')).toBe('2'); // 1 was taken
+    expect(getCell(types, 1, 'Id')).toBe('1'); // record 1, whatever the package called it
     expect(getCell(types, 1, 'File 1')).toBe('Act1/Test/z.dt1');
     expect(getCell(types, 1, 'File 2')).toBe('Act1/Test/b.dt1');
     const levels = byTable['Levels.txt'];
-    expect(getCell(levels, 1, 'Id')).toBe('6'); // 5 was taken
-    expect(getCell(levels, 1, 'LevelType')).toBe('2');
-    expect(levelIds.get('5')).toBe('6');
+    expect(getCell(levels, 1, 'Id')).toBe('1');
+    expect(getCell(levels, 1, 'LevelType')).toBe('1'); // the imported type's record;
+    expect(levelIds.get('5')).toBe('1');
     const prest = byTable['LvlPrest.txt'];
-    expect(getCell(prest, 1, 'Def')).toBe('11');
-    expect(getCell(prest, 1, 'LevelId')).toBe('6');
+    expect(getCell(prest, 1, 'Def')).toBe('1');
+    expect(getCell(prest, 1, 'LevelId')).toBe('1');
     expect(getCell(prest, 1, 'Dt1Mask')).toBe('3');
   });
 

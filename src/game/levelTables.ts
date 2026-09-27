@@ -1,5 +1,6 @@
-import { appendRow, colIndex, getCell, parseTxtTable, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
+import { colIndex, getCell, parseTxtTable, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
 import { normalizePath, type LayeredFs } from '../vfs/vfs';
+import { appendAt, dataRows, freeOffset, levelAct, rowOfRecord } from './addToGame';
 
 const EXCEL = 'data/global/excel/';
 
@@ -179,7 +180,7 @@ function appendFrom(doc: TxtTableDoc, r: PackageRow, overrides: Record<string, s
   });
   Object.assign(values, overrides);
   for (const k of Object.keys(values)) if (colIndex(doc, k) < 0) delete values[k];
-  return appendRow(doc, values);
+  return appendAt(doc, values).doc;
 }
 
 /**
@@ -204,7 +205,8 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
   const typeIn = rows.find((r) => is(r, 'lvltypes'));
   const levelIn = rows.find((r) => is(r, 'levels'));
   const prestIn = rows.find((r) => is(r, 'lvlprest'));
-  const freeId = (doc: TxtTableDoc, col: string) => Math.max(0, ...doc.rows.map((_, i) => num(getCell(doc, i, col)))) + 1;
+  // The game reads these tables by row position: a new row is always the next record, whatever id it had elsewhere.
+  const nextRecord = (doc: TxtTableDoc) => dataRows(doc).length;
   const findByName = (doc: TxtTableDoc, name: string) => doc.rows.findIndex((_, i) => getCell(doc, i, 'Name').trim().toLowerCase() === name.trim().toLowerCase());
 
   // Level type
@@ -212,9 +214,9 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
   if (typeIn) {
     typeRow = findByName(types, rowValue(typeIn, 'Name'));
     if (typeRow < 0) {
-      const id = types.rows.some((_, i) => num(getCell(types!, i, 'Id')) === num(rowValue(typeIn, 'Id'))) ? freeId(types, 'Id') : num(rowValue(typeIn, 'Id'));
+      const id = nextRecord(types);
       types = appendFrom(types, typeIn, { Id: String(id) });
-      typeRow = types.rows.length - 1;
+      typeRow = rowOfRecord(types, id);
       summary['LvlTypes.txt'].push(`New level type ${id} "${rowValue(typeIn, 'Name')}"`);
     }
   }
@@ -236,10 +238,20 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
         summary['Levels.txt'].push(`Level ${levelId} "${rowValue(levelIn, 'Name')}": LevelType → ${typeId}`);
       }
     } else {
-      const wanted = num(rowValue(levelIn, 'Id'));
-      levelId = levels.rows.some((_, i) => num(getCell(levels!, i, 'Id')) === wanted) ? freeId(levels, 'Id') : wanted;
-      levels = appendFrom(levels, levelIn, { Id: String(levelId), LevelType: String(typeId) });
-      summary['Levels.txt'].push(`New level ${levelId} "${rowValue(levelIn, 'Name')}" (level type ${typeId})`);
+      levelId = nextRecord(levels);
+      // New levels are Act 5 in the game (it takes the act from the number); keep it clear of the other levels there.
+      const off = freeOffset(levels, levelAct(levelId));
+      const layer = Math.max(0, ...dataRows(levels).map((r) => num(getCell(levels!, r, 'Layer')))) + 1;
+      levels = appendFrom(levels, levelIn, {
+        Id: String(levelId),
+        LevelType: String(typeId),
+        Act: String(levelAct(levelId)),
+        OffsetX: String(off.x),
+        OffsetY: String(off.y),
+        Depend: '0',
+        Layer: String(layer),
+      });
+      summary['Levels.txt'].push(`New level ${levelId} "${rowValue(levelIn, 'Name')}" (level type ${typeId}, Act ${levelAct(levelId) + 1}, at ${off.x},${off.y})`);
     }
     if (String(levelId) !== String(num(rowValue(levelIn, 'Id')))) levelIds.set(String(num(rowValue(levelIn, 'Id'))), String(levelId));
   }
@@ -259,8 +271,7 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
       summary['LvlPrest.txt'].push(`Updated "${getCell(prest, r, 'Name')}": LevelId ${newLevel}, Dt1Mask ${newMask}`);
     }
   } else if (prestIn) {
-    const wanted = num(rowValue(prestIn, 'Def'));
-    const def = prest.rows.some((_, i) => num(getCell(prest!, i, 'Def')) === wanted) ? freeId(prest, 'Def') : wanted;
+    const def = nextRecord(prest);
     prest = appendFrom(prest, prestIn, { Def: String(def), LevelId: String(levelId), Dt1Mask: String(mask) });
     summary['LvlPrest.txt'].push(`New preset "${rowValue(prestIn, 'Name')}" (Def ${def}) → level ${levelId}, Dt1Mask ${mask}`);
   }

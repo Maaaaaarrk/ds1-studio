@@ -202,7 +202,11 @@ again replaces the editor's earlier rows instead of piling them up.
 
 - **Data tables:** browse and edit any `.txt` table in a spreadsheet view, with a **?** on column headers that explains
   what the column does in plain language.
-- **Add to game:** creates the `LvlPrest`/`Levels`/`LvlTypes` rows that make the game load a new map.
+- **Add to game:** creates the `Levels`/`LvlPrest`/`LvlTypes` rows that make the game load a map, as a new level or
+  as the map of an existing preset level, and lists every field it writes (old → new, and why) before applying. It
+  follows the game's own rules: rows appended as the next record (the game reads these tables by row), the level's
+  act from its number (new levels are Act 5), `Pal` for the tiles' colours, the level size from the map, a free spot
+  and automap layer, and tile paths the game can hold. The compatibility check verifies the same for any map.
 - **Cube recipe:** creates a map item and a Horadric Cube recipe for it (the item-to-level link needs a mod plugin,
   e.g. PD2's map system). Pick the base item and the cube ingredients from lists with icons, or type a custom code
   (checked against the game's items); every field has a plain-language explanation.

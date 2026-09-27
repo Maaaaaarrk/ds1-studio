@@ -8,6 +8,8 @@ import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
 import { duplicateDt1s } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
+import { verifyInGame } from './addToGame';
+import { loadTable } from './levelTables';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
@@ -161,7 +163,9 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   // --- Tables: is the map part of a level? --------------------------------------------------------------------------
   const [prest, levels, types] = await Promise.all([table(gd, 'LvlPrest.txt'), table(gd, 'Levels.txt'), table(gd, 'LvlTypes.txt')]);
   const rel = normalizePath(map.path).replace(/^data\/global\/tiles\//, '');
-  const prestRow = prest?.rows.find((r) => [1, 2, 3, 4, 5, 6].some((i) => normalizePath(r[`File${i}`] ?? '') === rel));
+  // A map can be listed by several rows (a shared room and its own level): check the one that builds a level first.
+  const listing = prest?.rows.filter((r) => [1, 2, 3, 4, 5, 6].some((i) => normalizePath(r[`File${i}`] ?? '') === rel)) ?? [];
+  const prestRow = listing.find((r) => Number(r['LevelId']) > 0) ?? listing[0];
   if (!prest) out.push({ severity: 'warning', area: 'Tables', title: 'LvlPrest.txt not found', detail: 'Cannot check how the game loads this map.' });
   else if (!prestRow)
     out.push({
@@ -177,6 +181,12 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     });
   else {
     out.push({ severity: 'ok', area: 'Tables', title: `LvlPrest: "${prestRow['Name']}" (Def ${prestRow['Def']})` });
+    // The rules the game's table loaders and level builder follow (row = record, first claiming row, sizes, act,
+    // palette, overlaps, path lengths); see game/addToGame.ts.
+    const [p2, l2, t2] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt'), loadTable(gd.fs, 'LvlTypes.txt')]);
+    if (p2 && l2 && t2)
+      for (const issue of verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1))
+        out.push({ ...issue, area: issue.columns?.[0]?.table === 'Levels' ? 'Level' : 'Tables', fixes: [{ kind: 'register', label: 'Add to game… (sets these fields as the game needs them)' }] });
     const levelId = Number(prestRow['LevelId']);
     const mask = Number(prestRow['Dt1Mask']) >>> 0;
     if (!levelId) {
@@ -241,7 +251,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
             severity: 'info',
             area: 'Level',
             title: `Level is in Act ${act + 1}, DS1 header says Act ${ds1.act + 1}`,
-            detail: 'The game uses the level’s act (palette, music, town). Matching the header keeps object names and other editors in step.',
+            detail: 'The game places the map’s objects and NPCs from the level’s act (by its number), so the object numbers in the DS1 should be that act’s. The colours come from the level’s Pal. Matching the header keeps object names here and in other editors right.',
             columns: [{ table: 'Levels', col: 'Act' }],
             fixes: [{ kind: 'set-act', label: `Set the DS1 header to Act ${act + 1}`, act }],
           });

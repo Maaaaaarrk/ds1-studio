@@ -556,7 +556,24 @@
 
   <h2 id="s-addgame"><span class="num">9.2</span>Add to game</h2>
   <figure class="medium"><img src="img/add-to-game.png" alt="Add to game" /><figcaption>Data → Add to game.</figcaption></figure>
-  <p>Makes the game load the open map: a <code>LvlPrest.txt</code> row pointing at it with a <code>Dt1Mask</code> covering the tile libraries it uses, a level for it — an existing one, or a <b>new level</b> cloned from one you choose — and any missing libraries in free <code>LvlTypes.txt</code> slots. The list shows exactly what will be written before you <b>Apply</b>. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>.</p>
+  <p>Makes the game load the open map. The dialog lists every field it will write, with the old value, the new value and the reason, before you click <b>Apply</b>. There are two ways to add a map:</p>
+  <ul>
+    <li><b>A new level</b>, with settings (monsters, lighting, sound, tile set) copied from a level you choose. A <code>Levels.txt</code> row is added as the next record, and its <code>LvlPrest.txt</code> row points at the map.</li>
+    <li><b>Replace the map of an existing preset level</b>. The level's own <code>LvlPrest</code> row is pointed at the map. Only preset levels can do this: levels the game builds at random don't load a single map.</li>
+  </ul>
+  <p>Either way, the tile libraries the map uses go into free <code>File</code> slots of the level type (<code>LvlTypes.txt</code>), and the preset's <code>Dt1Mask</code> selects them. The rules it follows come from the game's own code and tables:</p>
+  <table>
+    <tr><th>Rule</th><th>Why</th></tr>
+    <tr><td>New rows are always added at the end: a level's <code>Id</code>, a preset's <code>Def</code> and a level type's <code>Id</code> equal their row number. The <i>Expansion</i> line doesn't count.</td><td>The game reads these tables by row position. A row inserted in the middle shifts every level after it.</td></tr>
+    <tr><td>A level uses the <i>first</i> <code>LvlPrest</code> row with its <code>LevelId</code>.</td><td>A second row for the same level is ignored, so an existing level is changed through its own row.</td></tr>
+    <tr><td>New levels are Act 5 (<code>Act</code> 4).</td><td>The game takes the act from the level number: 109 and up is Act 5. That sets the objects, music and town.</td></tr>
+    <tr><td><code>Pal</code> = the act the tiles were drawn for (you can change it).</td><td><code>Pal</code> picks the colours. The game's own Act 5 levels that reuse Act 1, 2 and 4 tiles do this.</td></tr>
+    <tr><td><code>SizeX</code>/<code>SizeY</code> (all difficulties) = the map size minus one. <code>LvlPrest</code> <code>SizeX</code>/<code>SizeY</code> stay 0.</td><td>As in every preset level of the game. The preset then fills the level.</td></tr>
+    <tr><td><code>OffsetX</code>/<code>OffsetY</code> at a free spot. New <code>Layer</code> (automap). Quest requirement, waypoint (255), links (<code>Vis</code> 0 / <code>Warp</code> −1) cleared.</td><td>Levels of one act share a world and must not overlap. The copied level's quest lock or waypoint would otherwise carry over.</td></tr>
+    <tr><td><code>FillBlanks</code> 1, <code>Scan</code> 1, <code>AutoMap</code> 0, <code>Files</code> 1. <code>Populate</code>/<code>Outdoors</code>/<code>KillEdge</code> as the copied level's preset. <code>Pops</code>/<code>PopPad</code> for <a href="#s-pops">roof hiding</a>.</td><td><code>Scan</code> finds warps and special tiles. <code>AutoMap</code> 1 would reveal the whole automap on entry, as in towns.</td></tr>
+    <tr><td>Tile and map paths are at most 41 characters.</td><td>The game adds <code>DATA\GLOBAL\TILES\</code> in front, in a 60-byte buffer. The game's own longest path is 40.</td></tr>
+  </table>
+  <p>The <a href="#s-check">Compatibility check</a> checks the same rules for any map already in the game. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>. Set the DS1 header to Act 5 (the check offers it), so the map's object numbers are read as Act 5 objects.</p>
 
   <h2 id="s-cube"><span class="num">9.3</span>Cube recipe</h2>
   <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Data → Cube recipe.</figcaption></figure>

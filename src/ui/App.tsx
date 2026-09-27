@@ -2628,7 +2628,7 @@ export function App() {
       {dialog === 'register' && doc && (
         <RegisterMapDialog
           fs={data.gd.fs}
-          mapPath={doc.path}
+          mapPath={data.gd.fs.exactPath(doc.path) ?? doc.path}
           width={doc.ds1.width}
           height={doc.ds1.height}
           usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p)}
