@@ -229,15 +229,32 @@ export const SubTileFlag = {
  * OR'd together, plus "unwalkable" for cells whose floor/wall has prop3 bit 0x02 or which have no floor at all.
  * Result index: (cy * width + cx) * 25 + sy * 5 + sx, with (sx, sy) sub-tile coordinates inside the cell.
  */
-export function walkability(ds1: Ds1, scene: Scene): Uint8Array {
+export function walkability(ds1: Ds1, scene: Scene, lib?: TileLibrary): Uint8Array {
   const { width, height } = ds1;
   const out = new Uint8Array(width * height * 25);
-  for (const it of scene.items) {
-    if (it.kind === 'shadow' || it.kind === 'special') continue;
-    const base = (it.cellY * width + it.cellX) * 25;
-    const f = it.tile.subTileFlags;
+  const addFlags = (cellX: number, cellY: number, f: Uint8Array) => {
+    const base = (cellY * width + cellX) * 25;
     // File byte t: column t%5 runs along the cell's x axis, row t/5 runs against its y axis.
     for (let t = 0; t < 25; t++) out[base + (4 - Math.floor(t / 5)) * 5 + (t % 5)] |= f[t];
+  };
+  for (const it of scene.items) {
+    if (it.kind === 'shadow' || it.kind === 'special') continue;
+    addFlags(it.cellX, it.cellY, it.tile.subTileFlags);
+  }
+  // Hidden tiles aren't drawn, but the game still adds their flags (invisible blockers are made that way). Every
+  // variant counts, since the game may pick any of them.
+  if (lib) {
+    const hiddenFlags = (cx: number, cy: number, o: number, m: number, s: number) => lib.variants(o, m, s).forEach((t) => addFlags(cx, cy, t.subTileFlags));
+    for (let i = 0; i < width * height; i++) {
+      const [cx, cy] = [i % width, Math.floor(i / width)];
+      for (const l of ds1.floors) if (!isEmptyCell(l[i]) && l[i].hidden) hiddenFlags(cx, cy, Orientation.Floor, l[i].mainIndex, l[i].subIndex);
+      for (const l of ds1.walls) {
+        const c = l[i];
+        if (isEmptyCell(c) || !c.hidden || isSpecial(c.orientation)) continue;
+        hiddenFlags(cx, cy, c.orientation, c.mainIndex, c.subIndex);
+        if (c.orientation === Orientation.RightPartOfNorthCornerWall) hiddenFlags(cx, cy, Orientation.LeftPartOfNorthCornerWall, c.mainIndex, c.subIndex);
+      }
+    }
   }
   const layers = [...ds1.floors, ...ds1.walls];
   for (let i = 0; i < width * height; i++) {

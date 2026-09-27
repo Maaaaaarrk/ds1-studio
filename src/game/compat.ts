@@ -362,7 +362,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     });
 
   // --- Objects -----------------------------------------------------------------------------------------------------
-  const walk = walkability(ds1, scene);
+  const walk = walkability(ds1, scene, lib);
   const W = ds1.width * 5;
   const H = ds1.height * 5;
   const walkable = (sx: number, sy: number) =>

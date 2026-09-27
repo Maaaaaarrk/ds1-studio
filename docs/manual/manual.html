@@ -391,6 +391,9 @@
   </div>
 
   <h2 id="s-subtiles"><span class="num">3.8</span>Walkability: sub-tile flags</h2>
+  <p><b>Painting walkability on the map (this map only).</b> Turn on <b>Walkability</b> (<kbd>W</kbd>): the side panels make way for the <b>Walkability</b> panel and the map shows every sub-tile (5×5 per cell) that blocks walking (amber) or jumping and teleporting too (red). Choose <b>Blocked</b> or <b>Walkable</b>, what it blocks or allows (walking, jumping &amp; teleport, sight &amp; light, players only) and a brush (1×1, 3×3, 5×5 sub-tiles or a whole cell), then click or drag over the map. <kbd>Shift</kbd>+drag paints a rectangle and holding <kbd>Ctrl</kbd> does the opposite. Each stroke is one undo step; <b>Done</b> brings the other panels back.</p>
+  <p>It changes nothing for other maps. The game adds up the sub-tile flags of every tile in a cell, hidden tiles included, so blocking puts an invisible floor tile holding just those flags into a free floor layer of the cell (like Tal Rasha's tomb's own blockers), and making a sub-tile walkable that a tile blocks gives that cell its own copy of the tile without the flag (same picture and variants; a north-corner wall's other half comes along). Both go into a small tile library made for the map, <code>&lt;map&gt;_walk.dt1</code> next to it, which is added to the map's tile libraries and level type. A cell whose two floor layers both hold real tiles has no room for a blocker; the panel says which cells it skipped.</p>
+  <p><b>Changing a tile everywhere.</b> To change the flags of a tile itself, for every cell and map using it, use the Cell panel:</p>
   <div class="pair">
     <figure><img src="img/cell-flags.png" alt="Sub-tile flags" /><figcaption>Painting sub-tile flags in the Cell panel.</figcaption></figure>
     <div>

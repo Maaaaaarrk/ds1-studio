@@ -91,6 +91,9 @@ import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
+import { WalkPanel, type WalkBrush } from './WalkPanel';
+import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
+import { tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
@@ -258,6 +261,14 @@ export function App() {
   const [changingFolders, setChangingFolders] = useState(false);
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
+  /** Walkability mode (the overlay on): the brush, the sub-tiles a stroke is painting, and its result. */
+  const [walkBrush, setWalkBrush] = useState<WalkBrush>({ mode: 'block', bits: 0x01, size: 1 });
+  const [walkMarks, setWalkMarks] = useState<{ keys: ReadonlySet<number>; mode: 'block' | 'clear' } | null>(null);
+  const [walkBusy, setWalkBusy] = useState(false);
+  const [walkLast, setWalkLast] = useState<string | null>(null);
+  const walkStroke = useRef<{ anchor: [number, number]; last: [number, number]; keys: Set<number>; rect: boolean; mode: 'block' | 'clear' } | null>(null);
+  /** Applies a finished walkability stroke (set below, once the table helpers it uses exist). */
+  const applyWalkRef = useRef<((paint: WalkPaint) => Promise<void>) | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
   /** Shift+click / Shift+drag with the Select tool: the selection being added to (null = a new selection). */
   const selectBase = useRef<CellSelection | null>(null);
@@ -630,6 +641,57 @@ export function App() {
   const onStroke = useCallback(
     (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => {
       if (!doc) return;
+      // Walkability mode: strokes paint sub-tiles (Shift: a rectangle; Ctrl: the opposite of the brush).
+      if (visibility.walkable && !pasting) {
+        const [fx, fy] = worldToSubTile(world[0], world[1]);
+        const at: [number, number] = [Math.round(fx), Math.round(fy)];
+        const W = doc.ds1.width * 5;
+        const Hh = doc.ds1.height * 5;
+        const key = (x: number, y: number) => y * 65536 + x;
+        const stamp = (keys: Set<number>, [x, y]: [number, number]) => {
+          if (walkBrush.size === 'cell') {
+            const [cx, cy] = [Math.floor(x / 5) * 5, Math.floor(y / 5) * 5];
+            for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) if (cx + dx >= 0 && cx + dx < W && cy + dy >= 0 && cy + dy < Hh) keys.add(key(cx + dx, cy + dy));
+            return;
+          }
+          const r = (walkBrush.size - 1) / 2;
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (x + dx >= 0 && x + dx < W && y + dy >= 0 && y + dy < Hh) keys.add(key(x + dx, y + dy));
+        };
+        if (phase === 'start') {
+          const mode = mods?.ctrl ? (walkBrush.mode === 'block' ? 'clear' : 'block') : walkBrush.mode;
+          walkStroke.current = { anchor: at, last: at, keys: new Set(), rect: !!mods?.shift, mode };
+        }
+        const st = walkStroke.current;
+        if (!st) return;
+        if (st.rect) {
+          // A rectangle of sub-tiles (whole cells with the Cell brush).
+          st.keys = new Set();
+          let [x0, x1] = [Math.min(st.anchor[0], at[0]), Math.max(st.anchor[0], at[0])];
+          let [y0, y1] = [Math.min(st.anchor[1], at[1]), Math.max(st.anchor[1], at[1])];
+          if (walkBrush.size === 'cell') [x0, y0, x1, y1] = [Math.floor(x0 / 5) * 5, Math.floor(y0 / 5) * 5, Math.floor(x1 / 5) * 5 + 4, Math.floor(y1 / 5) * 5 + 4];
+          for (let y = Math.max(0, y0); y <= Math.min(Hh - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(W - 1, x1); x++) st.keys.add(key(x, y));
+        } else {
+          // Freehand: every sub-tile on the way from the last point, so fast drags leave no gaps.
+          const [ax, ay] = st.last;
+          const n = Math.max(Math.abs(at[0] - ax), Math.abs(at[1] - ay), 1);
+          for (let i = 0; i <= n; i++) stamp(st.keys, [Math.round(ax + ((at[0] - ax) * i) / n), Math.round(ay + ((at[1] - ay) * i) / n)]);
+        }
+        st.last = at;
+        setWalkMarks({ keys: new Set(st.keys), mode: st.mode });
+        if (phase === 'end') {
+          walkStroke.current = null;
+          setWalkMarks(null);
+          const cellMasks = new Map<number, number>();
+          for (const k of st.keys) {
+            const [x, y] = [k % 65536, Math.floor(k / 65536)];
+            const cell = Math.floor(y / 5) * doc.ds1.width + Math.floor(x / 5);
+            cellMasks.set(cell, (cellMasks.get(cell) ?? 0) | (1 << ((y % 5) * 5 + (x % 5))));
+          }
+          if (cellMasks.size && walkBrush.bits) void applyWalkRef.current?.({ mode: st.mode, bits: walkBrush.bits, cells: cellMasks });
+          else if (!walkBrush.bits) notify('Tick at least one thing to block or allow (Walkability panel).', true);
+        }
+        return;
+      }
       if (tool === 'object') {
         const [fx, fy] = worldToSubTile(world[0], world[1]);
         const sx = Math.round(fx);
@@ -792,7 +854,7 @@ export function App() {
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, focusTile],
+    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, focusTile, walkBrush],
   );
 
   // Selection commands.
@@ -1031,8 +1093,7 @@ export function App() {
     [gd, data],
   );
 
-  /** After table edits: reload the game tables and re-resolve the open map (keeping its edits). */
-  /** Reloads the game's tables after a write; returns them for a map opened right after (the state updates later). */
+  /** After table edits: reloads the game tables and re-resolves the open map (keeping its edits); returns the tables for a map opened right after (the state updates later). */
   const reloadTables = useCallback(async (): Promise<GameData | undefined> => {
     if (!gd || data.status !== 'ready') return;
     const next = await GameData.load(gd.fs);
@@ -1097,6 +1158,46 @@ export function App() {
     },
     [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
   );
+
+  /**
+   * Applies a walkability stroke to this map (see game/walkEdit.ts): writes the map's walkability library when it gets
+   * new tiles, adds it to the map's tile libraries (and level type) the first time, and changes the cells as one undo
+   * step.
+   */
+  applyWalkRef.current = async (paint: WalkPaint) => {
+    if (!gd || !map || !doc) return;
+    if (!canWrite) return notify('Walkability edits need a writable mod folder: they add a small tile library for this map.', true);
+    const walkPath = walkDt1Path(map.path);
+    const tooLong = tilePathProblem(walkPath.replace(/^data\/global\/tiles\//i, ''));
+    if (tooLong) return notify(`The map's walkability library would be ${tooLong}`, true);
+    setWalkBusy(true);
+    try {
+      const plan = await planWalkEdit({ ds1: doc.ds1, lib: map.lib, read: (p) => gd.fs.read(p), walkPath, walk: await gd.fs.read(walkPath), paint });
+      if (plan.dt1) {
+        await writeFiles([{ path: walkPath, bytes: plan.dt1 }]);
+        gd.forgetDt1(walkPath);
+      }
+      if (plan.edits.length || plan.floors > doc.ds1.floors.length) {
+        doc.mutate((d) => {
+          while (d.floors.length < plan.floors) d.floors.push(Array.from({ length: d.width * d.height }, () => EMPTY_CELL));
+          for (const e of plan.edits) ((e.layer.kind === 'floor' ? d.floors : d.walls)[e.layer.index] as (typeof e.cell)[])[e.y * d.width + e.x] = e.cell;
+        }, `${paint.mode === 'block' ? 'Block' : 'Clear'} ${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'}`);
+        bump();
+      }
+      const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
+      const listed = libs.some((p) => normalizePath(p) === normalizePath(walkPath));
+      if (plan.dt1 && !listed) await applyDt1s([...libs, walkPath]);
+      else if (plan.dt1) setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths: libs }, doc.ds1));
+      const what = paint.mode === 'block' ? 'blocked' : 'made walkable';
+      const msg = plan.changed ? `${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'} ${what}.` : `Nothing to change: those sub-tiles were already ${what === 'blocked' ? 'blocked' : 'walkable'}.`;
+      setWalkLast(`${msg}${plan.skipped.length ? ` Skipped ${plan.skipped.length} cell${plan.skipped.length === 1 ? '' : 's'}: ${plan.skipped.slice(0, 3).join('; ')}` : ''}`);
+      if (plan.skipped.length) notify(`Walkability: ${plan.skipped[0]}${plan.skipped.length > 1 ? ` (+${plan.skipped.length - 1} more)` : ''}`, true);
+    } catch (e) {
+      notify(`Walkability: ${(e as Error).message}`, true);
+    } finally {
+      setWalkBusy(false);
+    }
+  };
 
   // Automap preview: AutoMap.txt + MaxiMap.dc6, loaded the first time the view is turned on (and after table edits).
   const [automapData, setAutomapData] = useState<{ gd: GameData; table: AutomapTable; cels: SpriteFrame[] } | null>(null);
@@ -2191,6 +2292,7 @@ export function App() {
             centerOn={centerOn}
             specialLabel={specialLabel}
             pops={popView}
+            walkMarks={walkMarks}
           />
         ) : (
           <div className="empty-stage">
@@ -2246,7 +2348,18 @@ export function App() {
       <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />
       <aside className="sidebar right">
         <ErrorBoundary what="the side panel" resetKey={`${map?.path}:${tool}`} context={() => ({ map: map?.path })} compact>
-        {map && scene && doc && (
+        {map && scene && doc && visibility.walkable && (
+          <WalkPanel
+            brush={walkBrush}
+            onChange={setWalkBrush}
+            busy={walkBusy}
+            canWrite={canWrite}
+            libraryPath={walkDt1Path(map.path).replace(/^data\/global\/tiles\//i, '')}
+            last={walkLast}
+            onDone={() => setVisibility((v) => ({ ...v, walkable: false }))}
+          />
+        )}
+        {map && scene && doc && !visibility.walkable && (
           <>
             {tool === 'object' && (
               <section className="panel object-preview-panel">

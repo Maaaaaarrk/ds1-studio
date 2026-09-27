@@ -136,6 +136,11 @@ export class GameData {
     return p;
   }
 
+  /** Forgets a cached DT1 (after its file was rewritten), so the next dt1() reads it again. */
+  forgetDt1(path: string): void {
+    this.dt1s.delete(normalizePath(path));
+  }
+
   dt1(path: string): Promise<Dt1 | null> {
     const key = normalizePath(path);
     let p = this.dt1s.get(key);

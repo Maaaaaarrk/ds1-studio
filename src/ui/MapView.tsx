@@ -34,6 +34,7 @@ export type StrokePhase = 'start' | 'move' | 'end';
 export interface StrokeMods {
   alt: boolean;
   shift: boolean;
+  ctrl: boolean;
 }
 
 interface Props {
@@ -84,6 +85,8 @@ interface Props {
    * shows them while a player is inside. `hidden` = "wallLayer:x:y" of those tiles.
    */
   pops?: { areas: PopArea[]; popPad: number; show: boolean; inside: boolean; hidden: Set<string> };
+  /** Sub-tiles being painted in walkability mode (keys sy * 65536 + sx), and whether they get blocked or cleared. */
+  walkMarks?: { keys: ReadonlySet<number>; mode: 'block' | 'clear' } | null;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -161,7 +164,7 @@ export function MapView(props: Props) {
   const [frame, setFrame] = useState(0);
   const automapImage = useMemo(() => (props.automap ? renderAutomap(map.ds1.width, map.ds1.height, props.automap) : null), [props.automap, map]);
   // Built once per scene, not per frame: a 150×150 map has 562,500 sub-tiles.
-  const walk = useMemo(() => (visibility.walkable ? walkPaths(walkability(map.ds1, scene), map.ds1.width, map.ds1.height) : null), [visibility.walkable, map, scene]);
+  const walk = useMemo(() => (visibility.walkable ? walkPaths(walkability(map.ds1, scene, map.lib), map.ds1.width, map.ds1.height) : null), [visibility.walkable, map, scene]);
   const resizeDrag = useRef<{ side: Side; delta: ResizeDelta } | null>(null);
   const latest = useRef({ ...props, walk, resizeDrag, automapImage });
   latest.current = { ...props, walk, resizeDrag, automapImage };
@@ -329,7 +332,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks]);
 
   // Input.
   useEffect(() => {
@@ -371,7 +374,7 @@ export function MapView(props: Props) {
       const toolDrag = ev.button === 0 && !space;
       if (toolDrag) {
         stroke = toCell(ev);
-        latest.current.onStroke('start', [stroke], toWorld(ev), { alt: ev.altKey, shift: ev.shiftKey });
+        latest.current.onStroke('start', [stroke], toWorld(ev), { alt: ev.altKey, shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey });
       } else if (ev.button <= 2) {
         pan = { x: ev.clientX, y: ev.clientY };
       }
@@ -788,6 +791,23 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
 
   // Red = blocks jumping/teleport too; amber = blocks walking.
   if (walk) drawWalk(ctx, canvas, cam, walk);
+  // Sub-tiles a walkability stroke is painting: filled in the colour they are getting.
+  if (s.walkMarks?.keys.size) {
+    ctx.beginPath();
+    for (const k of s.walkMarks.keys) {
+      const [x, y] = subTileToWorld(k % 65536, Math.floor(k / 65536));
+      ctx.moveTo(x, y - 8);
+      ctx.lineTo(x + 16, y);
+      ctx.lineTo(x, y + 8);
+      ctx.lineTo(x - 16, y);
+      ctx.closePath();
+    }
+    ctx.fillStyle = s.walkMarks.mode === 'block' ? 'rgba(255, 150, 30, 0.55)' : 'rgba(90, 220, 120, 0.5)';
+    ctx.fill();
+    ctx.lineWidth = 1 * px;
+    ctx.strokeStyle = s.walkMarks.mode === 'block' ? 'rgba(255, 190, 90, 0.9)' : 'rgba(150, 255, 170, 0.9)';
+    ctx.stroke();
+  }
 
   if (v.grid) {
     ctx.beginPath();
