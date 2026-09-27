@@ -161,4 +161,4 @@ export const CLASSIC_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.
 export const GAME_BINARY_FILES = ['D2Common.dll', 'Game.exe'];
 
 /** Only these extensions matter to the editor; skipping the rest keeps folder indexing fast. */
-export const RELEVANT_EXT = /\.(ds1|dt1|dat|txt|json|bin|cof|dcc|dc6)$/i;
+export const RELEVANT_EXT = /\.(ds1|dt1|dat|txt|json|bin|cof|dcc|dc6|tbl)$/i;

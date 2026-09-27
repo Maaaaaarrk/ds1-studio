@@ -2652,7 +2652,16 @@ export function App() {
           initial={registerInitial}
         />
       )}
-      {dialog === 'cube' && doc && <CubeRecipeDialog fs={data.gd.fs} mapName={doc.path.split('/').pop()!.replace(/\.ds1$/i, '')} onApply={applyTableWrites} onClose={() => setDialog(null)} />}
+      {dialog === 'cube' && doc && (
+        <CubeRecipeDialog
+          fs={data.gd.fs}
+          mapName={doc.path.split('/').pop()!.replace(/\.ds1$/i, '')}
+          mapPath={doc.path}
+          onApply={applyTableWrites}
+          onAddToGame={() => setDialog('register')}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === 'check' && (
         <CompatDialog
           results={checkResults}

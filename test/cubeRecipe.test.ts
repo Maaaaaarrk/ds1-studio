@@ -48,6 +48,39 @@ describe.runIf(hasD2)('cube recipe items, against the vanilla tables', async () 
     expect(plan).toMatch(/already uses exactly these ingredients/);
   });
 
+  it('a map item opens the open map\'s level: len, its own name string, the level\'s name, the mod\'s map-recipe style', async () => {
+    const { appendRow } = await import('../src/formats/txtTable');
+    const { parseTbl, tblLookup } = await import('../src/formats/tbl');
+    const { mapItemLevel, PATCH_STRINGS } = await import('../src/game/cubeRecipe');
+    const levels = await load('Levels.txt');
+    const strings = parseTbl((await fs.read(PATCH_STRINGS))!);
+    // A PD2-style map item: a mod type, pSpell 12, len = the level it opens (38, Tristram) — and a recipe making it.
+    let m = setCell(misc, rowOf('key'), 'type', 't1m');
+    m = setCell(m, rowOf('key'), 'pSpell', '12');
+    m = setCell(m, rowOf('key'), 'len', '38');
+    const c0 = appendRow(cube, { description: 'ID scroll -> Tristram Map', enabled: '1', version: '100', numinputs: '1', 'input 1': 'isc,qty=1', output: 'key,nor', lvl: '99', ilvl: '100' });
+    expect(mapItemLevel(m, rowOf('key'), levels)).toBe(38);
+    const plan = planCubeItem(
+      { misc: m, cube: c0, levels, strings },
+      { templateRow: rowOf('key'), name: 'Guild Hall Map', code: 'gh01', inputs: ['tbk', 'hp1'], numinputs: 2, mapName: 'guild3', map: { levelId: 25, levelTitle: 'Guild Hall' } },
+    );
+    if (typeof plan === 'string') throw new Error(plan);
+    expect(plan.map((w) => w.table)).toEqual(['Misc.txt', 'CubeMain.txt', 'Levels.txt', 'patchstring.tbl']);
+    const mm = parseTxtTable(plan[0].bytes);
+    const n = mm.rows.findIndex((_, r) => getCell(mm, r, 'code') === 'gh01');
+    expect([getCell(mm, n, 'len'), getCell(mm, n, 'pSpell'), getCell(mm, n, 'type'), getCell(mm, n, 'namestr')]).toEqual(['25', '12', 't1m', 'ds1s_gh01']);
+    const cc = parseTxtTable(plan[1].bytes);
+    const r = cc.rows.findIndex((_, i) => getCell(cc, i, 'output').startsWith('gh01'));
+    expect([getCell(cc, r, 'output'), getCell(cc, r, 'lvl'), getCell(cc, r, 'ilvl')]).toEqual(['gh01,nor', '99', '100']);
+    const ll = parseTxtTable(plan[2].bytes);
+    const lr = ll.rows.findIndex((_, i) => getCell(ll, i, 'Id') === '25');
+    expect([getCell(ll, lr, 'LevelName'), getCell(ll, lr, 'LevelWarp')]).toEqual(['ds1s_lvl_25', 'ds1s_lvl_25']);
+    expect(tblLookup(plan[3].bytes, 'ds1s_gh01')).toBe('Guild Hall Map');
+    expect(tblLookup(plan[3].bytes, 'ds1s_lvl_25')).toBe('Guild Hall');
+    // Without the map being a level, it asks for Add to game first.
+    expect(planCubeItem({ misc: m, cube: c0, levels, strings }, { templateRow: rowOf('key'), name: 'X', code: 'gh02', inputs: ['tbk', 'hp2'], numinputs: 2, mapName: 'x' })).toMatch(/Add to game first/);
+  });
+
   it('never copies an elixir, and asks before copying a mod-specific item type', () => {
     expect(templateRisk('elix')?.kind).toBe('blocked');
     expect(planCubeItem({ misc, cube }, { templateRow: rowOf('elx'), name: 'X', code: 'gk03', inputs: ['key', 'hp2'], numinputs: 2, mapName: 'x' })).toMatch(/Elixirs/);

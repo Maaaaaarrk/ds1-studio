@@ -79,7 +79,7 @@ fn set_config(app: AppHandle, state: State<AppState>, config: Config) -> Result<
 
 fn is_relevant(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    [".ds1", ".dt1", ".dat", ".txt", ".json", ".bin", ".cof", ".dcc", ".dc6"].iter().any(|ext| lower.ends_with(ext))
+    [".ds1", ".dt1", ".dat", ".txt", ".json", ".bin", ".cof", ".dcc", ".dc6", ".tbl"].iter().any(|ext| lower.ends_with(ext))
 }
 
 fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
@@ -168,12 +168,13 @@ fn resolve_case_insensitive(root: &Path, rel: &Path) -> PathBuf {
 }
 
 /// What the editor may write, and where: maps, tiles and sprites under data/global, tables under data/global/excel,
-/// and the studio's own files (presets) under data/ds1studio.
+/// string tables under data/local/lng, and the studio's own files (presets) under data/ds1studio.
 fn writable(rel: &str) -> bool {
     let p = rel.replace('\\', "/").to_ascii_lowercase();
     let ext = |exts: &[&str]| exts.iter().any(|e| p.ends_with(e));
     (p.starts_with("data/global/") && ext(&[".ds1", ".dt1", ".cof", ".dcc", ".dc6"]))
         || (p.starts_with("data/global/excel/") && ext(&[".txt"]))
+        || (p.starts_with("data/local/lng/") && ext(&[".tbl"]))
         || (p.starts_with("data/ds1studio/") && ext(&[".json"]))
 }
 

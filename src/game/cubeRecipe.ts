@@ -1,4 +1,5 @@
-import { colIndex, getCell, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
+import { colIndex, getCell, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
+import { setTblStrings, writeTbl, type Tbl } from '../formats/tbl';
 import { appendAt } from './addToGame';
 import type { TableWrite } from './levelTables';
 
@@ -62,6 +63,31 @@ export function sameRecipe(cube: TxtTableDoc, inputs: string[]): string | null {
   return null;
 }
 
+/**
+ * The level a map item opens, when the template is one: a mod item type with a use action (pSpell) whose `len` is a
+ * level number. That's how PD2's maps work (pSpell 12, len = the Levels.txt Id: "Halls of Torture Map" len 193 →
+ * level 193), including maps modders add themselves.
+ */
+export function mapItemLevel(misc: TxtTableDoc, row: number, levels: TxtTableDoc | null): number | null {
+  const type = getCell(misc, row, 'type').trim().toLowerCase();
+  if (!type || VANILLA_ITEM_TYPES.has(type) || !getCell(misc, row, 'pSpell').trim()) return null;
+  const len = getCell(misc, row, 'len').trim();
+  if (!/^\d+$/.test(len) || !levels) return null;
+  const id = Number(len);
+  const exists = levels.rows.some((_, r) => getCell(levels, r, 'Id').trim() === len && getCell(levels, r, 'DrlgType').trim() !== '' && getCell(levels, r, 'DrlgType').trim() !== '0');
+  return exists ? id : null;
+}
+
+/** Where the mod's own strings go (the game reads string.tbl, expansionstring.tbl, then patchstring.tbl). */
+export const PATCH_STRINGS = 'data/local/lng/eng/patchstring.tbl';
+
+export interface MapTarget {
+  /** Levels.txt Id of the open map's level. */
+  levelId: number;
+  /** Name shown in game for the level (entering it, the automap); empty = leave the level's names as they are. */
+  levelTitle?: string;
+}
+
 export interface CubeItemInput {
   /** Row of the template item in Misc.txt. */
   templateRow: number;
@@ -75,14 +101,29 @@ export interface CubeItemInput {
   mapName: string;
   /** The user accepted a template of a mod-specific type. */
   acceptModType?: boolean;
+  /** For a map-item template: the level the new item opens (the open map's). */
+  map?: MapTarget;
 }
 
-export function planCubeItem(tables: { misc: TxtTableDoc; cube: TxtTableDoc }, input: CubeItemInput): TableWrite[] | string {
+export interface CubeTables {
+  misc: TxtTableDoc;
+  cube: TxtTableDoc;
+  levels?: TxtTableDoc | null;
+  /** The mod's patchstring.tbl (or the game's, to extend). */
+  strings?: Tbl | null;
+}
+
+export function planCubeItem(tables: CubeTables, input: CubeItemInput): TableWrite[] | string {
   const { misc, cube } = tables;
   const t = input.templateRow;
   const risk = templateRisk(getCell(misc, t, 'type'), getCell(misc, t, 'type2'));
   if (risk?.kind === 'blocked') return risk.text;
-  if (risk?.kind === 'mod-type' && !input.acceptModType) return 'Tick the box under the template to confirm your mod supports new items of its type.';
+  const opens = mapItemLevel(misc, t, tables.levels ?? null);
+  if (opens !== null) {
+    // A map item: it will open the open map's level, which must be in the game.
+    if (!input.map) return 'This map isn’t a level in the game yet, so a map item can’t open it. Use Data → Add to game first, then come back.';
+    if (!tables.strings) return 'patchstring.tbl (the mod’s strings) could not be read.';
+  } else if (risk?.kind === 'mod-type' && !input.acceptModType) return 'Tick the box under the template to confirm your mod supports new items of its type.';
   if (!input.inputs.length) return 'Add at least one ingredient.';
   if (input.inputs.length > 7) return 'The cube holds at most 7 kinds of ingredient.';
   const clash = sameRecipe(cube, input.inputs);
@@ -96,6 +137,31 @@ export function planCubeItem(tables: { misc: TxtTableDoc; cube: TxtTableDoc }, i
   values.code = input.code;
   for (const c of ['normcode', 'ubercode', 'ultracode']) if (values[c] !== undefined && values[c].trim() === tCode) values[c] = input.code;
   if (values.spawnable !== undefined) values.spawnable = '0'; // never a random drop
+  const itemNotes: string[] = [];
+  const strings: Record<string, string> = {};
+  let levels = tables.levels ?? null;
+  const levelNotes: string[] = [];
+  if (opens !== null && input.map) {
+    // The map item opens the open map's level, and shows its own name.
+    values.len = String(input.map.levelId);
+    const key = `ds1s_${input.code}`;
+    values.namestr = key;
+    strings[key] = input.name;
+    itemNotes.push(`opens level ${input.map.levelId} (len ${getCell(misc, t, 'len')} → ${input.map.levelId})`, `its name "${input.name}" in ${PATCH_STRINGS.split('/').pop()} (${key})`);
+    if (input.map.levelTitle?.trim() && levels) {
+      const lr = levels.rows.findIndex((_, r) => getCell(levels!, r, 'Id').trim() === String(input.map!.levelId));
+      if (lr >= 0) {
+        const lk = `ds1s_lvl_${input.map.levelId}`;
+        strings[lk] = input.map.levelTitle.trim();
+        for (const col of ['LevelName', 'LevelWarp'])
+          if (colIndex(levels, col) >= 0 && getCell(levels, lr, col) !== lk) {
+            levelNotes.push(`${col} ${getCell(levels, lr, col) || '(empty)'} → ${lk}`);
+            levels = setCell(levels, lr, col, lk);
+          }
+        levelNotes.push(`shown in game as "${input.map.levelTitle.trim()}"`);
+      }
+    }
+  }
   const m = appendAt(misc, values).doc;
 
   const recipe: Record<string, string> = {
@@ -105,18 +171,41 @@ export function planCubeItem(tables: { misc: TxtTableDoc; cube: TxtTableDoc }, i
     numinputs: String(input.numinputs),
     output: input.code,
   };
+  // A map item comes out the way the mod's own map recipes make theirs (e.g. PD2: "pwl,nor", lvl 99, ilvl 100).
+  if (opens !== null) {
+    // Prefer a recipe that makes a map of the template's own type (PD2: a t1m map for a t1m template), else any map.
+    const maps = misc.rows.map((_, r) => r).filter((r) => mapItemLevel(misc, r, tables.levels ?? null) !== null);
+    const sameType = new Set(maps.filter((r) => getCell(misc, r, 'type') === getCell(misc, t, 'type')).map((r) => getCell(misc, r, 'code')));
+    const anyMap = new Set(maps.map((r) => getCell(misc, r, 'code')));
+    const makes = (codes: Set<string>) => cube.rows.findIndex((_, r) => getCell(cube, r, 'enabled') === '1' && codes.has(getCell(cube, r, 'output').split(',')[0].trim()));
+    const model = makes(sameType) >= 0 ? makes(sameType) : makes(anyMap);
+    if (model >= 0) {
+      const suffix = getCell(cube, model, 'output').split(',').slice(1).join(',');
+      if (suffix) recipe.output = `${input.code},${suffix}`;
+      for (const col of ['lvl', 'plvl', 'ilvl']) if (getCell(cube, model, col)) recipe[col] = getCell(cube, model, col);
+    }
+  }
   input.inputs.forEach((p, i) => (recipe[`input ${i + 1}`] = p.replace(/^"|"$/g, '')));
   for (const k of Object.keys(recipe)) if (colIndex(cube, k) < 0) delete recipe[k];
   const c = appendAt(cube, recipe).doc;
-  return [
+  const writes: TableWrite[] = [
     {
       table: 'Misc.txt',
       path: `${EXCEL}Misc.txt`,
       bytes: serializeTxtTable(m),
-      summary: [`New item “${input.name}” (code ${input.code}), a copy of “${getCell(misc, t, 'name')}”, added at the end (never drops at random)`],
+      summary: [`New item “${input.name}” (code ${input.code}), a copy of “${getCell(misc, t, 'name')}”, added at the end (never drops at random)`, ...itemNotes],
     },
-    { table: 'CubeMain.txt', path: `${EXCEL}CubeMain.txt`, bytes: serializeTxtTable(c), summary: [`New recipe → ${input.name}`] },
+    { table: 'CubeMain.txt', path: `${EXCEL}CubeMain.txt`, bytes: serializeTxtTable(c), summary: [`New recipe → ${input.name} (output ${recipe.output})`] },
   ];
+  if (levels && levelNotes.length) writes.push({ table: 'Levels.txt', path: `${EXCEL}Levels.txt`, bytes: serializeTxtTable(levels), summary: [`Level ${input.map!.levelId}: ${levelNotes.join('; ')}`] });
+  if (Object.keys(strings).length && tables.strings)
+    writes.push({
+      table: 'patchstring.tbl',
+      path: PATCH_STRINGS,
+      bytes: writeTbl(setTblStrings(tables.strings, strings)),
+      summary: Object.entries(strings).map(([k, v]) => `String ${k} = "${v}"`),
+    });
+  return writes;
 }
 
 export interface StudioRecipe {

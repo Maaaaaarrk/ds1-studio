@@ -584,7 +584,15 @@
     <li><b>Never a random drop:</b> the new item gets <code>spawnable 0</code>, and references to the template's code (<code>normcode</code>…) are changed to the new code.</li>
     <li><b>Safe templates only:</b> elixirs aren't offered; a copy of one crashed the game when hovered. Items of a type the base game doesn't have, like PD2's maps, need a tick first. The mod's own code handles those types and only knows the mod's own item codes.</li>
   </ul>
-  <div class="note"><b>PD2 maps</b> A new item code is not a new PD2 map: PD2's map system only knows its own map items. To open your map with a PD2 map item, give one of PD2's map levels your map with <a href="#s-addgame">Add to game</a> → <i>replace the map of an existing preset level</i>.</div>
+  <h3 id="s-mapitem">A map item that opens this map</h3>
+  <p>Pick one of your mod's <b>map items</b> as the template; they are listed first under <i>Map items (open a level)</i>. The new item then opens <b>the map you have open</b>, and DS1 Studio makes every change for it:</p>
+  <ul>
+    <li><b>Misc.txt:</b> the map item, with <code>len</code> set to the map's level number. PD2's map items open the level named in <code>len</code>: "Halls of Torture Map" has <code>len</code> 193, which is level 193.</li>
+    <li><b>patchstring.tbl</b> (<code>data/local/lng/eng</code>): the item's name, and optionally the level's name as shown in game. Every existing string keeps its number.</li>
+    <li><b>Levels.txt:</b> the level's <code>LevelName</code>/<code>LevelWarp</code> point at that name, if you name the level.</li>
+    <li><b>CubeMain.txt:</b> the recipe, made the way your mod's other map recipes make their maps (e.g. <code>,nor</code>, <code>lvl</code>, <code>ilvl</code>).</li>
+  </ul>
+  <p>The map must be a level in the game first. If it isn't, the dialog offers <a href="#s-addgame">Add to game</a>. After creating it, rebuild the <code>.bin</code> tables (<code>-direct -txt</code>) if your mod uses them.</p>
   <p>Recipes and items DS1 Studio made are listed under <b>Made by DS1 Studio</b> in the dialog, where you can remove them. Remove an item only when no character holds it: a character with an item whose code is gone may not load.</p>
 
   <h2 id="s-check"><span class="num">9.4</span>Compatibility check</h2>
