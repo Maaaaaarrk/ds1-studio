@@ -323,27 +323,79 @@ fn mcp_stdin(app: AppHandle) {
     });
 }
 
-/// The file last picked for importing (read once with `read_picked`).
+/// Files picked for importing, read one by one with `read_picked`.
 #[derive(Default)]
-struct PickedFile(Mutex<Option<PathBuf>>);
+struct PickedFile(Mutex<Vec<PathBuf>>);
 
-/// Native "Open" dialog for imports that need the file's name: returns the name (None = cancelled) and keeps the path
-/// for `read_picked`, which sends the bytes raw (a JSON list of numbers would be slow and heavy for big maps).
-#[tauri::command]
-async fn pick_import(app: AppHandle, picked: State<'_, PickedFile>, extension: String) -> Result<Option<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let Some(path) = app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_file() else {
-        return Ok(None);
-    };
-    let path = path.into_path().map_err(|e| e.to_string())?;
-    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    *picked.0.lock().unwrap() = Some(path);
-    Ok(Some(name))
+/// Test hook: `DS1STUDIO_TEST_PICK` (paths separated by `;`) answers the next pick without showing a dialog, so the
+/// import flows can be driven end to end in tests. Unset in normal use.
+fn test_pick() -> Option<Vec<PathBuf>> {
+    std::env::var("DS1STUDIO_TEST_PICK").ok().map(|v| v.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect())
 }
 
+/// Every file with `extension` under `dir` (subfolders included), sorted.
+fn walk_files(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+    entries.sort();
+    for p in entries {
+        if p.is_dir() {
+            walk_files(&p, extension, out);
+        } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(extension)) {
+            out.push(p);
+        }
+    }
+}
+
+/// One picked file: its name, and its folder path relative to (and including) the picked folder it was found in.
+#[derive(Serialize)]
+struct PickedEntry {
+    name: String,
+    folder: String,
+}
+
+/// Native "Open" dialog for imports: one file, several files, or folders (every `extension` file inside them,
+/// subfolders included). Returns what was found (empty = cancelled); the bytes follow with `read_picked`, raw.
 #[tauri::command]
-fn read_picked(picked: State<'_, PickedFile>) -> Result<Response, String> {
-    let path = picked.0.lock().unwrap().take().ok_or("no file picked")?;
+async fn pick_import(app: AppHandle, picked: State<'_, PickedFile>, extension: String, mode: Option<String>) -> Result<Vec<PickedEntry>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mode = mode.unwrap_or_else(|| "file".into());
+    let to_paths = |v: Vec<tauri_plugin_dialog::FilePath>| v.into_iter().filter_map(|p| p.into_path().ok()).collect::<Vec<_>>();
+    let chosen: Vec<PathBuf> = match test_pick() {
+        Some(p) => p,
+        None => match mode.as_str() {
+            "folders" => app.dialog().file().blocking_pick_folders().map(to_paths).unwrap_or_default(),
+            "files" => app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_files().map(to_paths).unwrap_or_default(),
+            _ => app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_file().and_then(|p| p.into_path().ok()).into_iter().collect(),
+        },
+    };
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
+    for c in chosen {
+        if c.is_dir() {
+            let root_name = c.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let mut found = Vec::new();
+            walk_files(&c, &extension, &mut found);
+            for f in found {
+                let rel_dir = f.parent().and_then(|d| d.strip_prefix(&c).ok()).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+                let folder = if rel_dir.is_empty() { root_name.clone() } else { format!("{root_name}/{rel_dir}") };
+                files.push((f, folder));
+            }
+        } else {
+            files.push((c, String::new()));
+        }
+    }
+    let entries = files
+        .iter()
+        .map(|(p, folder)| PickedEntry { name: p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), folder: folder.clone() })
+        .collect();
+    *picked.0.lock().unwrap() = files.into_iter().map(|(p, _)| p).collect();
+    Ok(entries)
+}
+
+/// The bytes of picked file `index` (from the last pick_import), sent raw.
+#[tauri::command]
+fn read_picked(picked: State<'_, PickedFile>, index: Option<usize>) -> Result<Response, String> {
+    let path = picked.0.lock().unwrap().get(index.unwrap_or(0)).cloned().ok_or("no file picked")?;
     fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 

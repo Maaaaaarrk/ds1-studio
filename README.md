@@ -100,9 +100,10 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
   to reopen the last map on start.
 - **Export image**: the map or the selection as a PNG.
 - **Import DS1 / DT1** (Home → File): a map comes in as `expansion/Map/<name>.ds1` and goes straight on to *Add to
-  game* (a level, LvlPrest row and tile libraries, pre-filled from a level using the same tiles); a tile library comes in
-  as `PD2assets/<folder>/<name>.dt1` and can be added to the open map at once (LvlTypes slot + Dt1Mask). Files are
-  checked before import, and names are kept plain so the game's tables can use them.
+  game* (a level, LvlPrest row and tile libraries, pre-filled from a level using the same tiles); tile libraries come in
+  as `PD2assets/<folder>/…` — pick several DT1 files, or whole folders (every DT1 inside, subfolders included, keeping
+  their structure) — and can be added to the open map at once (LvlTypes slots + Dt1Mask). Files are checked before
+  import (unreadable ones are left out), and names are kept plain so the game's tables can use them.
 - **Click a tile and it's shown in its DT1** in the Tiles panel, with its main/sub index, orientation and source file.
 - **Overlapping tiles** (trees over trees, a wall over a floor): hold **Shift** and turn the mouse wheel to step
   through them one at a time; only that tile's layer is selected, so copy/cut/Delete leave the others alone.

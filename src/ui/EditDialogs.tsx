@@ -295,18 +295,33 @@ export function WarpLinkDialog({ tables, levelId, vis, busy, onApply, onClose }:
 export const safeName = (s: string) => /^[A-Za-z0-9_-]{1,48}$/.test(s.trim());
 const baseName = (file: string) => file.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'imported';
 
+export interface ImportDt1File {
+  name: string;
+  /** Subfolder path inside the picked folder ('' for a picked file). */
+  folder: string;
+  bytes: Uint8Array;
+  /** Parsed summary, or why the file can't be used. */
+  info: { tiles: number; kinds: string } | string;
+}
+
 export interface ImportDt1Choice {
-  path: string;
+  files: { path: string; bytes: Uint8Array }[];
   addToMap: boolean;
 }
 
-/** Import a DT1 into data/global/tiles/PD2assets/<folder>/, optionally adding it to the open map's level type. */
-export function ImportDt1Dialog({ file, info, exists, mapOpen, busy, onImport, onClose }: {
-  file: { name: string };
-  /** Parsed summary, or why the file can't be used. */
-  info: { tiles: number; kinds: string } | string;
+/** A path segment made safe for the game's tables (letters, digits, - and _). */
+const safeSegment = (s: string) => s.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'x';
+
+/**
+ * Import DT1s (picked files, or whole folders with their subfolders) into data/global/tiles/PD2assets/<folder>/…,
+ * optionally adding them to the open map's level type.
+ */
+export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImport, onClose }: {
+  files: ImportDt1File[];
   exists: (path: string) => boolean;
   mapOpen: string | null;
+  /** Free File slots in the open map's level type (LvlTypes.txt), when known. */
+  freeSlots: number | null;
   busy: boolean;
   onImport: (c: ImportDt1Choice) => void;
   onClose: () => void;
@@ -318,42 +333,96 @@ export function ImportDt1Dialog({ file, info, exists, mapOpen, busy, onImport, o
       return 'custom';
     }
   });
-  const [name, setName] = useState(() => baseName(file.name));
+  const hasFolders = files.some((f) => f.folder);
+  const [keepFolders, setKeepFolders] = useState(true);
+  const valid = files.map((_, i) => i).filter((i) => typeof files[i].info !== 'string');
+  const [chosen, setChosen] = useState(() => new Set(valid));
   const [addToMap, setAddToMap] = useState(!!mapOpen);
-  const path = `data/global/tiles/PD2assets/${folder.trim()}/${name.trim()}.dt1`;
-  const ok = typeof info !== 'string' && safeName(folder) && safeName(name);
+  const okFolder = safeName(folder);
+  // Target path of every file; clashes (same name after cleaning up) get a number.
+  const targets = useMemo(() => {
+    const used = new Set<string>();
+    return files.map((f) => {
+      const sub = keepFolders && f.folder ? `${f.folder.split('/').map(safeSegment).join('/')}/` : '';
+      const base = safeSegment(f.name.replace(/\.dt1$/i, ''));
+      let path = `data/global/tiles/PD2assets/${folder.trim()}/${sub}${base}.dt1`;
+      for (let n = 2; used.has(path.toLowerCase()); n++) path = `data/global/tiles/PD2assets/${folder.trim()}/${sub}${base}_${n}.dt1`;
+      used.add(path.toLowerCase());
+      return path;
+    });
+  }, [files, folder, keepFolders]);
+  const picked = files.map((_, i) => i).filter((i) => chosen.has(i));
+  const tooMany = addToMap && !!mapOpen && freeSlots !== null && picked.length > freeSlots;
+  const toggle = (i: number) =>
+    setChosen((c) => {
+      const n = new Set(c);
+      if (n.has(i)) n.delete(i);
+      else n.add(i);
+      return n;
+    });
   return (
-    <Modal title="Import DT1" onClose={onClose}>
-      <p className="small">
-        <b>{file.name}</b>: {typeof info === 'string' ? <span className="error-text">{info}</span> : `${info.tiles} tiles (${info.kinds})`}
-      </p>
+    <Modal title={files.length === 1 ? 'Import DT1' : `Import ${files.length} DT1s`} onClose={onClose} wide>
       <label className="form-row">
         <span>
-          Folder <HelpTip text="A subfolder of data/global/tiles/PD2assets/ in your mod, to keep your imported tile libraries together (created if needed)." />
+          Into PD2assets / <HelpTip text="A subfolder of data/global/tiles/PD2assets/ in your mod, to keep your imported tile libraries together (created if needed)." />
         </span>
         <input className="text-input" value={folder} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
       </label>
-      <label className="form-row">
-        <span>File name</span>
-        <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
-      </label>
-      {!(safeName(folder) && safeName(name)) && <p className="error-text small">Use letters, digits, - and _ only (no spaces): plain names are safe in the game&apos;s tables.</p>}
-      <p className="small mono">{path}</p>
-      {exists(path) && <p className="warn-text small">A file with that name exists: it will be replaced (the old one is kept as .bak).</p>}
+      {!okFolder && <p className="error-text small">Use letters, digits, - and _ only (no spaces): plain names are safe in the game&apos;s tables.</p>}
+      {hasFolders && (
+        <label className="small">
+          <input type="checkbox" checked={keepFolders} onChange={(e) => setKeepFolders(e.target.checked)} /> keep the folder structure (each picked folder and its subfolders)
+        </label>
+      )}
+      <div className="imp-list">
+        <div className="imp-head small muted">
+          <label>
+            <input type="checkbox" checked={valid.length > 0 && valid.every((i) => chosen.has(i))} onChange={(e) => setChosen(new Set(e.target.checked ? valid : []))} /> {picked.length} of {files.length} selected
+          </label>
+        </div>
+        {files.map((f, i) => {
+          const bad = typeof f.info === 'string';
+          return (
+            <label key={i} className={`imp-row${bad ? ' bad' : ''}`} title={bad ? String(f.info) : targets[i]}>
+              <input type="checkbox" disabled={bad} checked={chosen.has(i)} onChange={() => toggle(i)} />
+              <span className="imp-name">
+                {f.folder && <span className="muted">{f.folder}/</span>}
+                {f.name}
+              </span>
+              <span className="small muted">{bad ? <span className="error-text">unreadable</span> : `${(f.info as { tiles: number }).tiles} tiles`}</span>
+              <span className="imp-target mono small">
+                {targets[i].replace(/^data\/global\/tiles\//, '')}
+                {!bad && exists(targets[i]) && <span className="warn-text"> (replaces)</span>}
+              </span>
+            </label>
+          );
+        })}
+        {!files.length && <p className="muted small pad">No .dt1 files were found there.</p>}
+      </div>
       {mapOpen ? (
         <label className="small">
-          <input type="checkbox" checked={addToMap} onChange={(e) => setAddToMap(e.target.checked)} /> add it to {mapOpen.split('/').pop()}&apos;s tile libraries{' '}
-          <HelpTip text="Puts the DT1 in a free File slot of the map's level type (LvlTypes.txt) and includes it in the map's Dt1Mask (LvlPrest.txt), so both DS1 Studio and the game load it. Without that, the game never loads the file, so it can't crash on it — but maps can't use its tiles either." />
+          <input type="checkbox" checked={addToMap} onChange={(e) => setAddToMap(e.target.checked)} /> add them to {mapOpen.split('/').pop()}&apos;s tile libraries{' '}
+          <HelpTip text="Puts each DT1 in a free File slot of the map's level type (LvlTypes.txt, 32 slots) and includes it in the map's Dt1Mask (LvlPrest.txt), so both DS1 Studio and the game load them. Without that, the game never loads the files (so it can't crash on them), but maps can't use their tiles either." />
+          {freeSlots !== null && <span className="muted"> · {freeSlots} free slot{freeSlots === 1 ? '' : 's'}</span>}
         </label>
       ) : (
-        <p className="muted small">Open a map first to add it to that map&apos;s tile libraries right away; otherwise add it later with Map → Tile libraries.</p>
+        <p className="muted small">Open a map first to add them to that map&apos;s tile libraries right away; otherwise add them later with Map → Tile libraries.</p>
+      )}
+      {tooMany && (
+        <p className="error-text small">
+          The map&apos;s level type has only {freeSlots} free slots for {picked.length} DT1s: select fewer (the ones this map needs), or untick “add them” and add them later.
+        </p>
       )}
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn primary" disabled={!ok || busy} onClick={() => onImport({ path, addToMap: !!mapOpen && addToMap })}>
-          {busy ? 'Importing…' : 'Import'}
+        <button
+          className="btn primary"
+          disabled={!okFolder || !picked.length || busy || tooMany}
+          onClick={() => onImport({ files: picked.map((i) => ({ path: targets[i], bytes: files[i].bytes })), addToMap: !!mapOpen && addToMap })}
+        >
+          {busy ? 'Importing…' : `Import ${picked.length || ''}`}
         </button>
       </div>
     </Modal>

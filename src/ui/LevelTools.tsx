@@ -36,7 +36,7 @@ interface RegisterProps {
   onApply: (writes: TableWrite[]) => Promise<void>;
   onClose: () => void;
   /** Pre-filled choices (e.g. right after importing a map). */
-  initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string };
+  initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string };
 }
 
 /** Creates the LvlPrest (and optionally Levels/LvlTypes) rows that make the game load this map. */
@@ -46,7 +46,9 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onAppl
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
   const [name, setName] = useState(() => initial?.name ?? mapPath.split('/').pop()!.replace(/\.ds1$/i, ''));
   const [busy, setBusy] = useState(false);
-  const rel = mapPath.replace(/^data\/global\/tiles\//i, '');
+  // The file's own spelling when known (an imported map), so the table names it exactly as it is on disk.
+  const exact = initial?.path && normalizePath(initial.path) === normalizePath(mapPath) ? initial.path : mapPath;
+  const rel = exact.replace(/^data\/global\/tiles\//i, '');
 
   useEffect(() => {
     void Promise.all([load(fs, 'LvlPrest.txt'), load(fs, 'Levels.txt'), load(fs, 'LvlTypes.txt')]).then(([prest, levels, types]) => {

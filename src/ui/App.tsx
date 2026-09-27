@@ -61,7 +61,7 @@ import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type Laye
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
-import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, importNamed, type SaveTarget } from '../vfs/save';
+import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
@@ -103,7 +103,7 @@ import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReop
 import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
 import { renderMapImage } from '../render/exportImage';
 import { writeTileSettings } from '../formats/dt1Header';
-import { ExportImageDialog, ImportDs1Dialog, ImportDt1Dialog, ReplaceDialog, WarpLinkDialog, type ImportDs1Choice, type ImportDt1Choice } from './EditDialogs';
+import { ExportImageDialog, ImportDs1Dialog, ImportDt1Dialog, ReplaceDialog, WarpLinkDialog, type ImportDs1Choice, type ImportDt1Choice, type ImportDt1File } from './EditDialogs';
 import { levelLinks, loadWarpTables, type WarpTables } from '../game/warps';
 import { parseDt1 } from '../formats/dt1';
 
@@ -200,13 +200,13 @@ export function App() {
   const [warpBusy, setWarpBusy] = useState(false);
   /** A DT1 or DS1 picked for importing (with what it contains, or why it can't be used). */
   const [importing, setImporting] = useState<
-    | { kind: 'dt1'; name: string; bytes: Uint8Array; info: { tiles: number; kinds: string } | string }
+    | { kind: 'dt1'; files: ImportDt1File[] }
     | { kind: 'ds1'; name: string; bytes: Uint8Array; info: { width: number; height: number; act: number; missing: string[] } | string }
     | null
   >(null);
   const [importBusy, setImportBusy] = useState(false);
   /** Choices "Add to game" starts with (after importing a map). */
-  const [registerInitial, setRegisterInitial] = useState<{ mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string } | undefined>(undefined);
+  const [registerInitial, setRegisterInitial] = useState<{ mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string } | undefined>(undefined);
   const [paletteFocus, setPaletteFocus] = useState<PaletteFocus | null>(null);
   /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
   const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
@@ -1243,62 +1243,79 @@ export function App() {
     [writeFiles, reloadTables, notify],
   );
 
-  /** Picks a DT1 or DS1 to import and checks it can be read. */
+  /** What a DT1 contains (for the import list), or why it can't be used. */
+  const describeDt1 = (bytes: Uint8Array): { tiles: number; kinds: string } | string => {
+    try {
+      const d = parseDt1(bytes);
+      if (!d.tiles.length) return 'It has no tiles.';
+      const floors = d.tiles.filter((t) => t.orientation === 0).length;
+      const shadows = d.tiles.filter((t) => t.orientation === 13).length;
+      const walls = d.tiles.length - floors - shadows;
+      return { tiles: d.tiles.length, kinds: [floors && `${floors} floors`, walls && `${walls} walls/objects`, shadows && `${shadows} shadows`].filter(Boolean).join(', ') };
+    } catch (e) {
+      return `This isn't a DT1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
+    }
+  };
+
+  /** Picks DT1s (files, or folders with their subfolders) or a DS1 to import, and checks what they contain. */
   const pickImport = useCallback(
-    async (kind: 'dt1' | 'ds1') => {
+    async (kind: 'dt1' | 'ds1', mode: 'file' | 'files' | 'folders' = 'file') => {
       if (!gd) return;
+      if (kind === 'dt1') {
+        const picked = await importMany('dt1', mode);
+        if (!picked.length) {
+          if (mode === 'folders') notify('No .dt1 files were chosen (or found in those folders).');
+          return;
+        }
+        notify(`Reading ${picked.length} DT1${picked.length === 1 ? '' : 's'}…`);
+        const files: ImportDt1File[] = [];
+        for (const p of picked) {
+          const bytes = await p.read();
+          files.push({ name: p.name, folder: p.folder, bytes, info: describeDt1(bytes) });
+        }
+        setImporting({ kind, files });
+        return;
+      }
       const f = await importNamed(kind);
       if (!f) return;
-      if (kind === 'dt1') {
-        let info: { tiles: number; kinds: string } | string;
-        try {
-          const d = parseDt1(f.bytes);
-          if (!d.tiles.length) throw new Error('it has no tiles');
-          const floors = d.tiles.filter((t) => t.orientation === 0).length;
-          const shadows = d.tiles.filter((t) => t.orientation === 13).length;
-          info = { tiles: d.tiles.length, kinds: [floors && `${floors} floors`, d.tiles.length - floors - shadows && `${d.tiles.length - floors - shadows} walls/objects`, shadows && `${shadows} shadows`].filter(Boolean).join(', ') };
-        } catch (e) {
-          info = `This isn't a DT1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
-        }
-        setImporting({ kind, name: f.name, bytes: f.bytes, info });
-      } else {
-        let info: { width: number; height: number; act: number; missing: string[] } | string;
-        try {
-          const d = parseDs1(f.bytes);
-          const missing = d.files
-            .map(ds1FileToDt1Path)
-            .filter((p): p is string => !!p)
-            .filter((p) => !gd.fs.locate(normalizePath(p)))
-            .map((p) => p.replace(/^data\/global\/tiles\//i, ''));
-          info = { width: d.width, height: d.height, act: d.act, missing };
-        } catch (e) {
-          info = `This isn't a DS1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
-        }
-        setImporting({ kind, name: f.name, bytes: f.bytes, info });
+      let info: { width: number; height: number; act: number; missing: string[] } | string;
+      try {
+        const d = parseDs1(f.bytes);
+        const missing = d.files
+          .map(ds1FileToDt1Path)
+          .filter((p): p is string => !!p)
+          .filter((p) => !gd.fs.locate(normalizePath(p)))
+          .map((p) => p.replace(/^data\/global\/tiles\//i, ''));
+        info = { width: d.width, height: d.height, act: d.act, missing };
+      } catch (e) {
+        info = `This isn't a DS1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
       }
+      setImporting({ kind, name: f.name, bytes: f.bytes, info });
     },
-    [gd],
+    [gd, notify],
   );
 
   const importDt1 = useCallback(
     async (c: ImportDt1Choice) => {
-      if (!importing || importing.kind !== 'dt1') return;
+      if (!importing || importing.kind !== 'dt1' || !c.files.length) return;
       setImportBusy(true);
       try {
-        await writeFiles([{ path: c.path, bytes: importing.bytes }]);
+        await writeFiles(c.files);
         try {
-          localStorage.setItem('ds1studio.importFolder', c.path.split('/').slice(-2, -1)[0]);
+          localStorage.setItem('ds1studio.importFolder', c.files[0].path.split('/')[4] ?? 'custom');
         } catch {
           // per-viewer convenience only
         }
         setImporting(null);
+        const n = c.files.length;
+        const what = n === 1 ? c.files[0].path.split('/').pop() : `${n} DT1s`;
         if (c.addToMap && map) {
-          // Same as adding it in Tile libraries: the map's list, a LvlTypes File slot and the Dt1Mask.
-          await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), normalizePath(c.path)]);
-          notify(`Imported ${c.path.split('/').pop()} and added it to this map's tile libraries (LvlTypes / Dt1Mask).`);
+          // Same as adding them in Tile libraries: the map's list, LvlTypes File slots and the Dt1Mask.
+          await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...c.files.map((f) => f.path)]);
+          notify(`Imported ${what} and added ${n === 1 ? 'it' : 'them'} to this map's tile libraries (LvlTypes / Dt1Mask).`);
         } else {
           await reloadTables();
-          notify(`Imported ${c.path}. Add it to a map with Map → Tile libraries.`);
+          notify(`Imported ${what} into ${c.files[0].path.split('/').slice(3, 5).join('/')}. Add ${n === 1 ? 'it' : 'them'} to a map with Map → Tile libraries.`);
         }
       } catch (e) {
         notify(`Import failed: ${(e as Error).message}`, true);
@@ -1341,6 +1358,7 @@ export function App() {
             if (row) levelId = Number(row[idCol]);
           }
           setRegisterInitial({
+            path: c.path,
             mode: 'new',
             levelId,
             name: c.path.split('/').pop()!.replace(/\.ds1$/i, ''),
@@ -1775,7 +1793,18 @@ export function App() {
             { label: 'Export .ds1', icon: <FileOutput />, onClick: () => void exportFile(), disabled: noMap, size: 'sm' },
             { label: 'Export image', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the map (or the selection) as a PNG picture' },
             { label: 'Import DS1…', icon: <FileInput />, onClick: () => void pickImport('ds1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a map (.ds1) into your mod as expansion/Map/<name>.ds1, then add it to the game' : 'No writable mod folder' },
-            { label: 'Import DT1…', icon: <Grid2x2Plus />, onClick: () => void pickImport('dt1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a tile library (.dt1) into your mod under PD2assets/<folder>, and add it to the open map' : 'No writable mod folder' },
+            {
+              label: 'Import DT1',
+              icon: <Grid2x2Plus />,
+              onClick: () => undefined,
+              disabled: !canWrite,
+              size: 'sm',
+              title: canWrite ? 'Bring tile libraries (.dt1) into your mod under PD2assets/<folder>, and add them to the open map' : 'No writable mod folder',
+              menu: [
+                { label: 'DT1 files…', hint: 'one or several', onClick: () => void pickImport('dt1', 'files') },
+                { label: 'Folders…', hint: 'with their subfolders', onClick: () => void pickImport('dt1', 'folders') },
+              ],
+            },
             {
               label: 'Recent',
               icon: <Clock />,
@@ -2308,10 +2337,10 @@ export function App() {
       )}
       {importing?.kind === 'dt1' && (
         <ImportDt1Dialog
-          file={importing}
-          info={importing.info}
+          files={importing.files}
           exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
           mapOpen={map?.path ?? null}
+          freeSlots={map?.resolution.lvlType ? map.resolution.lvlType.files.filter((f) => !f).length : null}
           busy={importBusy}
           onImport={(c) => void importDt1(c)}
           onClose={() => setImporting(null)}

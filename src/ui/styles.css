@@ -675,3 +675,11 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .crash-message { color: #ff9aa2; word-break: break-word; }
 .crash-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .crash-stack { max-height: 240px; overflow: auto; font-size: 11px; white-space: pre-wrap; background: #000; padding: 8px; border-radius: 4px; user-select: text; }
+
+/* Import lists */
+.imp-list { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin: 6px 0; }
+.imp-head { padding: 4px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel, #15171d); }
+.imp-row { display: grid; grid-template-columns: 20px minmax(0, 1.3fr) 70px minmax(0, 1.7fr); gap: 8px; align-items: center; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+.imp-row:hover { background: var(--hover, rgba(255, 255, 255, 0.05)); }
+.imp-row.bad { opacity: 0.7; cursor: default; }
+.imp-name, .imp-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
