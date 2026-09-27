@@ -46,6 +46,7 @@ import {
   Lightbulb,
   FileInput,
   Grid2x2Plus,
+  Blend,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
@@ -87,6 +88,7 @@ import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
+import { ActSafeDialog } from './ActSafeDialog';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
@@ -224,7 +226,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -1940,6 +1942,7 @@ export function App() {
           items: [
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
             { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+            { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
             { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],
         },
@@ -2503,7 +2506,26 @@ export function App() {
           <p className="small">{automapData ? 'Pick the AutoMap.txt level for this map in the Automap panel first.' : 'Loading AutoMap.txt and MaxiMap.dc6…'}</p>
         </Modal>
       ))}
- {dialog === 'dt1edit' && map && (
+ {dialog === 'actsafe' && map && (
+        <ActSafeDialog
+          map={map}
+          gd={data.gd}
+          canSave={canWrite}
+          onApply={async (files) => {
+            await writeFiles(files);
+            await reloadTables();
+            setDialog(null);
+            notify(`Converted ${files.length} DT1${files.length === 1 ? '' : 's'} to act-safe colours: ${files.map((f) => f.path.split('/').pop()).join(', ')} (originals kept as .bak)`);
+          }}
+          onRemove={async (paths) => {
+            const drop = new Set(paths.map(normalizePath));
+            await applyDt1s(map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path) && !drop.has(normalizePath(l.path))).map((l) => l.path));
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'dt1edit' && map && (
         <Dt1Editor
           map={map}
           gd={data.gd}

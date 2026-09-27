@@ -3,9 +3,10 @@ import { Orientation } from '../formats/dt1';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { SubTileFlag, walkability, type Scene } from '../render/scene';
 import { normalizePath } from '../vfs/vfs';
-import { GameData } from './GameData';
+import { GameData, TileLibrary } from './GameData';
 import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
+import { duplicateDt1s } from './duplicateDt1s';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
@@ -98,6 +99,30 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
       detail: `${notFound.map((l) => short(l.path)).join(', ')}. The game cannot load ${notFound.length > 1 ? 'them' : 'it'} either.`,
       fixes: [{ kind: 'remove-dt1s', label: `Remove ${notFound.length > 1 ? 'them' : 'it'} from the map's libraries`, paths: notFound.map((l) => l.path) }],
     });
+  const dups = duplicateDt1s(lib);
+  if (dups.length) {
+    const shared = new Set(dups.flatMap((d) => [...d.shared]));
+    const cells: { x: number; y: number }[] = [];
+    for (let i = 0; i < ds1.width * ds1.height; i++) {
+      const used =
+        ds1.floors.some((l) => l[i].prop1 !== 0 && shared.has(TileLibrary.key(Orientation.Floor, l[i].mainIndex, l[i].subIndex))) ||
+        ds1.walls.some((l) => l[i].prop1 !== 0 && shared.has(TileLibrary.key(l[i].orientation, l[i].mainIndex, l[i].subIndex)));
+      if (used) cells.push({ x: i % ds1.width, y: Math.floor(i / ds1.width) });
+    }
+    const earlier = [...new Set(dups.map((d) => d.earlier))];
+    const later = [...new Set(dups.map((d) => d.later))];
+    out.push({
+      severity: 'warning',
+      area: 'Tiles',
+      title: `${dups.length} tile librar${dups.length > 1 ? 'ies are' : 'y is'} loaded twice`,
+      detail: `${dups.map((d) => `${short(d.earlier)} and ${short(d.later)}`).join('; ')} provide the same tiles. Where a tile has random variants, the game picks among both copies, so the map shows a random mix of them (odd colours on some cells, for example) — in game too. Keep one copy of each.`,
+      cells,
+      fixes: [
+        { kind: 'remove-dt1s', label: `Keep the later ones: remove ${earlier.map(short).join(', ')}`, paths: earlier },
+        { kind: 'remove-dt1s', label: `Keep the earlier ones: remove ${later.map(short).join(', ')}`, paths: later },
+      ],
+    });
+  }
   if (scene.missing.length) {
     const keys = new Set(scene.missing.map((m) => `${m.orientation}|${m.main}|${m.sub}`));
     const loadedSet = new Set(lib.loaded.map((l) => normalizePath(l.path)));

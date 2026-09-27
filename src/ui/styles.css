@@ -693,3 +693,12 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .imp-need.provided .imp-mark { color: #7cc8ff; }
 .imp-pick select { width: 100%; }
 .imp-extra { display: block; padding: 2px 0; }
+
+/* Make act-safe */
+.actsafe-list { display: flex; flex-direction: column; gap: 8px; max-height: 56vh; overflow: auto; margin: 8px 0; }
+.actsafe-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.actsafe-row.off { opacity: 0.6; }
+.actsafe-name { display: flex; align-items: center; gap: 6px; }
+.actsafe-samples { grid-column: 1 / -1; display: grid; grid-template-columns: 40px repeat(4, 90px); gap: 4px 8px; align-items: center; }
+.actsafe-samples .thumb-img { --thumb-h: 48px; background-color: #0b0c0f; border-radius: 4px; }
+.actsafe-callout { display: block; margin: 8px 0; line-height: 1.5; } .actsafe-callout .btn { margin-top: 6px; }
