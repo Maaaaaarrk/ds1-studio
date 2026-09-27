@@ -65,6 +65,8 @@ downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` pac
   preset's `Dt1Mask`, and the right act palette. When two loaded DT1s have the same tile, the one listed later in
   `LvlTypes.txt` replaces it, as in the game (mods use this to swap tiles).
 - Special tiles (warps, town and map entries, corpse and portal spots) are invisible in game: DS1 Studio labels them.
+  **Warps show where they lead** ("Warp · link 1 → Catacombs Level 1", from Levels.txt): select one to open the
+  map it leads to, or change the level it connects to (and add the way back) without touching the .txt files.
 - Floors, walls, roofs, shadows, lower walls, animated tiles, special tiles, objects and NPCs with their real sprites
   — **animated in real time** at the game's own speeds, with fire, glows, magic and fog blended like in game — NPC
   paths, substitution groups. Objects that show their sprite don't get a marker on top (hover or select one to see its
@@ -97,6 +99,10 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
   you're offered them when you open the map again. **Recent maps** on the Home tab and the start page, with an option
   to reopen the last map on start.
 - **Export image**: the map or the selection as a PNG.
+- **Import DS1 / DT1** (Home → File): a map comes in as `expansion/Map/<name>.ds1` and goes straight on to *Add to
+  game* (a level, LvlPrest row and tile libraries, pre-filled from a level using the same tiles); a tile library comes in
+  as `PD2assets/<folder>/<name>.dt1` and can be added to the open map at once (LvlTypes slot + Dt1Mask). Files are
+  checked before import, and names are kept plain so the game's tables can use them.
 - **Click a tile and it's shown in its DT1** in the Tiles panel, with its main/sub index, orientation and source file.
 - **Overlapping tiles** (trees over trees, a wall over a floor): hold **Shift** and turn the mouse wheel to step
   through them one at a time; only that tile's layer is selected, so copy/cut/Delete leave the others alone.

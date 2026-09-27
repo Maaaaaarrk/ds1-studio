@@ -44,9 +44,11 @@ import {
   PaintBucket,
   MapPinned,
   Lightbulb,
+  FileInput,
+  Grid2x2Plus,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
+import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
@@ -59,7 +61,7 @@ import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type Laye
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
-import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, type SaveTarget } from '../vfs/save';
+import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
@@ -94,13 +96,15 @@ import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type Des
 import { DesktopSetup } from './DesktopSetup';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
-import { isBuiltinPath } from '../game/specialTiles';
+import { isBuiltinPath, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
 import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
 import { renderMapImage } from '../render/exportImage';
 import { writeTileSettings } from '../formats/dt1Header';
-import { ExportImageDialog, ReplaceDialog } from './EditDialogs';
+import { ExportImageDialog, ImportDs1Dialog, ImportDt1Dialog, ReplaceDialog, WarpLinkDialog, type ImportDs1Choice, type ImportDt1Choice } from './EditDialogs';
+import { levelLinks, loadWarpTables, type WarpTables } from '../game/warps';
+import { parseDt1 } from '../formats/dt1';
 
 type DataState =
   | { status: 'connecting' }
@@ -189,6 +193,19 @@ export function App() {
   const flagEdits = useRef(new Map<Dt1Tile, { path: string; index: number; original: Uint8Array }>());
   const [flagEditCount, setFlagEditCount] = useState(0);
   const [savingFlags, setSavingFlags] = useState(false);
+  /** Levels / LvlWarp / LvlPrest, for showing and changing where warps lead. */
+  const [warpTables, setWarpTables] = useState<WarpTables | null>(null);
+  const [warpEdit, setWarpEdit] = useState<number | null>(null);
+  const [warpBusy, setWarpBusy] = useState(false);
+  /** A DT1 or DS1 picked for importing (with what it contains, or why it can't be used). */
+  const [importing, setImporting] = useState<
+    | { kind: 'dt1'; name: string; bytes: Uint8Array; info: { tiles: number; kinds: string } | string }
+    | { kind: 'ds1'; name: string; bytes: Uint8Array; info: { width: number; height: number; act: number; missing: string[] } | string }
+    | null
+  >(null);
+  const [importBusy, setImportBusy] = useState(false);
+  /** Choices "Add to game" starts with (after importing a map). */
+  const [registerInitial, setRegisterInitial] = useState<{ mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string } | undefined>(undefined);
   const [paletteFocus, setPaletteFocus] = useState<PaletteFocus | null>(null);
   /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
   const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
@@ -332,8 +349,9 @@ export function App() {
   }, [doc]);
 
   const open = useCallback(
-    async (path: string) => {
-      if (!gd || !confirmDiscard()) return;
+    /** `confirmed`: the caller already asked about unsaved changes. */
+    async (path: string, confirmed = false) => {
+      if (!gd || (!confirmed && !confirmDiscard())) return;
       setLoadingPath(path);
       try {
         const m = await openMap(gd, path);
@@ -469,6 +487,26 @@ export function App() {
     setFlagEditCount(0);
     bump();
   }, []);
+
+  useEffect(() => {
+    if (!gd) return;
+    let live = true;
+    void loadWarpTables(gd.fs).then((t) => live && setWarpTables(t));
+    return () => {
+      live = false;
+    };
+  }, [gd]);
+  const mapLevelId = map?.resolution.preset?.levelId ?? 0;
+  const links = useMemo(() => (warpTables && gd && mapLevelId > 0 ? levelLinks(warpTables, mapLevelId, gd.fs) : null), [warpTables, gd, mapLevelId]);
+  const specialLabel = useCallback(
+    (main: number, sub: number) => {
+      const base = main <= 7 ? `Warp · link ${main}` : null;
+      if (base === null) return specialTileInfo(main, sub).label;
+      const link = links?.links[main];
+      return link ? `${base} → ${link.target.name}` : links ? `${base} (not set)` : specialTileInfo(main, sub).label;
+    },
+    [links],
+  );
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` invalidates the scene after in-place edits
   const scene = useMemo(() => (map ? buildScene(map.ds1, map.lib) : null), [map, revision]);
@@ -1186,6 +1224,138 @@ export function App() {
     }
   }, [gd, writeFiles, reloadTables, notify]);
 
+  /** Saves a warp link change (Levels.txt) and reloads the tables so labels and panels show it. */
+  const applyWarpLink = useCallback(
+    async (write: TableWrite) => {
+      setWarpBusy(true);
+      try {
+        await writeFiles([write]);
+        await reloadTables();
+        setWarpEdit(null);
+        notify(`Levels.txt: ${write.summary.join('; ')}`);
+      } catch (e) {
+        notify(`Couldn't save Levels.txt: ${(e as Error).message}`, true);
+      } finally {
+        setWarpBusy(false);
+      }
+    },
+    [writeFiles, reloadTables, notify],
+  );
+
+  /** Picks a DT1 or DS1 to import and checks it can be read. */
+  const pickImport = useCallback(
+    async (kind: 'dt1' | 'ds1') => {
+      if (!gd) return;
+      const f = await importNamed(kind);
+      if (!f) return;
+      if (kind === 'dt1') {
+        let info: { tiles: number; kinds: string } | string;
+        try {
+          const d = parseDt1(f.bytes);
+          if (!d.tiles.length) throw new Error('it has no tiles');
+          const floors = d.tiles.filter((t) => t.orientation === 0).length;
+          const shadows = d.tiles.filter((t) => t.orientation === 13).length;
+          info = { tiles: d.tiles.length, kinds: [floors && `${floors} floors`, d.tiles.length - floors - shadows && `${d.tiles.length - floors - shadows} walls/objects`, shadows && `${shadows} shadows`].filter(Boolean).join(', ') };
+        } catch (e) {
+          info = `This isn't a DT1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
+        }
+        setImporting({ kind, name: f.name, bytes: f.bytes, info });
+      } else {
+        let info: { width: number; height: number; act: number; missing: string[] } | string;
+        try {
+          const d = parseDs1(f.bytes);
+          const missing = d.files
+            .map(ds1FileToDt1Path)
+            .filter((p): p is string => !!p)
+            .filter((p) => !gd.fs.locate(normalizePath(p)))
+            .map((p) => p.replace(/^data\/global\/tiles\//i, ''));
+          info = { width: d.width, height: d.height, act: d.act, missing };
+        } catch (e) {
+          info = `This isn't a DS1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
+        }
+        setImporting({ kind, name: f.name, bytes: f.bytes, info });
+      }
+    },
+    [gd],
+  );
+
+  const importDt1 = useCallback(
+    async (c: ImportDt1Choice) => {
+      if (!importing || importing.kind !== 'dt1') return;
+      setImportBusy(true);
+      try {
+        await writeFiles([{ path: c.path, bytes: importing.bytes }]);
+        try {
+          localStorage.setItem('ds1studio.importFolder', c.path.split('/').slice(-2, -1)[0]);
+        } catch {
+          // per-viewer convenience only
+        }
+        setImporting(null);
+        if (c.addToMap && map) {
+          // Same as adding it in Tile libraries: the map's list, a LvlTypes File slot and the Dt1Mask.
+          await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), normalizePath(c.path)]);
+          notify(`Imported ${c.path.split('/').pop()} and added it to this map's tile libraries (LvlTypes / Dt1Mask).`);
+        } else {
+          await reloadTables();
+          notify(`Imported ${c.path}. Add it to a map with Map → Tile libraries.`);
+        }
+      } catch (e) {
+        notify(`Import failed: ${(e as Error).message}`, true);
+      } finally {
+        setImportBusy(false);
+      }
+    },
+    [importing, map, writeFiles, applyDt1s, reloadTables, notify],
+  );
+
+  const importDs1 = useCallback(
+    async (c: ImportDs1Choice) => {
+      if (!importing || importing.kind !== 'ds1' || !gd) return;
+      if (!confirmDiscard()) return;
+      setImportBusy(true);
+      try {
+        await writeFiles([{ path: c.path, bytes: importing.bytes }]);
+        setImporting(null);
+        await reloadTables();
+        await open(normalizePath(c.path), true);
+        if (c.register) {
+          // Start "Add to game" from a level that uses the same tile set (a new level cloned from it).
+          const m = await openMap(gd, normalizePath(c.path));
+          // The level type whose files cover the map's tile libraries best (a map new to the game has none yet).
+          let typeId = m.resolution.lvlType?.id;
+          if (typeId === undefined) {
+            const want = new Set(m.resolution.paths.map(normalizePath));
+            let best = 0;
+            for (const t of gd.lvlTypes) {
+              const score = GameData.dt1sFor(t, 0xffffffff).filter((p) => want.has(p)).length;
+              if (score > best) [best, typeId] = [score, t.id];
+            }
+          }
+          const t = warpTables;
+          let levelId: number | undefined;
+          if (t && typeId !== undefined) {
+            const idCol = t.levels.columns.indexOf('Id');
+            const typeCol = t.levels.columns.indexOf('LevelType');
+            const row = t.levels.rows.find((r) => Number(r[typeCol]) === typeId && Number(r[idCol]) > 0);
+            if (row) levelId = Number(row[idCol]);
+          }
+          setRegisterInitial({
+            mode: 'new',
+            levelId,
+            name: c.path.split('/').pop()!.replace(/\.ds1$/i, ''),
+            note: `Imported. Now add it to the game: a new level${levelId ? ' is pre-filled from one using the same tiles' : ''}; pick another level to copy settings from if you like, then Apply.`,
+          });
+          setDialog('register');
+        } else notify(`Imported ${c.path}. Use Data → Add to game when you want the game to load it.`);
+      } catch (e) {
+        notify(`Import failed: ${(e as Error).message}`, true);
+      } finally {
+        setImportBusy(false);
+      }
+    },
+    [importing, gd, confirmDiscard, writeFiles, reloadTables, open, warpTables, notify],
+  );
+
   // Desktop app: a quiet update check at most once a day; a newer version is announced, never installed unasked.
   const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
   useEffect(() => {
@@ -1603,29 +1773,25 @@ export function App() {
             { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
             { label: 'Export .ds1', icon: <FileOutput />, onClick: () => void exportFile(), disabled: noMap, size: 'sm' },
             { label: 'Export image', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the map (or the selection) as a PNG picture' },
+            { label: 'Import DS1…', icon: <FileInput />, onClick: () => void pickImport('ds1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a map (.ds1) into your mod as expansion/Map/<name>.ds1, then add it to the game' : 'No writable mod folder' },
+            { label: 'Import DT1…', icon: <Grid2x2Plus />, onClick: () => void pickImport('dt1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a tile library (.dt1) into your mod under PD2assets/<folder>, and add it to the open map' : 'No writable mod folder' },
             {
-              custom: (
-                <select
-                  className="recent-select"
-                  value=""
-                  title="Recently opened maps"
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === '__reopen') {
-                      setReopenLast(!reopenLastMap);
-                      setReopenLastMap(!reopenLastMap);
-                    } else if (v) void open(v);
-                  }}
-                >
-                  <option value="">Recent maps…</option>
-                  {recentMapList.map((m) => (
-                    <option key={m.path} value={m.path}>
-                      {m.path.split('/').pop()} — {folderOf(m.path)}
-                    </option>
-                  ))}
-                  <option value="__reopen">{reopenLastMap ? '☑' : '☐'} Reopen the last map on start</option>
-                </select>
-              ),
+              label: 'Recent',
+              icon: <Clock />,
+              onClick: () => undefined,
+              size: 'sm',
+              title: 'Recently opened maps',
+              emptyMenu: 'No maps opened yet.',
+              menu: [
+                ...recentMapList.map((m) => ({ label: m.path.split('/').pop()!, hint: folderOf(m.path), title: m.path, onClick: () => void open(m.path) })),
+                {
+                  label: `${reopenLastMap ? '☑' : '☐'} Reopen the last map on start`,
+                  onClick: () => {
+                    setReopenLast(!reopenLastMap);
+                    setReopenLastMap(!reopenLastMap);
+                  },
+                },
+              ],
             },
             ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const }] : []),
           ],
@@ -1866,6 +2032,7 @@ export function App() {
             onCycle={cycleStack}
             automap={automapView}
             centerOn={centerOn}
+            specialLabel={specialLabel}
           />
         ) : (
           <div className="empty-stage">
@@ -2104,6 +2271,7 @@ export function App() {
                 walkabilityShown: visibility.walkable,
                 onShowWalkability: () => setVisibility((v) => ({ ...v, walkable: true })),
               }}
+              warps={{ links, onOpen: (p) => void open(p), onEdit: (vis) => setWarpEdit(vis) }}
             />
             <HistoryPanel
               doc={doc}
@@ -2125,6 +2293,23 @@ export function App() {
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
       {dialog === 'about' && <AboutDialog onClose={() => setDialog(null)} />}
+      {warpEdit !== null && warpTables && mapLevelId > 0 && (
+        <WarpLinkDialog tables={warpTables} levelId={mapLevelId} vis={warpEdit} busy={warpBusy} onApply={(w) => void applyWarpLink(w)} onClose={() => setWarpEdit(null)} />
+      )}
+      {importing?.kind === 'dt1' && (
+        <ImportDt1Dialog
+          file={importing}
+          info={importing.info}
+          exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
+          mapOpen={map?.path ?? null}
+          busy={importBusy}
+          onImport={(c) => void importDt1(c)}
+          onClose={() => setImporting(null)}
+        />
+      )}
+      {importing?.kind === 'ds1' && (
+        <ImportDs1Dialog file={importing} info={importing.info} exists={(p) => !!data.gd.fs.locate(normalizePath(p))} busy={importBusy} onImport={(c) => void importDs1(c)} onClose={() => setImporting(null)} />
+      )}
       {dialog === 'replace' && doc && map && (
         <ReplaceDialog
           doc={doc}
@@ -2281,7 +2466,11 @@ export function App() {
           height={doc.ds1.height}
           usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p))}
           onApply={applyTableWrites}
-          onClose={() => setDialog(null)}
+          onClose={() => {
+            setDialog(null);
+            setRegisterInitial(undefined);
+          }}
+          initial={registerInitial}
         />
       )}
       {dialog === 'cube' && doc && <CubeRecipeDialog fs={data.gd.fs} mapName={doc.path.split('/').pop()!.replace(/\.ds1$/i, '')} onApply={applyTableWrites} onClose={() => setDialog(null)} />}

@@ -8,6 +8,7 @@ import { SubtileEditor } from './TileSettings';
 import { isBuiltinPath } from '../game/specialTiles';
 import { decodeTile } from '../formats/dt1';
 import type { Palette } from '../formats/palette';
+import type { LevelLinks } from '../game/warps';
 import type { Bindings } from './keybindings';
 import { GameData } from '../game/GameData';
 import { rectSize, type CellRect } from '../game/clipboard';
@@ -148,6 +149,60 @@ interface CellPanelProps {
   brush?: Brush | null;
   /** Editing the sub-tile flags of the tiles in the cell (they belong to the DT1, so saving writes the DT1). */
   tileFlags?: TileFlagsControl;
+  /** Where this map's warps lead (Levels.txt), for warp special tiles. */
+  warps?: WarpControl;
+}
+
+export interface WarpControl {
+  /** The map's level and its links; null when the map isn't tied to a level (not in LvlPrest). */
+  links: LevelLinks | null;
+  onOpen: (path: string) => void;
+  onEdit: (vis: number) => void;
+}
+
+/** A warp tile's destination: the level its link leads to, how, and that level's maps. */
+function WarpInfo({ vis, control }: { vis: number; control: WarpControl }) {
+  if (!control.links)
+    return (
+      <div className="cell-warp">
+        <p className="small muted">
+          This map isn&apos;t tied to a level (no LvlPrest row with a LevelId), so its warps don&apos;t lead anywhere yet. Add it to the game first (Data → Add to game).
+        </p>
+      </div>
+    );
+  const link = control.links.links[vis];
+  return (
+    <div className="cell-warp">
+      <div className="small">
+        <b>Warp link {vis}</b> of {control.links.level.name} <HelpTip text={`A warp tile with main index ${vis} uses link ${vis} of its level: Levels.txt column Vis${vis} says which level it leads to, Warp${vis} which kind of warp it is (LvlWarp.txt: stairs, cave entrance…).`} />
+      </div>
+      {link ? (
+        <>
+          <div className="small">
+            Leads to <b>{link.target.name}</b> <span className="muted">(level {link.target.id})</span>
+            {link.warp && <span className="muted"> · {link.warp.name}</span>}
+          </div>
+          {link.target.maps.length ? (
+            <div className="cell-warp-maps">
+              {link.target.maps.slice(0, 6).map((p) => (
+                <button key={p} className="btn small" onClick={() => control.onOpen(p)} title={`Open ${p}`}>
+                  Open {p.split('/').pop()}
+                </button>
+              ))}
+              {link.target.maps.length > 6 && <span className="muted small">+{link.target.maps.length - 6} more</span>}
+            </div>
+          ) : (
+            <div className="small muted">That level is built at random by the game (no preset map to open).</div>
+          )}
+        </>
+      ) : (
+        <div className="small warn-text">Link {vis} isn&apos;t set: this warp leads nowhere in game.</div>
+      )}
+      <button className="link small" onClick={() => control.onEdit(vis)}>
+        {link ? 'Change where it leads…' : 'Connect it to a level…'}
+      </button>
+    </div>
+  );
 }
 
 export interface TileFlagsControl {
@@ -269,7 +324,7 @@ function drawnTile(scene: Scene, layer: LayerRef, x: number, y: number): Dt1Tile
 }
 
 /** Shows every layer of one cell; editable when that cell is selected. */
-export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer, brush, tileFlags }: CellPanelProps) {
+export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, onFocusTile, onlyLayer, brush, tileFlags, warps }: CellPanelProps) {
   const { ds1, lib } = map;
   if (!cell) {
     return (
@@ -380,6 +435,7 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
             <RawBytes cell={c} onCommit={(next) => set(layer.kind === 'wall' ? { ...(c as WallCell), ...next } : next)} />
           </CellField>
         </div>
+        {special && warps && c.mainIndex <= 7 && <WarpInfo vis={c.mainIndex} control={warps} />}
         {tileFlags && drawn && src && !isBuiltinPath(src.path) && (
           <CellSubtiles
             tile={drawn}

@@ -89,13 +89,43 @@ export async function importBytes(extension: string): Promise<Uint8Array | null>
     const buf = new Uint8Array(await invoke<ArrayBuffer>('import_file', { extension }));
     return buf.length ? buf : null;
   }
+  const file = await pickFile(extension);
+  return file ? new Uint8Array(await file.arrayBuffer()) : null;
+}
+
+/** Browser: a file from a (hidden, attached) file input; null if cancelled. */
+function pickFile(extension: string): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = `.${extension}`;
-    input.onchange = async () => resolve(input.files?.[0] ? new Uint8Array(await input.files[0].arrayBuffer()) : null);
+    input.style.display = 'none';
+    // Attached while in use: detached inputs don't reliably report the chosen file in every browser.
+    document.body.appendChild(input);
+    let settled = false;
+    const done = (f: File | null) => {
+      if (settled) return;
+      settled = true;
+      // Removed a little later: some browsers can't read the chosen file once its input is gone.
+      setTimeout(() => input.remove(), 60_000);
+      resolve(f);
+    };
+    input.addEventListener('change', () => done(input.files?.[0] ?? null));
+    // Some browsers report "cancel" around a programmatic choice too: only give up if no file follows.
+    input.addEventListener('cancel', () => setTimeout(() => done(input.files?.[0] ?? null), 1000));
     input.click();
   });
+}
+
+/** Like importBytes, but also gives the picked file's name. */
+export async function importNamed(extension: string): Promise<{ name: string; bytes: Uint8Array } | null> {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const f = await invoke<{ name: string; bytes: number[] } | null>('import_named', { extension });
+    return f ? { name: f.name, bytes: new Uint8Array(f.bytes) } : null;
+  }
+  const file = await pickFile(extension);
+  return file ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
 }
 
 /** Fallback: hand the file to the user as a download. */

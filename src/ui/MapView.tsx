@@ -75,6 +75,8 @@ interface Props {
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
   /** When `signal` changes, centre the view on this world point (zooming in if far out). */
   centerOn?: { x: number; y: number; signal: number } | null;
+  /** Label of a special tile (e.g. where a warp leads); defaults to what the tile is. */
+  specialLabel?: (main: number, sub: number) => string;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -318,7 +320,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel]);
 
   // Input.
   useEffect(() => {
@@ -813,7 +815,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
       ctx.fill();
       ctx.stroke();
       const [x, y] = cellToWorld(sp.cellX + 0.5, sp.cellY + 0.5);
-      const text = specialTileInfo(sp.main, sp.sub).label;
+      const text = s.specialLabel?.(sp.main, sp.sub) ?? specialTileInfo(sp.main, sp.sub).label;
       const size = Math.max(11 * px, 14);
       ctx.font = `600 ${size}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';

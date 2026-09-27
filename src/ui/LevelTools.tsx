@@ -35,14 +35,16 @@ interface RegisterProps {
   usedDt1s: string[];
   onApply: (writes: TableWrite[]) => Promise<void>;
   onClose: () => void;
+  /** Pre-filled choices (e.g. right after importing a map). */
+  initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string };
 }
 
 /** Creates the LvlPrest (and optionally Levels/LvlTypes) rows that make the game load this map. */
-export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onApply, onClose }: RegisterProps) {
+export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onApply, onClose, initial }: RegisterProps) {
   const [tables, setTables] = useState<{ prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc } | null>(null);
-  const [mode, setMode] = useState<'existing' | 'new'>('existing');
-  const [levelId, setLevelId] = useState(0);
-  const [name, setName] = useState(() => mapPath.split('/').pop()!.replace(/\.ds1$/i, ''));
+  const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'existing');
+  const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
+  const [name, setName] = useState(() => initial?.name ?? mapPath.split('/').pop()!.replace(/\.ds1$/i, ''));
   const [busy, setBusy] = useState(false);
   const rel = mapPath.replace(/^data\/global\/tiles\//i, '');
 
@@ -153,6 +155,7 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, onAppl
 
   return (
     <Modal title="Add map to game" onClose={onClose}>
+      {initial?.note && <p className="small accent-text">{initial.note}</p>}
       <p className="muted small">
         Makes the game load <span className="mono">{rel}</span>: a LvlPrest row (File1 <ColHelp table="LvlPrest" col="File1" />) pointing at it, with a
         Dt1Mask <ColHelp table="LvlPrest" col="Dt1Mask" /> covering the tile libraries it uses; missing libraries go into free LvlTypes slots{' '}

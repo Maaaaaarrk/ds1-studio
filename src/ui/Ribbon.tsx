@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export interface RibbonButton {
   label: string;
@@ -11,6 +11,10 @@ export interface RibbonButton {
   size?: 'lg' | 'sm';
   /** Keyboard shortcut shown in the tooltip. */
   shortcut?: string;
+  /** A drop-down menu instead of a single action (onClick is then unused). */
+  menu?: { label: string; onClick: () => void; title?: string; hint?: string }[];
+  /** Shown in the menu when it has no items. */
+  emptyMenu?: string;
 }
 
 export interface RibbonGroup {
@@ -34,11 +38,66 @@ interface Props {
 
 function Button({ b }: { b: RibbonButton }) {
   const tip = [b.title ?? b.label, b.shortcut && `(${b.shortcut})`].filter(Boolean).join(' ');
-  return (
-    <button className={`rb-btn ${b.size ?? 'lg'}${b.active ? ' active' : ''}`} onClick={b.onClick} disabled={b.disabled} title={tip}>
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState({ left: 0, top: 0 });
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('keydown', esc, true);
+    return () => {
+      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('keydown', esc, true);
+    };
+  }, [open]);
+  const button = (
+    <button className={`rb-btn ${b.size ?? 'lg'}${b.active || open ? ' active' : ''}`} onClick={
+        b.menu
+          ? (e) => {
+              // The ribbon clips what overflows it, so the menu is placed against the window, under the button.
+              const r = e.currentTarget.getBoundingClientRect();
+              setAt({ left: r.left, top: r.bottom + 2 });
+              setOpen(!open);
+            }
+          : b.onClick
+      } disabled={b.disabled} title={tip}>
       <span className="rb-icon">{b.icon}</span>
-      <span className="rb-label">{b.label}</span>
+      <span className="rb-label">
+        {b.label}
+        {b.menu && ' ▾'}
+      </span>
     </button>
+  );
+  if (!b.menu) return button;
+  return (
+    <div className="rb-menu-wrap" ref={ref}>
+      {button}
+      {open && (
+        <div className="rb-menu" role="menu" style={at}>
+          {b.menu.length ? (
+            b.menu.map((m, i) => (
+              <button
+                key={`${m.label}${i}`}
+                className="rb-menu-item"
+                role="menuitem"
+                title={m.title}
+                onClick={() => {
+                  setOpen(false);
+                  m.onClick();
+                }}
+              >
+                <span>{m.label}</span>
+                {m.hint && <span className="muted small">{m.hint}</span>}
+              </button>
+            ))
+          ) : (
+            <div className="rb-menu-empty muted small">{b.emptyMenu ?? 'Nothing here yet.'}</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

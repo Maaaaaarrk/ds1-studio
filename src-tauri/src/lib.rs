@@ -323,6 +323,25 @@ fn mcp_stdin(app: AppHandle) {
     });
 }
 
+/// A file the user picks in a native "Open" dialog, with its name (imports that keep or show the name). None = cancelled.
+#[derive(Serialize)]
+struct NamedFile {
+    name: String,
+    bytes: Vec<u8>,
+}
+
+#[tauri::command]
+async fn import_named(app: AppHandle, extension: String) -> Result<Option<NamedFile>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(path) = app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(Some(NamedFile { name, bytes }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mcp = mcp_mode();
@@ -362,7 +381,8 @@ pub fn run() {
             import_file,
             mcp_ready,
             mcp_out,
-            app_exe
+            app_exe,
+            import_named
         ])
         .run(tauri::generate_context!())
         .expect("error while running DS1 Studio");

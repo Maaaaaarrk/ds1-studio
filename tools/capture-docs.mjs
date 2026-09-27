@@ -56,8 +56,10 @@ const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r, { once: true }));
 let nextId = 0;
 const pending = new Map();
+const listeners = new Map();
 ws.addEventListener('message', (ev) => {
   const msg = JSON.parse(ev.data);
+  if (msg.method) for (const fn of listeners.get(msg.method) ?? []) fn(msg.params);
   const p = pending.get(msg.id);
   if (!p) return;
   pending.delete(msg.id);
@@ -76,6 +78,18 @@ await call('Page.enable');
 await call('Page.navigate', { url: URL });
 
 // --- Page helpers -----------------------------------------------------------------------------------------------
+/** Runs `trigger` (which opens a file picker) and answers the picker with `file` (an absolute path). */
+async function chooseFile(file, trigger) {
+  await call('Page.setInterceptFileChooserDialog', { enabled: true });
+  const opened = new Promise((resolve) => listeners.set('Page.fileChooserOpened', [resolve]));
+  await trigger();
+  const { backendNodeId } = await Promise.race([opened, new Promise((_, rej) => setTimeout(() => rej(new Error('no file picker opened')), 5000))]);
+  listeners.delete('Page.fileChooserOpened');
+  await call('DOM.setFileInputFiles', { files: [file], backendNodeId });
+  await call('Page.setInterceptFileChooserDialog', { enabled: false });
+  await sleep(500);
+}
+
 async function js(expression) {
   const r = await call('Runtime.evaluate', { expression: `(async () => { ${expression} })()`, awaitPromise: true, returnByValue: true });
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
@@ -201,7 +215,7 @@ async function ribbonTab(label) {
   await button(label);
 }
 
-const helpers = { sleep, js, waitFor, press, keyDown, keyUp, click, drag, wheel, button, openMap, viewport, rect, shot, gif, closeDialogs, ribbonTab, W, H };
+const helpers = { chooseFile, sleep, js, waitFor, press, keyDown, keyUp, click, drag, wheel, button, openMap, viewport, rect, shot, gif, closeDialogs, ribbonTab, W, H };
 
 // --- Scenes ------------------------------------------------------------------------------------------------------
 // SCENES=<file> runs another scene file (e.g. for QA) instead of the docs scenes.

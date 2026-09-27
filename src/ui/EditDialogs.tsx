@@ -8,6 +8,8 @@ import { exportSize, MAX_PIXELS, MAX_SIDE } from '../render/exportImage';
 import { Modal } from './Dialogs';
 import { HelpTip } from './HelpTip';
 import { Thumb } from './TilePalette';
+import { allLevels, allWarps, levelLinks, levelRef, linkWrite, type WarpTables } from '../game/warps';
+import type { TableWrite } from '../game/levelTables';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Find & replace
@@ -184,6 +186,226 @@ export function ExportImageDialog({ width, height, selection, busy, onExport, on
         </button>
         <button className="btn primary" disabled={busy} onClick={() => onExport({ area: area === 'selection' ? selection : null, scale: chosen, objects })}>
           {busy ? 'Drawing…' : 'Export PNG…'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Warp links
+
+interface WarpProps {
+  tables: WarpTables;
+  levelId: number;
+  vis: number;
+  busy: boolean;
+  onApply: (write: TableWrite) => void;
+  onClose: () => void;
+}
+
+/** Sets where link `vis` of a level leads (Levels.txt VisN / WarpN), optionally with the way back. */
+export function WarpLinkDialog({ tables, levelId, vis, busy, onApply, onClose }: WarpProps) {
+  const current = useMemo(() => levelLinks(tables, levelId), [tables, levelId]);
+  const link = current?.links[vis] ?? null;
+  const levels = useMemo(() => allLevels(tables), [tables]);
+  const warps = useMemo(() => allWarps(tables), [tables]);
+  const [target, setTarget] = useState(link?.target.id ?? 0);
+  const [warp, setWarp] = useState(link?.warp?.id ?? warps[0]?.id ?? 0);
+  const [query, setQuery] = useState('');
+  const [back, setBack] = useState(!link);
+  const [backWarp, setBackWarp] = useState(link?.warp?.id ?? warps[0]?.id ?? 0);
+  const q = query.trim().toLowerCase();
+  const shown = levels.filter((l) => !q || l.name.toLowerCase().includes(q) || String(l.id) === q);
+  const plan = target ? linkWrite(tables, { levelId, vis, targetId: target, warpId: warp, back: back ? { warpId: backWarp } : null }) : null;
+  const name = current?.level.name ?? `level ${levelId}`;
+  return (
+    <Modal title={`Warp link ${vis} of ${name}`} onClose={onClose}>
+      <p className="muted small">
+        Warp tiles with main index {vis} in this level&apos;s maps use this link. Choose the level it leads to and the kind of warp (LvlWarp.txt decides the
+        look and where the player appears). Saved into Levels.txt in your mod.
+      </p>
+      <label className="form-row">
+        <span>Leads to</span>
+        <div className="wl-pick">
+          <input className="search small-input" placeholder="Search levels…" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+          <select size={8} value={target} onChange={(e) => setTarget(Number(e.target.value))}>
+            {shown.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.id} · {l.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </label>
+      {target > 0 && <p className="small">Its maps: {levelRef(tables, target).maps.map((p) => p.split('/').pop()).join(', ') || 'none (built at random)'}</p>}
+      <label className="form-row">
+        <span>Kind of warp</span>
+        <select value={warp} onChange={(e) => setWarp(Number(e.target.value))}>
+          {warps.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.id} · {w.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="small">
+        <input type="checkbox" checked={back} onChange={(e) => setBack(e.target.checked)} /> also add the way back (the target level gets a link to {name})
+      </label>
+      {back && (
+        <label className="form-row">
+          <span>Way back</span>
+          <select value={backWarp} onChange={(e) => setBackWarp(Number(e.target.value))}>
+            {warps.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.id} · {w.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="change-list">
+        {typeof plan === 'string' ? <p className="error-text small">{plan}</p> : plan ? plan.write.summary.map((s) => <div key={s} className="small">• {s}</div>) : <p className="muted small">Pick a level.</p>}
+      </div>
+      <p className="muted small">If your mod ships compiled .bin tables, rebuild them after applying (start the game once with -direct -txt).</p>
+      <div className="modal-actions">
+        {link && (
+          <button className="btn" disabled={busy} onClick={() => {
+            const r = linkWrite(tables, { levelId, vis, targetId: 0, warpId: -1 });
+            if (typeof r !== 'string') onApply(r.write);
+          }}>
+            Remove link
+          </button>
+        )}
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" disabled={busy || !plan || typeof plan === 'string'} onClick={() => plan && typeof plan !== 'string' && onApply(plan.write)}>
+          {busy ? 'Saving…' : 'Apply'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Import DT1 / DS1
+
+/** Letters, digits, - and _ only: plain names are safe in the game's tables and file lookups on every system. */
+export const safeName = (s: string) => /^[A-Za-z0-9_-]{1,48}$/.test(s.trim());
+const baseName = (file: string) => file.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'imported';
+
+export interface ImportDt1Choice {
+  path: string;
+  addToMap: boolean;
+}
+
+/** Import a DT1 into data/global/tiles/PD2assets/<folder>/, optionally adding it to the open map's level type. */
+export function ImportDt1Dialog({ file, info, exists, mapOpen, busy, onImport, onClose }: {
+  file: { name: string };
+  /** Parsed summary, or why the file can't be used. */
+  info: { tiles: number; kinds: string } | string;
+  exists: (path: string) => boolean;
+  mapOpen: string | null;
+  busy: boolean;
+  onImport: (c: ImportDt1Choice) => void;
+  onClose: () => void;
+}) {
+  const [folder, setFolder] = useState(() => {
+    try {
+      return localStorage.getItem('ds1studio.importFolder') || 'custom';
+    } catch {
+      return 'custom';
+    }
+  });
+  const [name, setName] = useState(() => baseName(file.name));
+  const [addToMap, setAddToMap] = useState(!!mapOpen);
+  const path = `data/global/tiles/PD2assets/${folder.trim()}/${name.trim()}.dt1`;
+  const ok = typeof info !== 'string' && safeName(folder) && safeName(name);
+  return (
+    <Modal title="Import DT1" onClose={onClose}>
+      <p className="small">
+        <b>{file.name}</b>: {typeof info === 'string' ? <span className="error-text">{info}</span> : `${info.tiles} tiles (${info.kinds})`}
+      </p>
+      <label className="form-row">
+        <span>
+          Folder <HelpTip text="A subfolder of data/global/tiles/PD2assets/ in your mod, to keep your imported tile libraries together (created if needed)." />
+        </span>
+        <input className="text-input" value={folder} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+      </label>
+      <label className="form-row">
+        <span>File name</span>
+        <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+      </label>
+      {!(safeName(folder) && safeName(name)) && <p className="error-text small">Use letters, digits, - and _ only (no spaces): plain names are safe in the game&apos;s tables.</p>}
+      <p className="small mono">{path}</p>
+      {exists(path) && <p className="warn-text small">A file with that name exists: it will be replaced (the old one is kept as .bak).</p>}
+      {mapOpen ? (
+        <label className="small">
+          <input type="checkbox" checked={addToMap} onChange={(e) => setAddToMap(e.target.checked)} /> add it to {mapOpen.split('/').pop()}&apos;s tile libraries{' '}
+          <HelpTip text="Puts the DT1 in a free File slot of the map's level type (LvlTypes.txt) and includes it in the map's Dt1Mask (LvlPrest.txt), so both DS1 Studio and the game load it. Without that, the game never loads the file, so it can't crash on it — but maps can't use its tiles either." />
+        </label>
+      ) : (
+        <p className="muted small">Open a map first to add it to that map&apos;s tile libraries right away; otherwise add it later with Map → Tile libraries.</p>
+      )}
+      <div className="modal-actions">
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" disabled={!ok || busy} onClick={() => onImport({ path, addToMap: !!mapOpen && addToMap })}>
+          {busy ? 'Importing…' : 'Import'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+export interface ImportDs1Choice {
+  path: string;
+  register: boolean;
+}
+
+/** Import a DS1 as data/global/tiles/expansion/Map/<name>.ds1, then (optionally) add it to the game. */
+export function ImportDs1Dialog({ file, info, exists, busy, onImport, onClose }: {
+  file: { name: string };
+  info: { width: number; height: number; act: number; missing: string[] } | string;
+  exists: (path: string) => boolean;
+  busy: boolean;
+  onImport: (c: ImportDs1Choice) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(() => baseName(file.name));
+  const [register, setRegister] = useState(true);
+  const path = `data/global/tiles/expansion/Map/${name.trim()}.ds1`;
+  const ok = typeof info !== 'string' && safeName(name);
+  return (
+    <Modal title="Import DS1" onClose={onClose}>
+      <p className="small">
+        <b>{file.name}</b>: {typeof info === 'string' ? <span className="error-text">{info}</span> : `${info.width}×${info.height} map, act ${info.act + 1}`}
+      </p>
+      <label className="form-row">
+        <span>Map name</span>
+        <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+      </label>
+      {!safeName(name) && <p className="error-text small">Use letters, digits, - and _ only (no spaces): plain names are safe in the game&apos;s tables.</p>}
+      <p className="small mono">{path}</p>
+      {exists(path) && <p className="warn-text small">A map with that name exists: it will be replaced (the old one is kept as .bak).</p>}
+      {typeof info !== 'string' && info.missing.length > 0 && (
+        <p className="warn-text small">
+          It lists tile libraries that aren&apos;t in your game or mod: {info.missing.join(', ')}. Import those DT1s too, or its tiles show as missing (and the game can&apos;t
+          draw them).
+        </p>
+      )}
+      <label className="small">
+        <input type="checkbox" checked={register} onChange={(e) => setRegister(e.target.checked)} /> add it to the game next{' '}
+        <HelpTip text="Opens “Add to game” for it: a LvlPrest row pointing at the map, a level for it (existing or new) and its tile libraries in LvlTypes/Dt1Mask. Until then the game doesn't know the map (it can't load it, so it can't crash on it either)." />
+      </label>
+      <div className="modal-actions">
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" disabled={!ok || busy} onClick={() => onImport({ path, register })}>
+          {busy ? 'Importing…' : 'Import'}
         </button>
       </div>
     </Modal>
