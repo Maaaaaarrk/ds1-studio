@@ -54,6 +54,9 @@ DS1 Studio's own labelled markers. On Linux, point it at the Diablo II folder in
 **Updates:** the app checks GitHub once a day and tells you when a new version is out. **Help → Check for updates**
 downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` packages get a link to the new release.)
 
+**Manual:** a full illustrated how-to guide with a linked table of contents is in
+[docs/manual/DS1-Studio-Manual.pdf](docs/manual/DS1-Studio-Manual.pdf).
+
 ---
 
 ## Features

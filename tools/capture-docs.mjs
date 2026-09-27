@@ -78,14 +78,14 @@ await call('Page.enable');
 await call('Page.navigate', { url: URL });
 
 // --- Page helpers -----------------------------------------------------------------------------------------------
-/** Runs `trigger` (which opens a file picker) and answers the picker with `file` (an absolute path). */
+/** Runs `trigger` (which opens a file picker) and answers the picker with `file` (an absolute path, or several). */
 async function chooseFile(file, trigger) {
   await call('Page.setInterceptFileChooserDialog', { enabled: true });
   const opened = new Promise((resolve) => listeners.set('Page.fileChooserOpened', [resolve]));
   await trigger();
   const { backendNodeId } = await Promise.race([opened, new Promise((_, rej) => setTimeout(() => rej(new Error('no file picker opened')), 5000))]);
   listeners.delete('Page.fileChooserOpened');
-  await call('DOM.setFileInputFiles', { files: [file], backendNodeId });
+  await call('DOM.setFileInputFiles', { files: Array.isArray(file) ? file : [file], backendNodeId });
   await call('Page.setInterceptFileChooserDialog', { enabled: false });
   await sleep(500);
 }

@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>DS1 Studio — How-To Manual</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  :root { --ink: #1d2027; --muted: #5d6573; --accent: #b8841c; --accent-soft: #fbf3e2; --line: #dde1e7; --link: #1f5fbf; --note: #eef5ff; --warn: #fff4e5; }
+  * { box-sizing: border-box; }
+  html { font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--ink); font-size: 10.4pt; line-height: 1.5; }
+  body { margin: 0; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3, h4 { line-height: 1.2; break-after: avoid; }
+  h1 { font-size: 22pt; margin: 0 0 4mm; padding-bottom: 2mm; border-bottom: 2.5px solid var(--accent); }
+  h1 .num { color: var(--accent); margin-right: 3mm; }
+  h2 { font-size: 14pt; margin: 7mm 0 2mm; color: #20242c; }
+  h2 .num, h3 .num { color: var(--muted); font-weight: 600; margin-right: 2mm; }
+  h3 { font-size: 11.5pt; margin: 5mm 0 1.5mm; }
+  p { margin: 0 0 2.4mm; }
+  ul, ol { margin: 0 0 2.6mm; padding-left: 6mm; }
+  li { margin: 0 0 1mm; }
+  code, .mono { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 0.92em; background: #f1f3f6; padding: 0 1.2mm; border-radius: 1mm; }
+  kbd { font-family: "Cascadia Mono", Consolas, monospace; font-size: 0.85em; background: #fff; border: 1px solid #b9c0cb; border-bottom-width: 2px; border-radius: 1.2mm; padding: 0 1.4mm; white-space: nowrap; }
+  .chapter { break-before: page; }
+  .top { float: right; font-size: 8.5pt; font-weight: 400; color: var(--muted); margin-top: 3mm; }
+  figure { margin: 3mm 0 4mm; break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; border: 1px solid #c9ced6; border-radius: 1.5mm; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+  figure.small img { max-width: 62%; }
+  figure.half img { max-width: 48%; }
+  figure.medium img { max-width: 80%; }
+  figcaption { font-size: 8.8pt; color: var(--muted); margin-top: 1.5mm; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; break-inside: avoid; }
+  .pair figure { margin: 2mm 0; }
+  .note, .tip, .warn { border-left: 3px solid; border-radius: 1.5mm; padding: 2mm 3mm; margin: 3mm 0; break-inside: avoid; font-size: 9.8pt; }
+  .note { border-color: #3b82c4; background: var(--note); }
+  .tip { border-color: #3aa55c; background: #eefaf1; }
+  .warn { border-color: #d98a1a; background: var(--warn); }
+  .note b:first-child, .tip b:first-child, .warn b:first-child { margin-right: 1mm; }
+  table { border-collapse: collapse; width: 100%; margin: 2mm 0 4mm; font-size: 9.4pt; break-inside: auto; }
+  th, td { border: 1px solid var(--line); padding: 1.2mm 2mm; text-align: left; vertical-align: top; }
+  td code { white-space: nowrap; }
+  th { background: #f4f5f8; font-weight: 600; }
+  tr { break-inside: avoid; }
+  .steps { counter-reset: step; list-style: none; padding-left: 0; }
+  .steps > li { counter-increment: step; position: relative; padding-left: 8mm; margin-bottom: 1.6mm; }
+  .steps > li::before { content: counter(step); position: absolute; left: 0; top: 0.2mm; width: 5.2mm; height: 5.2mm; border-radius: 50%; background: var(--accent); color: #fff; font-size: 8pt; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  /* Cover */
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+  .cover .mark { font-size: 40pt; color: var(--accent); }
+  .cover h1 { border: 0; font-size: 36pt; margin: 2mm 0 0; }
+  .cover .sub { font-size: 15pt; color: var(--muted); margin: 2mm 0 10mm; }
+  .cover img { width: 100%; border-radius: 2mm; border: 1px solid #c9ced6; }
+  .cover .meta { margin-top: 8mm; font-size: 9.5pt; color: var(--muted); }
+  /* Contents */
+  .toc { columns: 2; column-gap: 8mm; font-size: 9.8pt; }
+  .toc ol { list-style: none; padding: 0; margin: 0; }
+  .toc > ol > li { break-inside: avoid; margin-bottom: 3mm; }
+  .toc > ol > li > a { font-weight: 700; color: var(--ink); }
+  .toc > ol > li > a .num { color: var(--accent); display: inline-block; width: 7mm; }
+  .toc li li { padding-left: 7mm; margin: 0.4mm 0; }
+  .toc li li a { color: var(--link); }
+  .toc li li .num { color: var(--muted); display: inline-block; width: 9mm; }
+  /* Annotated screenshot */
+  .annot { position: relative; display: inline-block; max-width: 100%; }
+  .annot img { display: block; }
+  .badge { position: absolute; transform: translate(-50%, -50%); width: 6.4mm; height: 6.4mm; border-radius: 50%; background: #e0343f; color: #fff; font-weight: 700; font-size: 9pt; display: flex; align-items: center; justify-content: center; border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+  .legend { counter-reset: none; list-style: none; padding: 0; columns: 2; column-gap: 6mm; }
+  .legend li { break-inside: avoid; padding-left: 8mm; position: relative; }
+  .legend li .dot { position: absolute; left: 0; top: 0.4mm; width: 5.2mm; height: 5.2mm; border-radius: 50%; background: #e0343f; color: #fff; font-size: 8pt; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .see { font-size: 9pt; color: var(--muted); }
+  .kv td:first-child { white-space: nowrap; width: 32%; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ COVER -->
+<section class="cover" id="top">
+  <div class="mark">◆</div>
+  <h1>DS1 Studio</h1>
+  <div class="sub">How-To Manual — the map editor for classic Diablo II (1.13 / 1.14) and its mods</div>
+  <img src="../media/overview.png" alt="DS1 Studio editing the Rogue Encampment" />
+  <div class="meta">
+    Covers DS1 Studio 0.1.13 · Windows and Linux · <a href="https://github.com/RoofooEvazan/ds1-studio">github.com/RoofooEvazan/ds1-studio</a><br />
+    Every blue link in this document jumps to that part of the manual. Use <a href="#contents">Contents</a> to find your way, and the <i>↑ Contents</i> link at the top of every chapter to come back.
+  </div>
+</section>
+
+<!-- ============================================================ CONTENTS -->
+<section class="chapter" id="contents">
+  <h1>Contents</h1>
+  <nav class="toc">
+    <ol>
+      <li><a href="#ch-start"><span class="num">1</span>Getting started</a>
+        <ol>
+          <li><a href="#s-install"><span class="num">1.1</span>Installing</a></li>
+          <li><a href="#s-first"><span class="num">1.2</span>First start: choosing your folders</a></li>
+          <li><a href="#s-window"><span class="num">1.3</span>A tour of the window</a></li>
+          <li><a href="#s-open"><span class="num">1.4</span>Opening a map</a></li>
+          <li><a href="#s-save"><span class="num">1.5</span>Saving, and where files go</a></li>
+          <li><a href="#s-autosave"><span class="num">1.6</span>Autosave and recovery</a></li>
+          <li><a href="#s-recent"><span class="num">1.7</span>Recent maps</a></li>
+          <li><a href="#s-updates"><span class="num">1.8</span>Updates</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-view"><span class="num">2</span>Viewing maps</a>
+        <ol>
+          <li><a href="#s-nav"><span class="num">2.1</span>Moving around and zooming</a></li>
+          <li><a href="#s-minimap"><span class="num">2.2</span>The minimap</a></li>
+          <li><a href="#s-layers"><span class="num">2.3</span>Layers: showing and hiding</a></li>
+          <li><a href="#s-overlays"><span class="num">2.4</span>Grid, rooms, walkability, automap</a></li>
+          <li><a href="#s-gameview"><span class="num">2.5</span>Game view</a></li>
+          <li><a href="#s-sprites"><span class="num">2.6</span>Objects, sprites and animation</a></li>
+          <li><a href="#s-special"><span class="num">2.7</span>Special tiles</a></li>
+          <li><a href="#s-stacked"><span class="num">2.8</span>Overlapping (stacked) tiles</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-edit"><span class="num">3</span>Editing tiles</a>
+        <ol>
+          <li><a href="#s-tools"><span class="num">3.1</span>The tools</a></li>
+          <li><a href="#s-palette"><span class="num">3.2</span>The Tiles panel</a></li>
+          <li><a href="#s-paint"><span class="num">3.3</span>Painting: freehand, rectangle, fill</a></li>
+          <li><a href="#s-select"><span class="num">3.4</span>Selecting, copying and moving</a></li>
+          <li><a href="#s-replace"><span class="num">3.5</span>Find &amp; replace, re-roll</a></li>
+          <li><a href="#s-history"><span class="num">3.6</span>Undo and the History panel</a></li>
+          <li><a href="#s-cell"><span class="num">3.7</span>The Cell panel</a></li>
+          <li><a href="#s-subtiles"><span class="num">3.8</span>Walkability: sub-tile flags</a></li>
+          <li><a href="#s-resize"><span class="num">3.9</span>Resizing and new maps</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-objects"><span class="num">4</span>Objects and NPCs</a>
+        <ol>
+          <li><a href="#s-gallery"><span class="num">4.1</span>Placing from the gallery</a></li>
+          <li><a href="#s-editobj"><span class="num">4.2</span>Moving and editing objects</a></li>
+          <li><a href="#s-inmap"><span class="num">4.3</span>“In this map”: find any object</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-presets"><span class="num">5</span>Presets</a></li>
+      <li><a href="#ch-warps"><span class="num">6</span>Warps: connecting maps</a></li>
+      <li><a href="#ch-import"><span class="num">7</span>Importing DS1 and DT1 files</a>
+        <ol>
+          <li><a href="#s-import-ds1"><span class="num">7.1</span>Import DS1 (with its tile libraries)</a></li>
+          <li><a href="#s-import-dt1"><span class="num">7.2</span>Import DT1 (files or folders)</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-tiles"><span class="num">8</span>Tile libraries and the DT1 editor</a>
+        <ol>
+          <li><a href="#s-libraries"><span class="num">8.1</span>Tile libraries</a></li>
+          <li><a href="#s-dt1editor"><span class="num">8.2</span>The DT1 editor</a></li>
+          <li><a href="#s-recolour"><span class="num">8.3</span>Recolouring</a></li>
+          <li><a href="#s-pixel"><span class="num">8.4</span>Pixel painting</a></li>
+          <li><a href="#s-tilesettings"><span class="num">8.5</span>Tile settings (.ini)</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-data"><span class="num">9</span>Game data</a>
+        <ol>
+          <li><a href="#s-tables"><span class="num">9.1</span>Data tables</a></li>
+          <li><a href="#s-addgame"><span class="num">9.2</span>Add to game</a></li>
+          <li><a href="#s-cube"><span class="num">9.3</span>Cube recipe</a></li>
+          <li><a href="#s-check"><span class="num">9.4</span>Compatibility check</a></li>
+          <li><a href="#s-automap"><span class="num">9.5</span>The automap</a></li>
+        </ol>
+      </li>
+      <li><a href="#ch-share"><span class="num">10</span>Sharing and exporting</a></li>
+      <li><a href="#ch-help"><span class="num">11</span>Help, feedback and shortcuts</a></li>
+      <li><a href="#ch-trouble"><span class="num">12</span>Safety and troubleshooting</a></li>
+      <li><a href="#ap-keys"><span class="num">A</span>Keyboard and mouse reference</a></li>
+      <li><a href="#ap-glossary"><span class="num">B</span>Glossary</a></li>
+    </ol>
+  </nav>
+</section>
+
+<!-- ============================================================ 1 GETTING STARTED -->
+<section class="chapter" id="ch-start">
+  <h1><span class="num">1</span>Getting started <a class="top" href="#contents">↑ Contents</a></h1>
+  <p>DS1 Studio opens the map presets (<b>DS1</b> files) of classic Diablo II and your mod straight from the game's files, draws them the way the game does, and lets you edit their tiles, objects, the game's level tables, the automap and the tile libraries (<b>DT1</b> files) themselves. See the <a href="#ap-glossary">Glossary</a> for any term you don't know.</p>
+
+  <h2 id="s-install"><span class="num">1.1</span>Installing</h2>
+  <p>Download the latest version from the <a href="https://github.com/RoofooEvazan/ds1-studio/releases/latest">Releases page</a> on GitHub:</p>
+  <table>
+    <tr><th>System</th><th>File</th><th>Notes</th></tr>
+    <tr><td>Windows 10/11</td><td><code>…_x64-setup.exe</code></td><td>Recommended. Installs for your user and updates itself.</td></tr>
+    <tr><td></td><td><code>…_x64_en-US.msi</code></td><td>For managed installs.</td></tr>
+    <tr><td>Linux</td><td><code>….AppImage</code></td><td>Runs on most distributions; make it executable and double-click. Updates itself.</td></tr>
+    <tr><td></td><td><code>….deb</code> / <code>….rpm</code></td><td>Debian/Ubuntu, Fedora/openSUSE packages.</td></tr>
+  </table>
+  <div class="note"><b>Note</b> The Windows installer isn't code-signed yet, so Windows may say “Windows protected your PC”. Click <b>More info → Run anyway</b>.</div>
+
+  <h2 id="s-first"><span class="num">1.2</span>First start: choosing your folders</h2>
+  <p>The first time it runs, DS1 Studio asks for two folders:</p>
+  <ul>
+    <li><b>Diablo II</b> — the folder with <code>d2data.mpq</code>, <code>d2exp.mpq</code> and <code>patch_d2.mpq</code>. It is only ever <i>read</i>.</li>
+    <li><b>Mod folder</b> (optional) — your mod's folder with its <code>data/</code> tree. This is where everything you save goes (<a href="#s-save">see Saving</a>). Tick <i>Also read the mod folder's own .mpq files</i> if your mod ships its data in MPQs.</li>
+  </ul>
+  <p>On Linux, point it at the Diablo II folder inside your Wine prefix. You can change the folders later with <b>Home → File → Folders…</b> Nothing else is needed: object names and sprites come from the game's own files, and special tiles get DS1 Studio's own markers.</p>
+
+  <h2 id="s-window"><span class="num">1.3</span>A tour of the window</h2>
+  <figure>
+    <div class="annot">
+      <img src="img/window.png" alt="The DS1 Studio window" />
+      <span class="badge" style="left: 22%; top: 3%">1</span>
+      <span class="badge" style="left: 27.5%; top: 10.5%">2</span>
+      <span class="badge" style="left: 70.5%; top: 3%">3</span>
+      <span class="badge" style="left: 8%; top: 40%">4</span>
+      <span class="badge" style="left: 40%; top: 33%">5</span>
+      <span class="badge" style="left: 24%; top: 87%">6</span>
+      <span class="badge" style="left: 90%; top: 30%">7</span>
+      <span class="badge" style="left: 60%; top: 98.4%">8</span>
+    </div>
+    <figcaption>The main window with Act 1's Rogue Encampment open.</figcaption>
+  </figure>
+  <ol class="legend">
+    <li><span class="dot">1</span><b>Tabs</b>: Home, Map, Data and Help switch the ribbon below.</li>
+    <li><span class="dot">2</span><b>Ribbon</b>: the commands, in labelled groups (File, Edit, Tools, Paint / erase, Layer, View…). Hover any button for what it does and its shortcut.</li>
+    <li><span class="dot">3</span><b>Suggest a feature</b> and the open map's name and path. A dot after the name means unsaved changes.</li>
+    <li><span class="dot">4</span><b>Presets list</b>: every DS1 in the game and your mod. Type in the box to filter (<a href="#s-open">see Opening a map</a>).</li>
+    <li><span class="dot">5</span><b>Map view</b>: the map as the game draws it (<a href="#ch-view">see Viewing maps</a>).</li>
+    <li><span class="dot">6</span><b>Minimap</b>: the whole map; click it to move there (<a href="#s-minimap">2.2</a>).</li>
+    <li><span class="dot">7</span><b>Side panels</b>: Tiles/Presets, Selection, Cell, History, Layers, Map… (they change with the tool).</li>
+    <li><span class="dot">8</span><b>Status bar</b>: the data sources, the tool and layer, the cell under the mouse, zoom, size and act.</li>
+  </ol>
+  <figure>
+    <img src="img/ribbon-home-full.png" alt="The Home ribbon" />
+    <figcaption>The Home ribbon. The other tabs are shown in their chapters: <a href="#ch-tiles">Map</a>, <a href="#ch-data">Data</a>, <a href="#ch-help">Help</a>.</figcaption>
+  </figure>
+
+  <h2 id="s-open"><span class="num">1.4</span>Opening a map</h2>
+  <ol class="steps">
+    <li>Type part of the path in the box above the presets list, e.g. <code>act1/town</code> or <code>arcane</code>.</li>
+    <li>Click a map in the list. It opens with the tile libraries the game would use for it (from <code>LvlPrest.txt</code> → <code>Levels.txt</code> → <code>LvlTypes.txt</code>) and the right act palette.</li>
+    <li>Press <kbd>F</kbd> to fit the whole map in the view.</li>
+  </ol>
+  <p>You can also reopen a recent map (<a href="#s-recent">1.7</a>), create a new one (<a href="#s-resize">3.9</a>) or import one (<a href="#s-import-ds1">7.1</a>).</p>
+
+  <h2 id="s-save"><span class="num">1.5</span>Saving, and where files go</h2>
+  <p><b>Save</b> (<kbd>Ctrl</kbd>+<kbd>S</kbd>) writes the map into your <b>mod folder</b>, under the same path it has in the game. If a file is replaced, the original is kept next to it as <code>&lt;name&gt;.bak</code> (only the first time, so the true original survives). <b>Save as…</b> saves under a new path. Your Diablo II install is never written to.</p>
+  <p>Everything else DS1 Studio writes — edited DT1s, <code>.txt</code> tables, presets — also goes into the mod folder with the same <code>.bak</code> safety. See <a href="#ch-trouble">Safety and troubleshooting</a>.</p>
+
+  <h2 id="s-autosave"><span class="num">1.6</span>Autosave and recovery</h2>
+  <p>While a map has unsaved changes, DS1 Studio keeps a copy of it every 20 seconds in its own storage (never in your game or mod folders). If the app crashes or is closed without saving:</p>
+  <ul>
+    <li>the start page lists <b>Unsaved work kept from an earlier session</b>, and</li>
+    <li>opening that map offers <b>Restore</b> (the autosaved version opens, unsaved until you save) or <b>Discard them</b>.</li>
+  </ul>
+  <p>Saving, or undoing back to the saved state, removes the kept copy.</p>
+
+  <h2 id="s-recent"><span class="num">1.7</span>Recent maps</h2>
+  <figure class="medium"><img src="img/recent-menu.png" alt="Recent maps menu" /><figcaption>Home → File → Recent.</figcaption></figure>
+  <p><b>Home → File → Recent ▾</b> lists the maps you opened last; the start page lists them too. Tick <b>Reopen the last map on start</b> to have your last map open automatically.</p>
+
+  <h2 id="s-updates"><span class="num">1.8</span>Updates</h2>
+  <p>The app checks GitHub once a day and tells you when a new version is out. <b>Help → Check for updates</b> downloads and installs it and restarts DS1 Studio. <b>Help → About</b> shows the version and build.</p>
+</section>
+
+<!-- ============================================================ 2 VIEWING -->
+<section class="chapter" id="ch-view">
+  <h1><span class="num">2</span>Viewing maps <a class="top" href="#contents">↑ Contents</a></h1>
+
+  <h2 id="s-nav"><span class="num">2.1</span>Moving around and zooming</h2>
+  <table class="kv">
+    <tr><td>Zoom</td><td>Mouse wheel (zooms around the mouse)</td></tr>
+    <tr><td>Pan</td><td>Arrow keys (<kbd>Shift</kbd> = faster), <kbd>Space</kbd> + drag, or drag with the middle or right mouse button</td></tr>
+    <tr><td>Fit the whole map</td><td><kbd>F</kbd></td></tr>
+    <tr><td>Jump anywhere</td><td>Click or drag on the <a href="#s-minimap">minimap</a></td></tr>
+  </table>
+  <p>At 100% you see exactly the game's pixels; zoomed out, tiles are properly downscaled instead of turning grainy.</p>
+
+  <h2 id="s-minimap"><span class="num">2.2</span>The minimap</h2>
+  <figure class="small"><img src="img/minimap.png" alt="Minimap" /><figcaption>The minimap. The outlined part is what the map view shows.</figcaption></figure>
+  <p>The bottom-left corner shows the whole map with the visible area outlined. Click or drag on it to move the view there. Toggle it with <kbd>K</kbd> or <b>View → Minimap</b>.</p>
+
+  <h2 id="s-layers"><span class="num">2.3</span>Layers: showing and hiding</h2>
+  <div class="pair">
+    <figure><img src="img/layers-panel.png" alt="Layers panel" /><figcaption>The Layers panel.</figcaption></figure>
+    <div>
+      <p>A map has up to 2 floor layers, 4 wall layers (walls, roofs, lower walls, special tiles, trees and objects that are tiles), shadows, and optionally a tag layer.</p>
+      <p>The <b>Layers</b> panel shows or hides each one and says how many cells it uses. The number keys toggle them too: <kbd>1</kbd>/<kbd>2</kbd> floors, <kbd>3</kbd>–<kbd>6</kbd> walls, <kbd>7</kbd> shadows, <kbd>8</kbd> roofs, <kbd>9</kbd> lower walls, <kbd>0</kbd> special tiles.</p>
+      <p>Hiding a layer only affects the view. To <i>edit</i> a layer, make it the active layer (<a href="#s-tools">3.1</a>).</p>
+    </div>
+  </div>
+
+  <h2 id="s-overlays"><span class="num">2.4</span>Grid, rooms, walkability, automap</h2>
+  <div class="pair">
+    <figure><img src="../media/walkability.png" alt="Walkability" /><figcaption><b>Walkability</b> (<kbd>W</kbd>): amber sub-tiles block walking; red also block jumping/teleporting.</figcaption></figure>
+    <figure><img src="../media/rooms.png" alt="Rooms" /><figcaption><b>Rooms 8×8</b> (<kbd>R</kbd>) and <b>Grid</b> (<kbd>G</kbd>): the rooms the game builds levels from, and the cell grid.</figcaption></figure>
+  </div>
+  <p><b>Automap</b> (<kbd>A</kbd>) draws the in-game automap over the map, as players will see it (<a href="#s-automap">see The automap</a>).</p>
+
+  <h2 id="s-gameview"><span class="num">2.5</span>Game view</h2>
+  <figure class="medium"><img src="../media/game-view.png" alt="Game view" /><figcaption>Game view: the 800×600 screen around the selection.</figcaption></figure>
+  <p><b>Game view</b> (<kbd>Z</kbd>) zooms to exactly what the character sees in game, centred on the selection, and shades everything else. Pick the screen size next to it: 640×480, 800×600, PD2's widescreen sizes, or a custom size.</p>
+
+  <h2 id="s-sprites"><span class="num">2.6</span>Objects, sprites and animation</h2>
+  <p>Objects and NPCs are drawn with their real sprites, animated at the game's speeds, with fire, glows, magic and fog blended as in game. <b>Sprites</b> (<kbd>N</kbd>) toggles the sprites, <kbd>M</kbd> the object markers, <kbd>P</kbd> the NPC paths. Animated floor tiles (water, lava) animate too. See <a href="#ch-objects">Objects and NPCs</a> for editing them.</p>
+
+  <h2 id="s-special"><span class="num">2.7</span>Special tiles</h2>
+  <p>Special tiles are invisible in game: they mark warps, where players arrive in town or on a map, the corpse and town-portal spots. DS1 Studio draws a labelled marker on each, e.g. <i>Town entry 1</i>, <i>Map entry</i>, <i>Corpse location</i>. Warps show where they lead, e.g. <i>Warp · link 1 → Catacombs Level 1</i>; see <a href="#ch-warps">Warps: connecting maps</a>.</p>
+
+  <h2 id="s-stacked"><span class="num">2.8</span>Overlapping (stacked) tiles</h2>
+  <figure class="medium"><img src="img/stacked.png" alt="Stacked tiles" /><figcaption>Shift + wheel picks one tile out of several that overlap (the chosen one is outlined).</figcaption></figure>
+  <p>Trees over trees, a wall over a floor: when several tiles overlap under the mouse, hold <kbd>Shift</kbd> and turn the mouse wheel to step through them one at a time. Only that tile's layer is selected, so Copy, Cut and Delete leave the others alone; <kbd>Esc</kbd> selects all layers again. Clicking a tile also shows it in its DT1 in the <a href="#s-palette">Tiles panel</a>.</p>
+</section>
+
+<!-- ============================================================ 3 EDITING -->
+<section class="chapter" id="ch-edit">
+  <h1><span class="num">3</span>Editing tiles <a class="top" href="#contents">↑ Contents</a></h1>
+
+  <h2 id="s-tools"><span class="num">3.1</span>The tools</h2>
+  <figure class="medium"><img src="img/paint-modes.png" alt="Tools and paint modes" /><figcaption>Tools, the Paint / erase modes and the active layer.</figcaption></figure>
+  <table>
+    <tr><th>Tool</th><th>Key</th><th>What it does</th></tr>
+    <tr><td>Select</td><td><kbd>V</kbd></td><td>Click a cell to inspect and edit it in the <a href="#s-cell">Cell panel</a>; drag to select an area (<a href="#s-select">3.4</a>).</td></tr>
+    <tr><td>Paint</td><td><kbd>B</kbd></td><td>Paints the tile chosen in the <a href="#s-palette">Tiles panel</a> on the active layer.</td></tr>
+    <tr><td>Erase</td><td><kbd>E</kbd></td><td>Clears cells on the active layer.</td></tr>
+    <tr><td>Pick</td><td><kbd>I</kbd></td><td>Click a tile on the map to paint with it.</td></tr>
+    <tr><td>Objects</td><td><kbd>O</kbd></td><td>Select, move, add and delete objects and NPCs (<a href="#ch-objects">chapter 4</a>). <kbd>Tab</kbd> switches between tile and object editing.</td></tr>
+  </table>
+  <p>The <b>Active layer</b> list chooses which layer Paint, Erase, Fill and Clear work on. Floors take floor tiles; wall layers take walls, roofs, lower walls, trees, objects and special tiles.</p>
+
+  <h2 id="s-palette"><span class="num">3.2</span>The Tiles panel</h2>
+  <div class="pair">
+    <figure><img src="img/tiles-panel.png" alt="Tiles panel" /><figcaption>Pinned and recent tiles on top, a brush plus two mixed tiles (dashed).</figcaption></figure>
+    <div>
+      <p>The Tiles panel shows every tile the map's libraries provide for the active layer.</p>
+      <ul>
+        <li><b>Click</b> a tile to paint with it (switches to Paint).</li>
+        <li><b>Ctrl+click</b> more tiles to paint a <b>random mix</b>: each painted cell gets one of them. <i>clear mix</i> in the header goes back to one tile.</li>
+        <li><b>Right-click</b> a tile to <b>pin</b> it (★) to the strip at the top; <b>Recent</b> lists what you used last. Both are remembered per tile set (level type).</li>
+        <li>The drop-down shows one DT1 at a time; on wall layers the chips filter walls, objects, roofs, lower walls and special tiles; the box finds a tile by <i>main/sub</i> number.</li>
+        <li><kbd>Ctrl</kbd>+wheel over the panel zooms the thumbnails.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="s-paint"><span class="num">3.3</span>Painting: freehand, rectangle, fill</h2>
+  <p>Paint and Erase work in three ways, chosen in the <b>Paint / erase</b> group:</p>
+  <table>
+    <tr><th>Mode</th><th>Key</th><th>How</th></tr>
+    <tr><td>Freehand</td><td><kbd>B</kbd></td><td>Paints the cells the mouse passes over.</td></tr>
+    <tr><td>Rectangle</td><td><kbd>U</kbd></td><td>Drag a rectangle; it's all painted (or erased) when you let go.</td></tr>
+    <tr><td>Fill area</td><td><kbd>L</kbd></td><td>Click a cell: the connected area of the same tile is filled. If you click inside a selection, the fill stays inside it.</td></tr>
+  </table>
+  <figure class="medium"><img src="img/rect-fill.png" alt="A painted rectangle" /><figcaption>A rectangle of floor painted with a random mix of two tiles.</figcaption></figure>
+  <div class="tip"><b>Tip</b> Every stroke, rectangle or fill is one step to undo (<a href="#s-history">3.6</a>).</div>
+
+  <h2 id="s-select"><span class="num">3.4</span>Selecting, copying and moving</h2>
+  <figure><img src="img/selection.png" alt="A selection" /><figcaption>A selection with the Selection panel on the right.</figcaption></figure>
+  <p>With <b>Select</b> (<kbd>V</kbd>), drag over the map to select cells, or press <kbd>Ctrl</kbd>+<kbd>A</kbd> for the whole map. The <b>Selection</b> panel then offers:</p>
+  <ul>
+    <li><b>Fill</b> the active layer with the brush (or random mix); <b>Clear</b> the active layer; <b>Clear everything</b> (all layers and the objects standing there, <kbd>Shift</kbd>+<kbd>Delete</kbd>).</li>
+    <li><b>Copy</b> (<kbd>Ctrl</kbd>+<kbd>C</kbd>), <b>Cut</b> (<kbd>Ctrl</kbd>+<kbd>X</kbd>) and <b>Paste</b> (<kbd>Ctrl</kbd>+<kbd>V</kbd>, then click where it goes). Objects and NPCs in the selection come along, so <b>Cut then Paste moves an area with everything in it</b> — even the whole map.</li>
+    <li><b>Re-roll</b> and <b>Find &amp; replace…</b> (<a href="#s-replace">3.5</a>).</li>
+  </ul>
+  <p>Empty cells paste as transparent. Hold <kbd>Alt</kbd> when you click to paste to <b>stack</b> the paste onto what's there (into the next free layer, adding layers as needed) instead of replacing it. Pasting into another map that doesn't load the copied tiles' DT1s offers to add them. <kbd>Esc</kbd> first drops what's on the cursor (a paste, an object, the paint tile), then deselects.</p>
+
+  <h2 id="s-replace"><span class="num">3.5</span>Find &amp; replace, re-roll</h2>
+  <figure class="medium"><img src="img/replace.png" alt="Find and replace" /><figcaption>Find &amp; replace tiles.</figcaption></figure>
+  <p><b>Find &amp; replace</b> (<kbd>Ctrl</kbd>+<kbd>H</kbd>, or <b>Replace…</b> on the ribbon) swaps every use of one tile for another, on every layer of the active kind or only the active layer, in the whole map or the selection. It starts with the selected cell's tile and your brush; <b>Show them on the map</b> marks every match. One step to undo.</p>
+  <p><b>Re-roll</b> (Selection panel) mixes up the active layer inside the selection: each tile becomes a random tile of the same group (main index) already used there, so repeats are less visible. It never brings in tiles that weren't there.</p>
+
+  <h2 id="s-history"><span class="num">3.6</span>Undo and the History panel</h2>
+  <div class="pair">
+    <figure><img src="img/history.png" alt="History panel" /><figcaption>The History panel: the current step is highlighted, undone steps are in italics.</figcaption></figure>
+    <p><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes and <kbd>Ctrl</kbd>+<kbd>Y</kbd> redoes, without limit. The <b>History</b> panel lists every step by name (“Paint rectangle on Floor 1 (36 cells)”, “Paste 57×41 + 32 objects”…); click one to go back — or forward — to just after it. <i>Map as opened</i> undoes everything. Undoing back to the saved state counts as saved again.</p>
+  </div>
+
+  <h2 id="s-cell"><span class="num">3.7</span>The Cell panel</h2>
+  <div class="pair">
+    <figure><img src="img/cell-panel.png" alt="Cell panel" /><figcaption>The Cell panel for a selected cell.</figcaption></figure>
+    <div>
+      <p>Click a single cell with Select to edit everything in it. Each layer that has a tile is a card with the tile's picture and the DT1 it comes from (click the file name to show it in the Tiles panel). Every field has a <b>?</b> that explains it:</p>
+      <ul>
+        <li><b>Kind (orientation)</b> on wall layers: left/right wall, corner, door, pillar/tree, roof, lower wall, special tile…</li>
+        <li><b>Main index</b> and <b>Sub index</b>: the tile's number.</li>
+        <li><b>Present (prop1)</b>: 00 means empty.</li>
+        <li><b>Hidden in game</b>: the game won't draw the tile.</li>
+        <li><b>Raw bytes</b>: all four property bytes, to set every bit by hand.</li>
+        <li><b>Tag value</b> on maps with a tag layer.</li>
+      </ul>
+      <p>Empty layers are one line with <b>Add</b> (puts your brush tile there). <b>×</b> clears a layer. Warp tiles also show where they lead (<a href="#ch-warps">chapter 6</a>).</p>
+    </div>
+  </div>
+
+  <h2 id="s-subtiles"><span class="num">3.8</span>Walkability: sub-tile flags</h2>
+  <div class="pair">
+    <figure><img src="img/cell-flags.png" alt="Sub-tile flags" /><figcaption>Painting sub-tile flags in the Cell panel.</figcaption></figure>
+    <div>
+      <p>Every tile has 25 <b>sub-tiles</b> (a 5×5 grid over its floor diamond) whose flags decide where units can walk, see, shoot and teleport. Under each card, <b>Sub-tile flags (walkability)</b> shows them on the tile:</p>
+      <ol class="steps">
+        <li>Pick a flag (Block walk, Block light &amp; sight, Block jump/teleport, Block player walk, Block missiles…). Hover a flag for what it does.</li>
+        <li>Click or drag over sub-tiles to set it; start on one that has it to clear instead.</li>
+        <li>Check the result on the map with <b>Walkability</b> (<kbd>W</kbd>).</li>
+        <li><b>Save DT1s to mod</b> in the bar at the top of the panel, or <b>Discard</b>.</li>
+      </ol>
+      <div class="warn"><b>Important</b> The flags belong to the tile in its DT1: every cell and map using that tile changes. <i>Change all variants</i> (on by default) keeps the random variants of the tile alike.</div>
+    </div>
+  </div>
+
+  <h2 id="s-resize"><span class="num">3.9</span>Resizing and new maps</h2>
+  <div class="pair">
+    <figure><img src="img/resize.png" alt="Resizing" /><figcaption>Map → Resize: drag the handles on the edges.</figcaption></figure>
+    <figure><img src="img/new-map.png" alt="New map" /><figcaption>Map → New map.</figcaption></figure>
+  </div>
+  <p><b>Map → Resize</b> shows handles on the four edges: drag them to add or remove cells (objects move with the cells). <b>Resize…</b> does it by numbers. <b>Map → New map</b> creates an empty map for a level type, size, act and number of layers; it's saved where <i>Save path</i> says. Use <a href="#s-addgame">Add to game</a> to make the game load it.</p>
+</section>
+
+<!-- ============================================================ 4 OBJECTS -->
+<section class="chapter" id="ch-objects">
+  <h1><span class="num">4</span>Objects and NPCs <a class="top" href="#contents">↑ Contents</a></h1>
+  <figure><img src="img/objects-mode.png" alt="Object mode" /><figcaption>Object mode (<kbd>O</kbd>): the preview, “In this map” and the gallery on the right.</figcaption></figure>
+
+  <h2 id="s-gallery"><span class="num">4.1</span>Placing from the gallery</h2>
+  <ol class="steps">
+    <li>Switch to <b>Objects</b> (<kbd>O</kbd>, or <kbd>Tab</kbd> from a tile tool).</li>
+    <li>In <b>Objects &amp; NPCs</b>, filter by <i>NPCs</i> or <i>Objects</i> or type a name; every one is shown with its sprite.</li>
+    <li>Click one, then click the map to place it. Keep clicking to place more; <kbd>Esc</kbd> stops.</li>
+  </ol>
+  <p>The list is the act's placeable objects and NPCs, worked out from the game's own tables (and your mod's).</p>
+
+  <h2 id="s-editobj"><span class="num">4.2</span>Moving and editing objects</h2>
+  <p>In object mode, drag an object to move it; <kbd>Delete</kbd> removes the selected one. The <b>Preview</b> panel animates the selected object in every direction. The <b>Object</b> panel edits its type, id, position, flags and its NPC path (the points an NPC walks between).</p>
+
+  <h2 id="s-inmap"><span class="num">4.3</span>“In this map”: find any object</h2>
+  <div class="pair">
+    <figure><img src="img/objects-list.png" alt="In this map" /><figcaption>Every object and NPC placed, with counts.</figcaption></figure>
+    <p><b>In this map</b> lists everything placed, grouped by name with a count (Chicken ×4…). Type to search by name or id. Click a name to select it and centre the view on it; click again for the next one of that kind.</p>
+  </div>
+</section>
+
+<!-- ============================================================ 5 PRESETS -->
+<section class="chapter" id="ch-presets">
+  <h1><span class="num">5</span>Presets <a class="top" href="#contents">↑ Contents</a></h1>
+  <figure class="medium"><img src="../media/presets.png" alt="Presets" /><figcaption>The Presets panel with suggested presets.</figcaption></figure>
+  <p>A <b>preset</b> is a reusable piece of map — a building, a wall run, a group of trees.</p>
+  <ul>
+    <li><b>Save selection</b> (Map → Presets, or the Presets panel) stores the selected area as a preset in your mod folder, so it travels with the mod.</li>
+    <li><b>Suggest</b> finds structures that recur across the maps sharing this map's tiles and offers them as presets.</li>
+    <li>Click a preset, then click the map to place it (like a <a href="#s-select">paste</a>; <kbd>Alt</kbd> stacks it onto existing tiles).</li>
+  </ul>
+  <p>Open the panel with the <b>Presets</b> tab next to Tiles, or <b>Map → Presets</b>.</p>
+</section>
+
+<!-- ============================================================ 6 WARPS -->
+<section class="chapter" id="ch-warps">
+  <h1><span class="num">6</span>Warps: connecting maps <a class="top" href="#contents">↑ Contents</a></h1>
+  <p>In Diablo II each map preset is its own <b>level</b>, and levels are joined by <b>warps</b>. A warp special tile with main index <i>N</i> (0–7) uses its level's <b>link N</b>: <code>Levels.txt</code> column <code>VisN</code> says which level it leads to, and <code>WarpN</code> which kind of warp it is (a <code>LvlWarp.txt</code> row: stairs, cave entrance…). DS1 Studio reads and edits these for you.</p>
+  <figure><img src="img/warp.png" alt="Warp" /><figcaption>A warp in the Cathedral: the label and the Cell panel show where it leads.</figcaption></figure>
+  <h3>Seeing where a warp leads</h3>
+  <ul>
+    <li>On the map, warp markers read e.g. <i>Warp · link 1 → Catacombs Level 1</i>, or <i>(not set)</i> when the link is empty.</li>
+    <li>Select the warp cell: the Cell panel shows the level it leads to, the kind of warp, and <b>Open</b> buttons for that level's maps. Levels built at random by the game have no map to open.</li>
+  </ul>
+  <h3>Changing where it leads</h3>
+  <figure class="medium"><img src="img/warp-dialog.png" alt="Warp link dialog" /><figcaption>Choosing the level a link leads to.</figcaption></figure>
+  <ol class="steps">
+    <li>Select the warp tile and click <b>Change where it leads…</b> (or <b>Connect it to a level…</b>).</li>
+    <li>Search and pick the level it should lead to, and the kind of warp.</li>
+    <li>Tick <b>also add the way back</b> to give the target level a link back here (its map needs a warp tile with that link's number).</li>
+    <li><b>Apply</b> writes <code>Levels.txt</code> in your mod. <b>Remove link</b> clears it.</li>
+  </ol>
+  <div class="note"><b>Note</b> A map must be tied to a level before its warps lead anywhere: use <a href="#s-addgame">Add to game</a> first. If your mod ships compiled <code>.bin</code> tables, rebuild them afterwards (<a href="#s-bin">see 12.3</a>).</div>
+</section>
+
+<!-- ============================================================ 7 IMPORT -->
+<section class="chapter" id="ch-import">
+  <h1><span class="num">7</span>Importing DS1 and DT1 files <a class="top" href="#contents">↑ Contents</a></h1>
+  <p>Bring maps and tile libraries from anywhere on your computer into your mod, with the game's tables updated so they load without crashing. Both are on <b>Home → File</b>.</p>
+
+  <h2 id="s-import-ds1"><span class="num">7.1</span>Import DS1 (with its tile libraries)</h2>
+  <ol class="steps">
+    <li><b>Import DS1…</b> and pick the <code>.ds1</code> file. It's checked first: a file the game couldn't read is refused.</li>
+    <li>Give the map a name (letters, digits, <code>-</code> and <code>_</code>). It will be saved as <code>expansion/Map/&lt;name&gt;.ds1</code>.</li>
+    <li>Check <b>Tile libraries this map uses</b>: every DT1 the map names is <b>✓</b> in your game/mod, <b>＋</b> provided by a DT1 you picked, or <b>✗</b> missing.</li>
+    <li>For missing ones, click <b>Add DT1 files…</b> or <b>Add folders…</b> (subfolders included). They're matched by file name, using the folders to tell same-named files apart; you can also choose a file for any library from its list.</li>
+    <li>Import stays unavailable while any library is missing — find those DT1s, or tick <b>import anyway</b> (their tiles will show as missing and the game can't draw them).</li>
+    <li><b>Import</b>. The provided DT1s go into <code>PD2assets/&lt;folder&gt;/</code> (keeping the paths the map names) and the map is pointed at them. With <b>add it to the game next</b> ticked, <a href="#s-addgame">Add to game</a> opens, pre-filled with a level that uses the same tiles — click <b>Apply</b>.</li>
+  </ol>
+  <div class="pair">
+    <figure><img src="img/import-ds1-before.png" alt="Import DS1 before" /><figcaption>Three libraries the map needs are missing.</figcaption></figure>
+    <figure><img src="img/import-ds1.png" alt="Import DS1 after" /><figcaption>After adding DT1 files: two provided (＋), one still missing (✗), one extra file listed separately.</figcaption></figure>
+  </div>
+
+  <h2 id="s-import-dt1"><span class="num">7.2</span>Import DT1 (files or folders)</h2>
+  <div class="pair">
+    <figure><img src="img/import-dt1-menu.png" alt="Import DT1 menu" /><figcaption>Import DT1 ▾: files or folders.</figcaption></figure>
+    <figure><img src="img/import-dt1.png" alt="Import DT1" /><figcaption>Three DT1s ready to import into PD2assets/mytiles.</figcaption></figure>
+  </div>
+  <ol class="steps">
+    <li><b>Import DT1 ▾ → DT1 files…</b> (one or several) or <b>Folders…</b> (every <code>.dt1</code> inside, subfolders included).</li>
+    <li>Choose the folder under <code>PD2assets/</code> they go into. <i>Keep the folder structure</i> keeps the picked folders' subfolders.</li>
+    <li>Check the list: each file's tile count, unreadable files (left out), files that will be replaced (the old one is kept as <code>.bak</code>). Untick any you don't want.</li>
+    <li>With a map open, <b>add them to this map's tile libraries</b> puts each in a free <code>File</code> slot of the map's level type and in its <code>Dt1Mask</code>, so the game loads them. The free slots are shown; a level type has 32.</li>
+  </ol>
+</section>
+
+<!-- ============================================================ 8 TILES -->
+<section class="chapter" id="ch-tiles">
+  <h1><span class="num">8</span>Tile libraries and the DT1 editor <a class="top" href="#contents">↑ Contents</a></h1>
+  <figure><img src="../media/ribbon-map.png" alt="Map ribbon" /><figcaption>The Map ribbon.</figcaption></figure>
+
+  <h2 id="s-libraries"><span class="num">8.1</span>Tile libraries</h2>
+  <figure class="medium"><img src="../media/tile-libraries.png" alt="Tile libraries" /><figcaption>Map → Tile libraries, with the DT1 viewer.</figcaption></figure>
+  <p><b>Map → Tile libraries</b> adds or removes DT1s for the map and lets you browse every tile of any DT1 before adding it. DS1 Studio keeps the game in step: new DT1s go into free <code>File</code> slots of the level type (<code>LvlTypes.txt</code>) and the map's <code>Dt1Mask</code> (<code>LvlPrest.txt</code>) is recomputed. When two loaded DT1s have the same tile, the one listed later replaces it, as in the game.</p>
+
+  <h2 id="s-dt1editor"><span class="num">8.2</span>The DT1 editor</h2>
+  <figure class="medium"><img src="../media/dt1-editor.png" alt="DT1 editor" /><figcaption>Map → DT1 editor.</figcaption></figure>
+  <p><b>Map → DT1 editor</b> edits a copy of any DT1: choose it in the tree on the left (every library in the game and mod, by folder), select tiles (<kbd>Shift</kbd>+click for a range, or <i>From preset</i> / <i>From map selection</i>), and edit their colours (<a href="#s-recolour">8.3</a>), pixels (<a href="#s-pixel">8.4</a>) or settings (<a href="#s-tilesettings">8.5</a>). Clicking a tile opens it in a zoom window you can move, resize and zoom to single pixels. <b>Save</b> writes a copy under a new name, or overwrites the original, and can switch your map over to it with the tables updated.</p>
+  <div class="note"><b>Palette</b> Editing uses the <b>Act 0</b> palette: only the 225 colours that look the same in every act, so edited tiles work in any act. Tick <i>highlight colours that change between acts</i> to see act-specific pixels in magenta; <b>Make act-safe</b> converts them.</div>
+
+  <h2 id="s-recolour"><span class="num">8.3</span>Recolouring</h2>
+  <figure class="half"><img src="../media/recolor.gif" alt="Recolouring" /><figcaption>Changing the hue of a group of tiles.</figcaption></figure>
+  <p>Hue, saturation, brightness, tint, and <b>replace a colour</b> — for the whole file, the selected tiles, a preset's tiles, or the tiles in your map selection. The preview is exact.</p>
+
+  <h2 id="s-pixel"><span class="num">8.4</span>Pixel painting</h2>
+  <div class="pair">
+    <figure><img src="../media/pixel-painter.png" alt="Pixel painter" /><figcaption>The pixel painter with the Act 0 colours.</figcaption></figure>
+    <div>
+      <p>Double-click a tile (or <b>Paint pixels…</b>) to paint it pixel by pixel. Only the tile's real pixels can be painted.</p>
+      <table>
+        <tr><td>Pencil / eraser / fill / colour picker</td><td><kbd>B</kbd> <kbd>E</kbd> <kbd>G</kbd> <kbd>I</kbd></td></tr>
+        <tr><td>Brush size</td><td><kbd>[</kbd> <kbd>]</kbd></td></tr>
+        <tr><td>Pick a colour</td><td><kbd>Alt</kbd>+click</td></tr>
+        <tr><td>Undo / redo</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td></tr>
+        <tr><td>Zoom</td><td><kbd>Ctrl</kbd>+wheel</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2 id="s-tilesettings"><span class="num">8.5</span>Tile settings (.ini)</h2>
+  <figure class="medium"><img src="../media/tile-settings.png" alt="Tile settings" /><figcaption>The Tile settings tab of the DT1 editor.</figcaption></figure>
+  <p>The <b>Tile settings (ini)</b> tab edits everything a DT1 Tools <code>.ini</code> holds for each tile — kind, main/sub index, rarity/frame, animated, footstep sound, roof height, direction — for one tile or many at once, each with an explanation on hover. The <a href="#s-subtiles">sub-tile flags</a> are painted on the tile's 5×5 grid. <b>Export .ini</b> / <b>Import .ini</b> exchange settings with DT1 Tools.</p>
+</section>
+
+<!-- ============================================================ 9 DATA -->
+<section class="chapter" id="ch-data">
+  <h1><span class="num">9</span>Game data <a class="top" href="#contents">↑ Contents</a></h1>
+  <figure><img src="../media/ribbon-data.png" alt="Data ribbon" /><figcaption>The Data ribbon.</figcaption></figure>
+
+  <h2 id="s-tables"><span class="num">9.1</span>Data tables</h2>
+  <figure class="medium"><img src="../media/data-tables.png" alt="Data tables" /><figcaption>Data → Data tables.</figcaption></figure>
+  <p>Browse and edit any <code>.txt</code> table of the game in a spreadsheet view. Column headers have a <b>?</b> explaining what the column does. The shortcuts (LvlPrest, LvlTypes, Levels, Objects, MonPreset, CubeMain) jump to the open map's row where there is one. Saving writes the table into your mod.</p>
+
+  <h2 id="s-addgame"><span class="num">9.2</span>Add to game</h2>
+  <figure class="medium"><img src="img/add-to-game.png" alt="Add to game" /><figcaption>Data → Add to game.</figcaption></figure>
+  <p>Makes the game load the open map: a <code>LvlPrest.txt</code> row pointing at it with a <code>Dt1Mask</code> covering the tile libraries it uses, a level for it — an existing one, or a <b>new level</b> cloned from one you choose — and any missing libraries in free <code>LvlTypes.txt</code> slots. The list shows exactly what will be written before you <b>Apply</b>. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>.</p>
+
+  <h2 id="s-cube"><span class="num">9.3</span>Cube recipe</h2>
+  <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Data → Cube recipe.</figcaption></figure>
+  <p>Creates a map item and a Horadric Cube recipe that makes it. Pick the base item and the ingredients from lists with icons, or type your own item code (checked against the game's items). Linking the item to the level needs a mod plugin, such as PD2's map system.</p>
+
+  <h2 id="s-check"><span class="num">9.4</span>Compatibility check</h2>
+  <figure class="medium"><img src="../media/compatibility.png" alt="Compatibility check" /><figcaption>Home → Compatibility.</figcaption></figure>
+  <p>Checks the map will load and play in game: missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled <code>.bin</code> reminders. Most results offer one-click <b>fixes</b>, and <b>Show on map</b> marks the cells involved. Map edits made by fixes can be undone.</p>
+
+  <h2 id="s-automap"><span class="num">9.5</span>The automap</h2>
+  <div class="pair">
+    <figure><img src="../media/automap.png" alt="Automap preview" /><figcaption>Automap preview (<kbd>A</kbd>).</figcaption></figure>
+    <figure><img src="../media/automap-suggest.png" alt="Automap suggestions" /><figcaption>Suggested pieces previewed in cyan.</figcaption></figure>
+  </div>
+  <p><b>Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined in <b>pink</b> have no <code>AutoMap.txt</code> entry, so the automap draws nothing there. <b>Map → Automap editor</b> lists every kind of tile the map uses with the automap piece it gets: select kinds (or click spots on the preview) and pick pieces, add random variants, <b>hide</b> a kind on purpose, or <b>Suggest</b> pieces from look-alike tiles. Nothing is written until <b>Save to AutoMap.txt</b>.</p>
+  <figure class="medium"><img src="../media/automap-editor.png" alt="Automap editor" /><figcaption>The Automap editor.</figcaption></figure>
+</section>
+
+<!-- ============================================================ 10 SHARING -->
+<section class="chapter" id="ch-share">
+  <h1><span class="num">10</span>Sharing and exporting <a class="top" href="#contents">↑ Contents</a></h1>
+  <h2 id="s-package"><span class="num">10.1</span>Map packages</h2>
+  <figure class="medium"><img src="img/export-package.png" alt="Export package" /><figcaption>Map → Export package.</figcaption></figure>
+  <p><b>Map → Export package</b> puts the DS1, its DT1s, any modded object sprites and every table row the map needs (LvlPrest, Levels, LvlTypes, LvlWarp/LvlMaze and a cube recipe made for it) into one <code>.zip</code>. <b>Import package</b> merges such a zip into your mod safely: same-named rows are reused, clashing ids get new numbers, DT1s go into free slots and the <code>Dt1Mask</code> is recomputed. Importing the same map twice changes nothing.</p>
+  <h2 id="s-exportimg"><span class="num">10.2</span>Export image</h2>
+  <figure class="medium"><img src="img/export-image.png" alt="Export image" /><figcaption>Home → File → Export image.</figcaption></figure>
+  <p>Saves the whole map or the selection as a PNG at 100%, 50%, 25% or 12.5%, with or without objects, drawn with the layers currently shown. Sizes too large for one image are greyed out.</p>
+  <h2 id="s-exportds1"><span class="num">10.3</span>Export .ds1</h2>
+  <p><b>Home → File → Export .ds1</b> saves a copy of the map anywhere on your computer, without touching your mod.</p>
+</section>
+
+<!-- ============================================================ 11 HELP -->
+<section class="chapter" id="ch-help">
+  <h1><span class="num">11</span>Help, feedback and shortcuts <a class="top" href="#contents">↑ Contents</a></h1>
+  <figure><img src="../media/help-menu.png" alt="Help ribbon" /><figcaption>The Help ribbon.</figcaption></figure>
+  <h2 id="s-shortcuts"><span class="num">11.1</span>Keyboard shortcuts</h2>
+  <figure class="medium"><img src="img/shortcuts.png" alt="Shortcuts" /><figcaption>Help → Shortcuts: click a key to change it.</figcaption></figure>
+  <p>Every shortcut can be changed in <b>Help → Shortcuts</b> (or <b>Home → Shortcuts</b>): click a key, then press the new key or combination. The full list is in <a href="#ap-keys">Appendix A</a>.</p>
+  <h2 id="s-feedback"><span class="num">11.2</span>Suggest a feature, report a bug</h2>
+  <figure class="small"><img src="img/topbar.png" alt="Suggest a feature" style="max-width: 100%" /><figcaption>The top bar.</figcaption></figure>
+  <p><b>Suggest a feature</b> (always in the top bar, and in Help) and <b>Help → Report a bug</b> open a pre-filled GitHub issue with your version, system and the open map. Screenshots help: paste them straight into the issue.</p>
+  <h2 id="s-about"><span class="num">11.3</span>About</h2>
+  <p><b>Help → About</b> shows the version, build and platform, with links to the GitHub page and release notes.</p>
+</section>
+
+<!-- ============================================================ 12 TROUBLE -->
+<section class="chapter" id="ch-trouble">
+  <h1><span class="num">12</span>Safety and troubleshooting <a class="top" href="#contents">↑ Contents</a></h1>
+  <div class="warn"><b>Before you start</b> DS1 Studio is in beta. Keep a backup of your mod (and your game files) before editing.</div>
+  <h2 id="s-safety"><span class="num">12.1</span>What DS1 Studio writes</h2>
+  <ul>
+    <li>Only into your <b>mod folder</b>: maps, DT1s, <code>.txt</code> tables, presets. Your Diablo II install is only ever read.</li>
+    <li>A file it replaces is kept as <code>&lt;name&gt;.bak</code> the first time, so the original survives.</li>
+    <li>Autosaved copies live in the app's own storage, not in your folders (<a href="#s-autosave">1.6</a>).</li>
+  </ul>
+  <h2 id="s-errors"><span class="num">12.2</span>If something goes wrong</h2>
+  <p>If part of the app fails, it shows what happened instead of a blank window, with <b>Try again</b>, <b>Close this map</b>, <b>Report this bug</b> (pre-filled with the error details) and <b>Reload DS1 Studio</b>. Your unsaved changes are kept in the autosave.</p>
+  <h2 id="s-bin"><span class="num">12.3</span>Compiled .bin tables</h2>
+  <p>The game reads compiled <code>.bin</code> copies of the <code>.txt</code> tables. After changing tables (Add to game, warps, tile libraries, cube recipes…), start the game once with <code>-direct -txt</code> so it rebuilds them, if your mod ships <code>.bin</code> files.</p>
+  <h2 id="s-faq"><span class="num">12.4</span>Common questions</h2>
+  <table>
+    <tr><th>Question</th><th>Answer</th></tr>
+    <tr><td>Tiles show as red “missing” diamonds.</td><td>The map uses tiles no loaded DT1 provides. Run the <a href="#s-check">Compatibility check</a> — it offers to add the DT1s that contain them — or add them in <a href="#s-libraries">Tile libraries</a>.</td></tr>
+    <tr><td>My new map doesn't appear in game.</td><td>Use <a href="#s-addgame">Add to game</a>, connect it with a <a href="#ch-warps">warp</a> or a <a href="#s-cube">cube recipe</a>, and rebuild <code>.bin</code> tables (<a href="#s-bin">12.3</a>).</td></tr>
+    <tr><td>A warp leads nowhere.</td><td>Its link isn't set in Levels.txt: select it and <b>Connect it to a level…</b> (<a href="#ch-warps">chapter 6</a>).</td></tr>
+    <tr><td>Edited tiles look different in another act.</td><td>Use the Act 0 palette and <b>Make act-safe</b> in the <a href="#s-dt1editor">DT1 editor</a>.</td></tr>
+    <tr><td>Windows blocks the installer.</td><td><b>More info → Run anyway</b> (<a href="#s-install">1.1</a>).</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ APPENDIX A -->
+<section class="chapter" id="ap-keys">
+  <h1><span class="num">A</span>Keyboard and mouse reference <a class="top" href="#contents">↑ Contents</a></h1>
+  <p>Default keys; change them in <a href="#s-shortcuts">Help → Shortcuts</a>.</p>
+  <div class="pair">
+    <div>
+      <h3>Tools</h3>
+      <table>
+        <tr><td>Select tool</td><td><kbd>V</kbd></td></tr>
+        <tr><td>Paint tool (freehand)</td><td><kbd>B</kbd></td></tr>
+        <tr><td>Paint / erase a rectangle</td><td><kbd>U</kbd></td></tr>
+        <tr><td>Flood fill / erase a connected area</td><td><kbd>L</kbd></td></tr>
+        <tr><td>Erase tool</td><td><kbd>E</kbd></td></tr>
+        <tr><td>Pick tool</td><td><kbd>I</kbd></td></tr>
+        <tr><td>Objects tool</td><td><kbd>O</kbd></td></tr>
+        <tr><td>Toggle tiles / objects editing</td><td><kbd>Tab</kbd></td></tr>
+      </table>
+      <h3>File and edit</h3>
+      <table>
+        <tr><td>Save</td><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td></tr>
+        <tr><td>Undo / redo</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>)</td></tr>
+        <tr><td>Copy / cut / paste</td><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd></td></tr>
+        <tr><td>Select all</td><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td></tr>
+        <tr><td>Cancel / drop the tile on the cursor / deselect</td><td><kbd>Esc</kbd></td></tr>
+        <tr><td>Delete (active layer / object)</td><td><kbd>Delete</kbd></td></tr>
+        <tr><td>Delete everything (all layers + objects)</td><td><kbd>Shift</kbd>+<kbd>Delete</kbd></td></tr>
+        <tr><td>Find &amp; replace tiles</td><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>View</h3>
+      <table>
+        <tr><td>Fit map</td><td><kbd>F</kbd></td></tr>
+        <tr><td>Game view</td><td><kbd>Z</kbd></td></tr>
+        <tr><td>Grid</td><td><kbd>G</kbd></td></tr>
+        <tr><td>Rooms (8×8)</td><td><kbd>R</kbd></td></tr>
+        <tr><td>Walkability</td><td><kbd>W</kbd></td></tr>
+        <tr><td>Automap preview</td><td><kbd>A</kbd></td></tr>
+        <tr><td>Object markers / sprites / NPC paths</td><td><kbd>M</kbd> / <kbd>N</kbd> / <kbd>P</kbd></td></tr>
+        <tr><td>Minimap</td><td><kbd>K</kbd></td></tr>
+      </table>
+      <h3>Layers (show / hide)</h3>
+      <table>
+        <tr><td>Floor 1 / Floor 2</td><td><kbd>1</kbd> / <kbd>2</kbd></td></tr>
+        <tr><td>Wall 1 – Wall 4</td><td><kbd>3</kbd> – <kbd>6</kbd></td></tr>
+        <tr><td>Shadows / roofs / lower walls</td><td><kbd>7</kbd> / <kbd>8</kbd> / <kbd>9</kbd></td></tr>
+        <tr><td>Special tiles</td><td><kbd>0</kbd></td></tr>
+      </table>
+    </div>
+  </div>
+  <h3>Mouse</h3>
+  <table>
+    <tr><td>Pan the map</td><td>Arrow keys (<kbd>Shift</kbd> = faster), <kbd>Space</kbd>+drag, middle or right drag</td></tr>
+    <tr><td>Zoom</td><td>Mouse wheel</td></tr>
+    <tr><td>Step through stacked tiles</td><td><kbd>Shift</kbd>+wheel</td></tr>
+    <tr><td>Stack a paste / preset onto existing tiles</td><td><kbd>Alt</kbd>+click</td></tr>
+    <tr><td>Add a tile to the random paint mix</td><td><kbd>Ctrl</kbd>+click it in the Tiles panel</td></tr>
+    <tr><td>Pin / unpin a tile</td><td>Right-click it in the Tiles panel</td></tr>
+    <tr><td>Zoom tile / object thumbnails</td><td><kbd>Ctrl</kbd>+wheel over the panel</td></tr>
+    <tr><td>Move the view</td><td>Click or drag on the minimap</td></tr>
+    <tr><td>Select a range of tiles (DT1 editor)</td><td><kbd>Shift</kbd>+click</td></tr>
+  </table>
+  <h3>Pixel painter (DT1 editor)</h3>
+  <p><kbd>B</kbd> pencil · <kbd>E</kbd> eraser · <kbd>G</kbd> fill · <kbd>I</kbd> colour picker · <kbd>[</kbd> / <kbd>]</kbd> brush size · <kbd>Alt</kbd>+click picks a colour · <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo / redo · <kbd>Ctrl</kbd>+wheel zoom (<a href="#s-pixel">8.4</a>).</p>
+</section>
+
+<!-- ============================================================ APPENDIX B -->
+<section class="chapter" id="ap-glossary">
+  <h1><span class="num">B</span>Glossary <a class="top" href="#contents">↑ Contents</a></h1>
+  <table>
+    <tr><td><b>DS1</b></td><td>A map preset: a grid of cells with floor, wall, shadow and tag layers, plus objects and NPCs. The game builds levels from them.</td></tr>
+    <tr><td><b>DT1</b></td><td>A tile library: the pictures and settings of the tiles DS1 cells refer to (<a href="#ch-tiles">chapter 8</a>).</td></tr>
+    <tr><td><b>Cell</b></td><td>One diamond of the map grid; each layer holds at most one tile in it.</td></tr>
+    <tr><td><b>Main / sub index</b></td><td>A tile's number. A cell asks for “kind + main + sub” and the game draws the DT1 tile with those numbers.</td></tr>
+    <tr><td><b>Orientation (kind)</b></td><td>What a tile is: floor, left/right wall, corner, door, pillar/tree, roof, shadow, lower wall, special tile.</td></tr>
+    <tr><td><b>Variant / rarity</b></td><td>Several tiles can share a number; the game picks one at random, weighted by rarity. Animated tiles use it as their frame number.</td></tr>
+    <tr><td><b>Sub-tile flags</b></td><td>The 5×5 walkability grid of a tile: block walk, sight, missiles, teleport… (<a href="#s-subtiles">3.8</a>).</td></tr>
+    <tr><td><b>Special tile</b></td><td>An invisible marker: warps, entries, corpse and portal spots (<a href="#s-special">2.7</a>).</td></tr>
+    <tr><td><b>Level</b></td><td>A row of <code>Levels.txt</code>: one area of the game (a town, a dungeon floor), built from DS1 presets or at random.</td></tr>
+    <tr><td><b>LvlPrest.txt</b></td><td>Lists the DS1 files, the level each belongs to, and its <b>Dt1Mask</b>.</td></tr>
+    <tr><td><b>LvlTypes.txt</b></td><td>Level types: up to 32 DT1 <code>File</code> slots each.</td></tr>
+    <tr><td><b>Dt1Mask</b></td><td>Which of its level type's DT1 slots a DS1 loads (one bit per slot).</td></tr>
+    <tr><td><b>Warp / link</b></td><td>How levels connect: Levels.txt <code>Vis0–7</code> (target level) and <code>Warp0–7</code> (LvlWarp row) (<a href="#ch-warps">chapter 6</a>).</td></tr>
+    <tr><td><b>Preset (DS1 Studio)</b></td><td>A saved piece of map you can place again (<a href="#ch-presets">chapter 5</a>). Not to be confused with a DS1 “map preset”.</td></tr>
+    <tr><td><b>Act 0 palette</b></td><td>The colours that look the same in every act (<a href="#s-dt1editor">8.2</a>).</td></tr>
+    <tr><td><b>Mod folder</b></td><td>Your mod's folder; everything DS1 Studio saves goes here (<a href="#s-save">1.5</a>).</td></tr>
+  </table>
+  <p class="see">Diablo II and its data are © Blizzard Entertainment. DS1 Studio reads your own game files and never ships them. Thanks to Paul Siramy (WinDS1, DT1 Tools), the Phrozen Keep community, and Gimli for the Act 0 palette.</p>
+  <p><a href="#top">↑ Back to the start</a></p>
+</section>
+
+</body>
+</html>
