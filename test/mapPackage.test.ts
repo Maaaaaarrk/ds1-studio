@@ -5,12 +5,15 @@ import { describe, expect, it } from 'vitest';
 import { GameData } from '../src/game/GameData';
 import {
   MANIFEST_NAME,
+  addTxtRow,
   buildMapPackage,
   collectMapTxtRows,
   isUnsafePath,
   mergeTxtRow,
+  missingTablesWarning,
   planImport,
   readMapPackage,
+  tableCoverage,
   type PackageManifest,
 } from '../src/game/mapPackage';
 import { openMap } from '../src/game/openMap';
@@ -46,6 +49,29 @@ describe('mergeTxtRow (synthetic)', () => {
   it('rejects missing key column and tabs in values', () => {
     expect(() => mergeTxtRow(table, ['Val'], ['q'], 'Name')).toThrow();
     expect(() => mergeTxtRow(table, ['Name', 'Val'], ['q', 'a\tb'], 'Name')).toThrow();
+  });
+});
+
+describe('AutoMap rows and the tables a map needs (synthetic)', () => {
+  const automap = enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tCel1\r\n1 Town\tfl\t0\t-1\t-1\t1\r\n');
+  const cols = ['LevelName', 'TileName', 'Style', 'StartSequence', 'EndSequence', 'Cel1'];
+
+  it('adds an AutoMap row unless the same one is there (a level type has many rows, no key of its own)', () => {
+    expect(addTxtRow(automap, cols, ['1 Town', 'fl', '0', '-1', '-1', '1']).action).toBe('unchanged');
+    const added = addTxtRow(automap, cols, ['Guild', 'wl', '3', '0', '9', '81']);
+    expect(added.action).toBe('appended');
+    expect(dec(added.bytes)).toBe(dec(automap) + 'Guild\twl\t3\t0\t9\t81\r\n');
+    // Columns the package doesn't have stay empty; ones the table doesn't have are ignored.
+    expect(dec(addTxtRow(automap, ['LevelName', 'TileName', 'Extra'], ['Guild', 'co', 'x']).bytes).split('\r\n')[2]).toBe('Guild\tco\t\t\t\t');
+  });
+
+  it("says which tables a map comes without, and warns that the importer's own may not match", () => {
+    const row = (table: string) => ({ table, key: 'Name', columns: ['Name'], row: ['x'] });
+    const cov = tableCoverage([row('LvlPrest'), row('Levels'), row('Levels'), row('LvlTypes'), row('data/global/excel/AutoMap.txt')]);
+    expect(cov.map((c) => [c.table, c.rows])).toEqual([['LvlPrest', 1], ['Levels', 2], ['LvlTypes', 1], ['CubeMain', 0], ['AutoMap', 1]]);
+    expect(missingTablesWarning(cov)).toMatch(/^No CubeMain rows came with this map, so your own table is used as it is\..*can crash/);
+    expect(missingTablesWarning(tableCoverage([]))).toMatch(/^No LvlPrest, Levels, LvlTypes, CubeMain, AutoMap rows came/);
+    expect(missingTablesWarning(tableCoverage(['LvlPrest', 'Levels', 'LvlTypes', 'CubeMain', 'AutoMap'].map(row)))).toBe('');
   });
 });
 
@@ -121,7 +147,11 @@ describe.runIf(hasD2)('map packages over the real game data', async () => {
       expect(dt1Paths.length).toBeGreaterThan(0);
       const ds1Bytes = (await layered.read(MAP))!;
       const txtRows = await collectMapTxtRows(layered, MAP);
-      expect(txtRows.map((r) => r.table)).toEqual(expect.arrayContaining(['LvlPrest', 'Levels', 'LvlTypes']));
+      expect(txtRows.map((r) => r.table)).toEqual(expect.arrayContaining(['LvlPrest', 'Levels', 'LvlTypes', 'AutoMap']));
+      // The town's automap pieces: the game's AutoMap.txt names "Act 1 - Town" as "1 Town".
+      const am = txtRows.filter((r) => r.table === 'AutoMap');
+      expect(am.length).toBeGreaterThan(20);
+      expect(new Set(am.map((r) => r.row[r.columns.indexOf('LevelName')]))).toEqual(new Set(['1 Town']));
 
       const built = await buildMapPackage(layered, { path: MAP, ds1: map.ds1, dt1Paths }, { ds1Bytes, txtRows, notes: 'hello' });
       expect(built.missing).toEqual([]);
@@ -142,6 +172,7 @@ describe.runIf(hasD2)('map packages over the real game data', async () => {
       }
 
       const plan = await planImport(pkg, layered);
+      expect(plan.coverage.filter((c) => !c.rows).map((c) => c.table)).toEqual(['CubeMain']); // no cube recipe for the town
       expect(plan.writes).toHaveLength(pkg.files.length);
       expect(plan.writes.every((w) => w.action === 'identical')).toBe(true);
       expect(plan.txtMerges.every((m) => m.exists && m.action === 'unchanged')).toBe(true);

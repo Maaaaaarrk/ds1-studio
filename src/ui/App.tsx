@@ -58,7 +58,7 @@ import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
-import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, type ImportPlan, type MapPackage } from '../game/mapPackage';
+import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
@@ -246,6 +246,8 @@ export function App() {
   const [checkResults, setCheckResults] = useState<CheckResult[] | null>(null);
   const [marks, setMarks] = useState<{ x: number; y: number }[] | undefined>(undefined);
   const [exportState, setExportState] = useState<{ building: boolean; result: { files: { path: string; size: number; from: string }[]; missing: string[] } | null }>({ building: false, result: null });
+  /** The open map's rows in the tables a package carries (null while reading). */
+  const [exportCoverage, setExportCoverage] = useState<TableCoverage[] | null>(null);
   const [importState, setImportState] = useState<{ pkg: MapPackage; plan: ImportPlan } | null>(null);
   const [sprites, setSprites] = useState<Map<string, Sprite>>(() => new Map());
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
@@ -1291,6 +1293,19 @@ export function App() {
   };
 
   /** Picks DT1s (files, or folders with their subfolders) or a DS1 to import, and checks what they contain. */
+  const openPackage = useCallback(
+    async (bytes: Uint8Array) => {
+      if (!gd) return;
+      try {
+        const pkg = readMapPackage(bytes);
+        setImportState({ pkg, plan: await planImport(pkg, gd.fs) });
+        setDialog('import');
+      } catch (e) {
+        notify(`Import failed: ${(e as Error).message}`, true);
+      }
+    },
+    [gd, notify],
+  );
   const pickImport = useCallback(
     async (kind: 'dt1' | 'ds1', mode: 'file' | 'files' | 'folders' = 'file') => {
       if (!gd) return;
@@ -1309,8 +1324,10 @@ export function App() {
         setImporting({ kind, files });
         return;
       }
-      const f = await importNamed(kind);
+      const f = await importNamed('ds1,zip');
       if (!f) return;
+      // A map package (Export map) brings its tile libraries and table rows along.
+      if (f.bytes[0] === 0x50 && f.bytes[1] === 0x4b) return void openPackage(f.bytes);
       let info: { width: number; height: number; act: number } | string;
       let needs: NeededDt1[] = [];
       try {
@@ -1322,7 +1339,7 @@ export function App() {
       }
       setImporting({ kind, name: f.name, bytes: f.bytes, info, needs });
     },
-    [gd, notify],
+    [gd, notify, openPackage],
   );
 
   const importDt1 = useCallback(
@@ -1646,17 +1663,17 @@ export function App() {
   );
 
   const startImport = useCallback(async () => {
-    if (!gd) return;
-    try {
-      const bytes = await importBytes('zip');
-      if (!bytes) return;
-      const pkg = readMapPackage(bytes);
-      setImportState({ pkg, plan: await planImport(pkg, gd.fs) });
-      setDialog('import');
-    } catch (e) {
-      notify(`Import failed: ${(e as Error).message}`, true);
-    }
-  }, [gd, notify]);
+    const bytes = await importBytes('zip');
+    if (bytes) await openPackage(bytes);
+  }, [openPackage]);
+  /** Export map: the package dialog, with the map's table rows read for it. */
+  const openExport = useCallback(() => {
+    if (!gd || !doc) return;
+    setExportState({ building: false, result: null });
+    setExportCoverage(null);
+    setDialog('export');
+    void collectMapTxtRows(gd.fs, doc.path).then((rows) => setExportCoverage(tableCoverage(rows)));
+  }, [gd, doc]);
   const finishImport = useCallback(async () => {
     if (!importState) return;
     try {
@@ -1875,9 +1892,9 @@ export function App() {
           items: [
             { label: 'Save', icon: <Save />, onClick: () => void save(), disabled: noMap, active: !!doc?.dirty, shortcut: kb['file.save'], title: data.saveTarget ? `Save into ${data.saveTarget.label}` : 'Save (downloads: no mod folder)' },
             { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
-            { label: 'Export .ds1', icon: <FileOutput />, onClick: () => void exportFile(), disabled: noMap, size: 'sm' },
+            { label: 'Export map…', icon: <FileOutput />, onClick: openExport, disabled: noMap, size: 'sm', title: 'A package (.zip) with the map, its tile libraries and its Levels / LvlPrest / LvlTypes / CubeMain / AutoMap rows (or the .ds1 on its own)' },
             { label: 'Export image', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the map (or the selection) as a PNG picture' },
-            { label: 'Import DS1…', icon: <FileInput />, onClick: () => void pickImport('ds1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a map (.ds1) into your mod as expansion/Map/<name>.ds1, then add it to the game' : 'No writable mod folder' },
+            { label: 'Import DS1…', icon: <FileInput />, onClick: () => void pickImport('ds1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a map into your mod: a map package (.zip, with its tables) or a .ds1 on its own (then add it to the game)' : 'No writable mod folder' },
             {
               label: 'Import DT1',
               icon: <Grid2x2Plus />,
@@ -2030,7 +2047,7 @@ export function App() {
         {
           label: 'Share',
           items: [
-            { label: 'Export package', icon: <PackagePlus />, onClick: () => { setExportState({ building: false, result: null }); setDialog('export'); }, disabled: noMap, title: 'Zip the map with everything it needs' },
+            { label: 'Export package', icon: <PackagePlus />, onClick: openExport, disabled: noMap, title: 'Zip the map with everything it needs' },
             { label: 'Import package', icon: <PackageOpen />, onClick: () => void startImport(), disabled: !canWrite, title: canWrite ? 'Import a map package into your mod' : 'No writable mod folder' },
           ],
         },
@@ -2060,7 +2077,7 @@ export function App() {
           ],
         },
         { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap }] },
-        { label: 'Share', items: [{ label: 'Export .ds1', icon: <Download />, onClick: () => void exportFile(), disabled: noMap }] },
+        { label: 'Share', items: [{ label: 'Export map', icon: <Download />, onClick: openExport, disabled: noMap }] },
       ],
     },
     {
@@ -2716,7 +2733,18 @@ export function App() {
         />
       )}
       {dialog === 'export' && doc && (
-        <ExportPackageDialog mapPath={doc.path} building={exportState.building} result={exportState.result} onBuild={(n, b) => void exportPackage(n, b)} onClose={() => setDialog(null)} />
+        <ExportPackageDialog
+          mapPath={doc.path}
+          building={exportState.building}
+          result={exportState.result}
+          coverage={exportCoverage}
+          onBuild={(n, b) => void exportPackage(n, b)}
+          onDs1Only={() => {
+            setDialog(null);
+            void exportFile();
+          }}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog === 'import' && importState && (
         <ImportPackageDialog pkg={importState.pkg} plan={importState.plan} canWrite={canWrite} onImport={finishImport} onClose={() => setDialog(null)} />

@@ -4,6 +4,7 @@ import { COMPONENTS, parseCof } from '../formats/cof';
 import { parseTxt } from '../formats/txt';
 import { CLASSIC_MPQS, normalizePath, type LayeredFs } from '../vfs/vfs';
 import { cofPath, layerPath, type SpriteSpec } from './sprites';
+import { automapLevelFor, type AutomapTable } from './automap';
 import { mergeMapRows } from './levelTables';
 
 /**
@@ -41,6 +42,38 @@ export interface TxtRowEntry {
   key: string;
   columns: string[];
   row: string[];
+}
+
+/**
+ * The tables a map needs its rows from to load and work in game, with what each one does for it. A package without
+ * some of them leaves the importer's own rows in charge, which may not match the map.
+ */
+export const MAP_TABLES = [
+  { table: 'LvlPrest', role: 'makes the game load this map for its level (the file, its Dt1Mask, roof hiding)' },
+  { table: 'Levels', role: 'the level itself: size, act, palette, world position, loading-screen image, light, monsters' },
+  { table: 'LvlTypes', role: 'the tile libraries (DT1s) the level loads' },
+  { table: 'CubeMain', role: 'the cube recipe that opens a portal to it (with its item from Misc.txt)' },
+  { table: 'AutoMap', role: "the automap pieces for the level type's tiles" },
+] as const;
+
+export interface TableCoverage {
+  table: string;
+  role: string;
+  rows: number;
+}
+
+/** How many rows of each of MAP_TABLES a package (or an export) carries. */
+export function tableCoverage(rows: TxtRowEntry[]): TableCoverage[] {
+  const name = (t: string) => t.replace(/\.txt$/i, '').split('/').pop()!.toLowerCase();
+  return MAP_TABLES.map((t) => ({ table: t.table, role: t.role, rows: rows.filter((r) => name(r.table) === t.table.toLowerCase()).length }));
+}
+
+/** The warning for tables a map arrives without (empty when it has rows from all of them). */
+export function missingTablesWarning(coverage: TableCoverage[]): string {
+  const missing = coverage.filter((c) => !c.rows).map((c) => c.table);
+  if (!missing.length) return '';
+  const one = missing.length === 1;
+  return `No ${missing.join(', ')} rows came with this map, so your own ${one ? 'table is' : 'tables are'} used as ${one ? 'it is' : 'they are'}. If ${one ? "it doesn't" : "they don't"} match this map and its tile libraries (the level's size and world position, the level type's DT1s and Dt1Mask, the loading-screen image, the automap), the game can crash when the map loads or while walking in it. After importing, use Map → Add to game and run the Compatibility check.`;
 }
 
 export interface PackageManifest {
@@ -297,6 +330,8 @@ export interface ImportPlan {
   txtMerges: TxtMergePlan[];
   /** Resulting table contents for every table that changes (all of a table's rows applied in order). */
   txtWrites: { path: string; bytes: Uint8Array }[];
+  /** Which of the map's tables came with the package (see MAP_TABLES). */
+  coverage: TableCoverage[];
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -323,11 +358,13 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
   // LvlPrest / Levels / LvlTypes are merged by meaning: DT1s go into free LvlTypes slots, clashing ids get new ones
   // and the Dt1Mask is recomputed against this install's slots.
   let levelIds = new Map<string, string>();
+  let typeIds = new Map<string, string>();
   if (core.length) {
     const dt1s = pkg.manifest.files.filter((f) => /\.dt1$/i.test(f.path)).map((f) => f.path);
     try {
       const merged = await mergeMapRows(fs, pkg.manifest.map, core, dt1s);
       levelIds = merged.levelIds;
+      typeIds = merged.typeIds;
       for (const w of merged.writes) {
         const original = (await fs.read(w.path))!;
         tables.set(normalizePath(w.path), { path: w.path, original, bytes: w.bytes });
@@ -341,7 +378,7 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
   }
   for (const r0 of pkg.manifest.txtRows) {
     if (LEVEL_TABLES.includes(tableName(r0.table))) continue;
-    const r = remapLevelIds(r0, levelIds);
+    const r = tableName(r0.table) === 'automap' ? remapAutomapLevel(r0, typeIds) : remapLevelIds(r0, levelIds);
     const path = txtTablePath(r.table);
     const keyValue = r.row[r.columns.indexOf(r.key)] ?? '';
     const key = normalizePath(path);
@@ -354,12 +391,13 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
       txtMerges.push({ table: r.table, path, key: r.key, keyValue, exists: false, action: 'missing-table' });
       continue;
     }
-    const merged = mergeTxtRow(t.bytes, r.columns, r.row, r.key);
+    // AutoMap rows have no key of their own (a level type has many): each is added unless an identical one is there.
+    const merged = tableName(r.table) === 'automap' ? addTxtRow(t.bytes, r.columns, r.row) : mergeTxtRow(t.bytes, r.columns, r.row, r.key);
     txtMerges.push({ table: r.table, path, key: r.key, keyValue, exists: merged.action !== 'appended', action: merged.action });
     t.bytes = merged.bytes;
   }
   const txtWrites = [...tables.values()].filter((t) => !sameBytes(t.original, t.bytes)).map((t) => ({ path: t.path, bytes: t.bytes }));
-  return { writes, txtMerges, txtWrites };
+  return { writes, txtMerges, txtWrites, coverage: tableCoverage(pkg.manifest.txtRows) };
 }
 
 export type TxtMergeAction = 'appended' | 'replaced' | 'unchanged';
@@ -372,6 +410,14 @@ function remapLevelIds(r: TxtRowEntry, ids: Map<string, string>): TxtRowEntry {
   if (!cols || !ids.size) return r;
   const row = r.row.map((v, i) => (cols.includes(r.columns[i]) && ids.has(v.trim()) ? ids.get(v.trim())! : v));
   return { ...r, row };
+}
+
+/** AutoMap rows name their level type by LvlTypes Name or Id: an Id the import renumbered follows it. */
+function remapAutomapLevel(r: TxtRowEntry, ids: Map<string, string>): TxtRowEntry {
+  const i = r.columns.indexOf('LevelName');
+  const v = i >= 0 ? r.row[i]?.trim() : undefined;
+  if (v === undefined || !ids.has(v)) return r;
+  return { ...r, row: r.row.map((c, j) => (j === i ? ids.get(v)! : c)) };
 }
 
 function latin1(bytes: Uint8Array): string {
@@ -395,20 +441,58 @@ function toLatin1(s: string): Uint8Array {
  * (cells for columns the package doesn't know keep their values); otherwise the row is appended after the last
  * non-blank line. Never adds columns: unknown ones are ignored. Every other byte, line endings included, is kept.
  */
+/** A txt table's lines with their terminators (so untouched lines are copied verbatim), its header and line ending. */
+function txtLines(tableBytes: Uint8Array) {
+  const text = latin1(tableBytes);
+  const lines: { body: string; eol: string }[] = [];
+  const re = /([^\r\n]*)(\r\n|\n|\r|$)/g;
+  for (let m = re.exec(text); m && m.index < text.length; m = re.exec(text)) lines.push({ body: m[1], eol: m[2] });
+  if (!lines.length) throw new Error('txt table is empty');
+  return { lines, header: lines[0].body.split('\t'), eol: lines[0].eol || '\r\n' };
+}
+
+/** The table with `line` added after its last non-blank line. */
+function appendLine(lines: { body: string; eol: string }[], line: string, eol: string): Uint8Array {
+  let last = lines.length - 1;
+  while (last > 0 && !lines[last].body.trim()) last--;
+  const before = lines.slice(0, last + 1);
+  const after = lines.slice(last + 1);
+  let out: string;
+  if (before[last].eol) out = before.map((l) => l.body + l.eol).join('') + line + eol;
+  else out = before.map((l) => l.body + l.eol).join('') + eol + line; // file had no final line break; keep it that way
+  out += after.map((l) => l.body + l.eol).join('');
+  return toLatin1(out);
+}
+
+/**
+ * Adds a row to a table without a key column of its own (AutoMap.txt), by column name, unless a row with the same
+ * values in every column the two share is already there.
+ */
+export function addTxtRow(tableBytes: Uint8Array, columns: string[], row: string[]): { bytes: Uint8Array; action: TxtMergeAction } {
+  const { lines, header, eol } = txtLines(tableBytes);
+  // The same header: cell by cell (AutoMap.txt names a column twice); else by column name.
+  const sameHeader = columns.length === header.length && columns.every((c, i) => c === header[i]);
+  const cells = header.map((col, i) => {
+    const j = sameHeader ? i : columns.indexOf(col);
+    return j < 0 ? '' : (row[j] ?? '');
+  });
+  if (cells.some((c) => /[\t\r\n]/.test(c))) throw new Error('row contains tabs or line breaks');
+  const shared = header.map((col, i) => (sameHeader || columns.includes(col) ? i : -1)).filter((i) => i >= 0);
+  const same = (body: string) => {
+    const old = body.split('\t');
+    return shared.every((c) => (old[c] ?? '').trim() === cells[c].trim());
+  };
+  if (lines.some((l, i) => i > 0 && l.body.trim() && same(l.body))) return { bytes: tableBytes, action: 'unchanged' };
+  return { bytes: appendLine(lines, cells.join('\t'), eol), action: 'appended' };
+}
+
 export function mergeTxtRow(
   tableBytes: Uint8Array,
   columns: string[],
   row: string[],
   keyColumn: string,
 ): { bytes: Uint8Array; action: TxtMergeAction } {
-  const text = latin1(tableBytes);
-  // Lines with their terminators, so untouched lines are copied verbatim.
-  const lines: { body: string; eol: string }[] = [];
-  const re = /([^\r\n]*)(\r\n|\n|\r|$)/g;
-  for (let m = re.exec(text); m && m.index < text.length; m = re.exec(text)) lines.push({ body: m[1], eol: m[2] });
-  if (!lines.length) throw new Error('txt table is empty');
-  const header = lines[0].body.split('\t');
-  const eol = lines[0].eol || '\r\n';
+  const { lines, header, eol } = txtLines(tableBytes);
 
   const keyIdx = header.indexOf(keyColumn);
   if (keyIdx < 0) throw new Error(`table has no "${keyColumn}" column`);
@@ -433,17 +517,8 @@ export function mergeTxtRow(
     return { bytes: toLatin1(lines.map((l) => l.body + l.eol).join('')), action: 'replaced' };
   }
 
-  const line = header.map((col) => valueOf(col) ?? '').join('\t');
-  let last = lines.length - 1;
-  while (last > 0 && !lines[last].body.trim()) last--;
-  const before = lines.slice(0, last + 1);
-  const after = lines.slice(last + 1);
-  let out: string;
-  if (before[last].eol) out = before.map((l) => l.body + l.eol).join('') + line + eol;
-  else out = before.map((l) => l.body + l.eol).join('') + eol + line; // file had no final line break; keep it that way
-  out += after.map((l) => l.body + l.eol).join('');
   // Only the appended text differs, so the original bytes form a prefix (plus any trailing blank lines after it).
-  return { bytes: toLatin1(out), action: 'appended' };
+  return { bytes: appendLine(lines, header.map((col) => valueOf(col) ?? '').join('\t'), eol), action: 'appended' };
 }
 
 /**
@@ -475,6 +550,25 @@ export async function collectMapTxtRows(fs: LayeredFs, mapPath: string): Promise
   for (const r of types?.rows ?? []) {
     if (!typeIds.has(r['Id']?.trim()) || r['Name'] === 'Expansion') continue;
     out.push({ table: 'LvlTypes', key: 'Id', columns: types!.columns, row: types!.columns.map((c) => r[c] ?? '') });
+  }
+  // The automap pieces of those level types, found the way the automap editor finds them (the game's own tables use
+  // short names like "1 Town" for "Act 1 - Town"; mods their LvlTypes Name or Id).
+  // Read by position: AutoMap.txt's header names Type2 twice, so rows keyed by column name would lose a cel.
+  const automapBytes = typeIds.size ? await fs.read('data/global/excel/AutoMap.txt') : null;
+  if (automapBytes) {
+    const [head, ...lines] = new TextDecoder('latin1').decode(automapBytes).split(/\r?\n/);
+    const columns = head.split('\t');
+    const rows = lines.filter((l) => l.trim()).map((l) => l.split('\t'));
+    const at = columns.indexOf('LevelName');
+    const levels = [...new Set(rows.map((r) => r[at] ?? '').filter((l) => l.trim()))];
+    const names = new Set<string>();
+    for (const r of types?.rows ?? []) {
+      if (!typeIds.has(r['Id']?.trim())) continue;
+      const level = automapLevelFor({ levels } as AutomapTable, r['Name'], undefined, Number(r['Id']));
+      if (level) names.add(level.trim().toLowerCase());
+    }
+    for (const r of rows)
+      if (names.has((r[at] ?? '').trim().toLowerCase())) out.push({ table: 'AutoMap', key: 'LevelName', columns, row: columns.map((_, i) => r[i] ?? '') });
   }
   const levelRows = (levels?.rows ?? []).filter((r) => levelIds.has(r['Id']?.trim()));
   const push = (table: string, key: string, t: NonNullable<Awaited<ReturnType<typeof load>>>, r: Record<string, string>) =>

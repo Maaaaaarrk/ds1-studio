@@ -335,7 +335,9 @@ struct PickedFile(Mutex<Vec<PathBuf>>);
 /// Test hook: `DS1STUDIO_TEST_PICK_<EXT>` (e.g. `_DS1`, `_DT1`; paths separated by `;`) answers picks for that file
 /// type without showing a dialog, so the import flows can be driven end to end in tests. Unset in normal use.
 fn test_pick(extension: &str) -> Option<Vec<PathBuf>> {
-    std::env::var(format!("DS1STUDIO_TEST_PICK_{}", extension.to_ascii_uppercase()))
+    // "ds1,zip" (several extensions) answers with the first one's variable.
+    let first = extension.split(',').next().unwrap_or(extension);
+    std::env::var(format!("DS1STUDIO_TEST_PICK_{}", first.to_ascii_uppercase()))
         .ok()
         .map(|v| v.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect())
 }
@@ -348,7 +350,7 @@ fn walk_files(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) {
     for p in entries {
         if p.is_dir() {
             walk_files(&p, extension, out);
-        } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(extension)) {
+        } else if p.extension().is_some_and(|e| extension.split(',').any(|x| e.eq_ignore_ascii_case(x))) {
             out.push(p);
         }
     }
@@ -367,13 +369,15 @@ struct PickedEntry {
 async fn pick_import(app: AppHandle, picked: State<'_, PickedFile>, extension: String, mode: Option<String>) -> Result<Vec<PickedEntry>, String> {
     use tauri_plugin_dialog::DialogExt;
     let mode = mode.unwrap_or_else(|| "file".into());
+    // "ds1,zip": one filter offering every listed extension.
+    let exts: Vec<&str> = extension.split(',').collect();
     let to_paths = |v: Vec<tauri_plugin_dialog::FilePath>| v.into_iter().filter_map(|p| p.into_path().ok()).collect::<Vec<_>>();
     let chosen: Vec<PathBuf> = match test_pick(&extension) {
         Some(p) => p,
         None => match mode.as_str() {
             "folders" => app.dialog().file().blocking_pick_folders().map(to_paths).unwrap_or_default(),
-            "files" => app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_files().map(to_paths).unwrap_or_default(),
-            _ => app.dialog().file().add_filter(&extension, &[extension.as_str()]).blocking_pick_file().and_then(|p| p.into_path().ok()).into_iter().collect(),
+            "files" => app.dialog().file().add_filter(&extension, &exts).blocking_pick_files().map(to_paths).unwrap_or_default(),
+            _ => app.dialog().file().add_filter(&extension, &exts).blocking_pick_file().and_then(|p| p.into_path().ok()).into_iter().collect(),
         },
     };
     let mut files: Vec<(PathBuf, String)> = Vec::new();

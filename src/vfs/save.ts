@@ -125,7 +125,7 @@ function pickFiles(extension: string, mode: 'file' | 'files' | 'folders'): Promi
     const input = document.createElement('input');
     input.type = 'file';
     if (mode === 'folders') (input as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true;
-    else input.accept = `.${extension}`;
+    else input.accept = extension.split(',').map((e) => `.${e}`).join(','); // 'ds1,zip' offers both
     input.multiple = mode !== 'file';
     input.style.display = 'none';
     // Attached while in use: detached inputs don't reliably report the chosen files in every browser.

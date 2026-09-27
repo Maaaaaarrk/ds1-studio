@@ -477,7 +477,8 @@
 
   <h2 id="s-import-ds1"><span class="num">7.1</span>Import DS1 (with its tile libraries)</h2>
   <ol class="steps">
-    <li><b>Import DS1…</b> and pick the <code>.ds1</code> file. It's checked first: a file the game couldn't read is refused.</li>
+    <li><b>Import DS1…</b> and pick the <code>.ds1</code> file. It's checked first: a file the game couldn't read is refused. (A map package <code>.zip</code> from <a href="#s-package">Export map</a> can be picked here too: it opens the package import, tables included.)</li>
+    <li>A <code>.ds1</code> on its own brings none of its rows from the game's tables (Levels, LvlPrest, LvlTypes, CubeMain, AutoMap), so a warning says your own are used as they are: if they don't match the map and its tile libraries, the game can crash when it loads or while walking in it. Add it to the game afterwards and run the Compatibility check.</li>
     <li>Give the map a name (letters, digits, <code>-</code> and <code>_</code>). It will be saved as <code>expansion/Map/&lt;name&gt;.ds1</code>.</li>
     <li>Check <b>Tile libraries this map uses</b>: every DT1 the map names is <b>✓</b> in your game/mod, <b>＋</b> provided by a DT1 you picked, or <b>✗</b> missing.</li>
     <li>For missing ones, click <b>Add DT1 files…</b> or <b>Add folders…</b> (subfolders included). They're matched by file name, using the folders to tell same-named files apart; you can also choose a file for any library from its list.</li>
@@ -613,12 +614,13 @@
   <h1><span class="num">10</span>Sharing and exporting <a class="top" href="#contents">↑ Contents</a></h1>
   <h2 id="s-package"><span class="num">10.1</span>Map packages</h2>
   <figure class="medium"><img src="img/export-package.png" alt="Export package" /><figcaption>Map → Export package.</figcaption></figure>
-  <p><b>Map → Export package</b> puts the DS1, its DT1s, any modded object sprites and every table row the map needs (LvlPrest, Levels, LvlTypes, LvlWarp/LvlMaze and a cube recipe made for it) into one <code>.zip</code>. <b>Import package</b> merges such a zip into your mod safely: same-named rows are reused, clashing ids get new numbers, DT1s go into free slots and the <code>Dt1Mask</code> is recomputed. Importing the same map twice changes nothing.</p>
+  <p><b>Export map</b> (Home → File, or Map → Export package) puts the DS1, its DT1s, any modded object sprites and every table row the map needs into one <code>.zip</code>: its <b>LvlPrest</b>, <b>Levels</b> and <b>LvlTypes</b> rows, the <b>CubeMain</b> recipe made for it (with its Misc.txt item), the <b>AutoMap</b> rows of its level type, and LvlWarp/LvlMaze rows. The dialog lists the five main tables with how many rows each gives, and warns about any the map has none in (not added to the game yet, no cube recipe, no automap pieces). <b>DS1 only…</b> saves just the map file.</p>
+  <p><b>Import package</b> (or Import DS1… with a <code>.zip</code>) merges such a zip into your mod safely: same-named rows are reused, clashing ids get new numbers (AutoMap rows follow a renumbered level type), DT1s go into free slots and the <code>Dt1Mask</code> is recomputed; AutoMap rows already there aren't added twice. Importing the same map twice changes nothing. The import lists which of the five tables came with the map and warns about missing ones: your own rows are used for those, and the game can crash if they don't match the map.</p>
   <h2 id="s-exportimg"><span class="num">10.2</span>Export image</h2>
   <figure class="medium"><img src="img/export-image.png" alt="Export image" /><figcaption>Home → File → Export image.</figcaption></figure>
   <p>Saves the whole map or the selection as a PNG at 100%, 50%, 25% or 12.5%, with or without objects, drawn with the layers currently shown. Sizes too large for one image are greyed out.</p>
   <h2 id="s-exportds1"><span class="num">10.3</span>Export .ds1</h2>
-  <p><b>Home → File → Export .ds1</b> saves a copy of the map anywhere on your computer, without touching your mod.</p>
+  <p><b>Export map → DS1 only…</b> saves a copy of just the map file anywhere on your computer, without touching your mod. It carries no tile libraries or table rows: to hand a map to someone, export the package.</p>
 </section>
 
 <!-- ============================================================ 11 HELP -->

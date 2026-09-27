@@ -214,6 +214,8 @@ export interface MergeResult {
   writes: TableWrite[];
   /** Level ids of the package mapped to the ids they got here (only entries that changed). */
   levelIds: Map<string, string>;
+  /** Level type ids of the package mapped to the ids they got here (only entries that changed). */
+  typeIds: Map<string, string>;
 }
 
 export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: PackageRow[], dt1s: string[]): Promise<MergeResult> {
@@ -240,6 +242,9 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
     }
   }
   if (typeRow < 0) throw new Error('The package has no level type row; open the map and use Data → Add to game.');
+  const typeIds = new Map<string, string>();
+  const fromId = typeIn ? String(num(rowValue(typeIn, 'Id'))) : '';
+  if (typeIn && fromId !== getCell(types, typeRow, 'Id').trim()) typeIds.set(fromId, getCell(types, typeRow, 'Id').trim());
   const ensured = ensureTypeSlots(types, typeRow, dt1s);
   types = ensured.types;
   summary['LvlTypes.txt'].push(...ensured.added.map((a) => `"${getCell(types!, typeRow, 'Name')}": ${a}`));
@@ -300,5 +305,5 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
   push('LvlTypes.txt', types);
   push('Levels.txt', levels);
   push('LvlPrest.txt', prest);
-  return { writes: out, levelIds };
+  return { writes: out, levelIds, typeIds };
 }

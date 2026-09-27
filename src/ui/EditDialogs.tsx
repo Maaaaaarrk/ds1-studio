@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { parseDt1, type Dt1 } from '../formats/dt1';
 import { sharedTiles, tileKeys } from '../game/duplicateDt1s';
+import { missingTablesWarning, tableCoverage } from '../game/mapPackage';
 import type { Palette } from '../formats/palette';
 import type { CellRect } from '../game/clipboard';
 import { findTile, keyText, replaceEdits, type TileKey } from '../game/editTools';
@@ -538,6 +539,12 @@ export function ImportDs1Dialog({ file, info, needs, exists, readDt1, busy, pick
       {!safeName(name) && <p className="error-text small">Use letters, digits, - and _ only (no spaces): plain names are safe in the game&apos;s tables.</p>}
       <p className="small mono">{path}</p>
       {exists(path) && <p className="warn-text small">A map with that name exists: it will be replaced (the old one is kept as .bak).</p>}
+      <div className="imp-callout">
+        <span className="small warn-text">
+          {missingTablesWarning(tableCoverage([]))} A map package (.zip, from Export map) brings its Levels, LvlPrest, LvlTypes, CubeMain and AutoMap
+          rows along: Import DS1… reads those too.
+        </span>
+      </div>
 
       <div className="field-label">
         Tile libraries this map uses{' '}

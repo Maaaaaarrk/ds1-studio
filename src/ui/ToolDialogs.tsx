@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CheckResult, Fix } from '../game/compat';
-import type { ImportPlan, MapPackage } from '../game/mapPackage';
+import { missingTablesWarning, type ImportPlan, type MapPackage, type TableCoverage } from '../game/mapPackage';
 import { Modal } from './Dialogs';
 import { ColHelp } from './HelpTip';
 
@@ -92,19 +92,47 @@ interface ExportProps {
   mapPath: string;
   building: boolean;
   result: { files: { path: string; size: number; from: string }[]; missing: string[] } | null;
+  /** The map's rows in the tables it needs (null while they are being read). */
+  coverage: TableCoverage[] | null;
   onBuild: (notes: string, includeBaseGame: boolean) => void;
+  /** Exports the .ds1 file on its own instead. */
+  onDs1Only: () => void;
   onClose: () => void;
 }
 
-export function ExportPackageDialog({ mapPath, building, result, onBuild, onClose }: ExportProps) {
+/** The tables a map needs and how many of its rows each has (or will get), with what they do. */
+export function TableCoverageList({ coverage }: { coverage: TableCoverage[] }) {
+  return (
+    <div className="change-list">
+      {coverage.map((c) => (
+        <div key={c.table} className="small">
+          <span className={c.rows ? '' : 'warn-text'}>
+            {c.rows ? '✓' : '✗'} <b>{c.table}.txt</b> {c.rows ? `(${c.rows} row${c.rows === 1 ? '' : 's'})` : '(none)'}
+          </span>{' '}
+          <span className="muted">— {c.role}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ExportPackageDialog({ mapPath, building, result, coverage, onBuild, onDs1Only, onClose }: ExportProps) {
   const [notes, setNotes] = useState('');
   const [base, setBase] = useState(true);
+  const missing = coverage?.filter((c) => !c.rows).map((c) => c.table) ?? [];
   return (
-    <Modal title="Export map package" onClose={onClose}>
+    <Modal title="Export map" onClose={onClose}>
       <p className="muted small">
-        A .zip with everything another map maker needs to open <span className="mono">{mapPath.split('/').pop()}</span> in DS1 Studio: the DS1, its
-        tile libraries, custom object sprites and its LvlPrest / Levels / LvlTypes rows.
+        A map package (.zip) with everything another map maker needs to use <span className="mono">{mapPath.split('/').pop()}</span>: the DS1, its tile
+        libraries, custom object sprites, and its rows from the game's tables, so the game loads it the same way for them:
       </p>
+      {coverage ? <TableCoverageList coverage={coverage} /> : <p className="muted small">Reading the tables…</p>}
+      {missing.length > 0 && (
+        <p className="small warn-text">
+          This map has no {missing.join(', ')} rows in your tables{missing.includes('LvlPrest') ? ' (it has not been added to the game yet: Map → Add to game)' : ''}. Whoever imports it keeps
+          their own, which may not match it: that can crash the game when the map loads.
+        </p>
+      )}
       <label className="mini-check">
         <input type="checkbox" checked={base} onChange={(e) => setBase(e.target.checked)} /> include base-game tile libraries (larger, but works even if
         they were modded)
@@ -129,6 +157,9 @@ export function ExportPackageDialog({ mapPath, building, result, onBuild, onClos
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           Close
+        </button>
+        <button className="btn" onClick={onDs1Only} title="Just the map file, without its tile libraries or table rows">
+          DS1 only…
         </button>
         <button className="btn primary" disabled={building} onClick={() => onBuild(notes, base)}>
           {building ? 'Building…' : 'Export .zip…'}
@@ -160,6 +191,9 @@ export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: 
         {count('new')} new files, {count('overwrite')} replacing existing ones, {count('identical')} already identical. Files go into your mod folder
         (replaced files are kept as .bak).
       </p>
+      <div className="field-label">The map's rows from the game's tables</div>
+      <TableCoverageList coverage={plan.coverage} />
+      {missingTablesWarning(plan.coverage) && <p className="small warn-text">{missingTablesWarning(plan.coverage)}</p>}
       <div className="change-list">
         {plan.writes
           .filter((w) => w.action !== 'identical')
