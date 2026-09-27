@@ -8,7 +8,7 @@ import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
 import { duplicateDt1s } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
-import { verifyInGame } from './addToGame';
+import { ENTRY_IMAGE_DIR, verifyInGame } from './addToGame';
 import { loadTable } from './levelTables';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
@@ -186,7 +186,9 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     // palette, overlaps, path lengths); see game/addToGame.ts.
     const [p2, l2, t2] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt'), loadTable(gd.fs, 'LvlTypes.txt')]);
     if (p2 && l2 && t2)
-      for (const issue of verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1))
+      for (const issue of verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1, {
+        entryImageExists: (name) => !!gd.fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`)),
+      }))
         out.push({
           severity: issue.severity,
           title: issue.title,

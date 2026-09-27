@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseDs1 } from '../src/formats/ds1';
 import { getCell, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../src/formats/txtTable';
-import { dataRows, planAddToGame, rowOfRecord, verifyInGame, type AddToGamePlan } from '../src/game/addToGame';
+import { dataRows, ENTRY_IMAGE_DIR, planAddToGame, rowOfRecord, verifyInGame, type AddToGamePlan } from '../src/game/addToGame';
 import { GameData } from '../src/game/GameData';
 import { LayeredFs, MpqSource, normalizePath } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
@@ -34,6 +34,7 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     return next;
   };
   const same = (a: TxtTableDoc, b: TxtTableDoc, except: number[]) => a.rows.every((r, i) => except.includes(i) || r.join('\t') === b.rows[i]?.join('\t'));
+  const entryImageExists = (name: string) => !!fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`));
 
   it('the rules hold for every preset level of the game (no false alarms)', async () => {
     const problems: string[] = [];
@@ -46,7 +47,7 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
       if (!rel || rel === '0') continue; // Lut Gholein picks its map in code
       const ds1 = await ds1Of(rel);
       checked++;
-      for (const p of verifyInGame(tables, rel, ds1)) if (p.severity !== 'info') problems.push(`${id} ${rel}: ${p.title}`);
+      for (const p of verifyInGame(tables, rel, ds1, { entryImageExists })) if (p.severity !== 'info') problems.push(`${id} ${rel}: ${p.title}`);
     }
     expect(checked).toBeGreaterThan(30);
     expect(problems).toEqual([]);
@@ -156,7 +157,7 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(cell('QuestFlag')).toBe('');
     expect(cell('Depend')).toBe('0');
     expect(Number(cell('Layer'))).toBeGreaterThan(Math.max(...dataRows(tables.levels).map((r) => num(getCell(tables.levels, r, 'Layer')))));
-    expect([cell('LevelName'), cell('LevelWarp'), cell('EntryFile')]).toEqual(['My Town', 'My Town', 'My Town']);
+    expect([cell('LevelName'), cell('LevelWarp'), cell('EntryFile')]).toEqual(['My Town', 'My Town', 'A5L1']); // EntryFile is an image: Harrogath's, kept
     const P = rowOfRecord(next.prest, prestCount);
     const pc = (c: string) => getCell(next.prest, P, c);
     expect([pc('Def'), pc('LevelId'), pc('File1'), pc('Files'), pc('FillBlanks'), pc('Scan'), pc('AutoMap'), pc('SizeX'), pc('SizeY'), pc('Expansion')]).toEqual([
@@ -179,6 +180,38 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(verifyInGame(next, rel, ds1).filter((p) => p.severity !== 'info')).toEqual([]);
     // Every change is listed for the dialog.
     expect(plan.changes.some((c) => c.table === 'Levels.txt' && c.column === 'OffsetX')).toBe(true);
+  });
+
+  it('flags a loading-screen image the game cannot open (empty or missing EntryFile crashes on the loading screen), with a fix', async () => {
+    const { setCell } = await import('../src/formats/txtTable');
+    const rel = 'Expansion/Town/townWest.ds1';
+    const ds1 = await ds1Of(rel);
+    const L = rowOfRecord(tables.levels, 109);
+    expect(entryImageExists(getCell(tables.levels, L, 'EntryFile'))).toBe(true); // Harrogath's A5L1 is in the game
+    for (const [value, title] of [
+      ['', /EntryFile is empty/],
+      ['guild3', /loading-screen image guild3\.dc6 doesn't exist/],
+    ] as const) {
+      const levels = setCell(tables.levels, L, 'EntryFile', value);
+      const issue = verifyInGame({ ...tables, levels }, rel, ds1, { entryImageExists }).find((i) => /loading screen/.test(i.title))!;
+      expect(issue.title).toMatch(title);
+      expect(issue.severity).toBe('error');
+      expect(getCell(parseTxtTable(issue.fix!.writes[0].bytes), L, 'EntryFile')).toBe('A5L1');
+    }
+    // Without a way to look images up, only the empty one is flagged.
+    expect(verifyInGame({ ...tables, levels: setCell(tables.levels, L, 'EntryFile', 'guild3') }, rel, ds1).some((i) => /loading screen/.test(i.title))).toBe(false);
+  });
+
+  it('a new level from an Act 1-4 template gets an Act 5 loading screen (its own image is not where Act 5 levels look)', async () => {
+    const rel = 'Act1/Tristram/Tri_Town4.ds1';
+    const ds1 = await ds1Of(rel);
+    const plan = planAddToGame(tables, { mode: 'new', levelId: 38, name: 'Old Tristram', mapRel: rel, width: ds1.width, height: ds1.height, usedDt1s: dt1sOf(rel), popCount: 0 });
+    if (typeof plan === 'string') throw new Error(plan);
+    const next = apply(plan);
+    const entry = getCell(next.levels, rowOfRecord(next.levels, plan.newLevelId!), 'EntryFile');
+    expect(entry).toBe('A5L1');
+    expect(entryImageExists(entry)).toBe(true);
+    expect(entryImageExists(getCell(tables.levels, rowOfRecord(tables.levels, 38), 'EntryFile'))).toBe(false); // A1L39: not there
   });
 
   it('a new level with another act\'s tiles keeps their palette (like the game\'s Uber Tristram)', async () => {

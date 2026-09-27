@@ -59,6 +59,14 @@ export function tilePathProblem(rel: string): string | null {
 /** The game's towns (the only levels whose LvlPrest AutoMap is 1). */
 export const TOWNS = new Set([1, 40, 75, 103, 109]);
 
+/**
+ * Levels EntryFile is the loading-screen image shown while a level is entered: Act 5 levels (109 on, which is every
+ * added level) load data/local/ui/<language>/expansion/<EntryFile>.dc6. A missing or empty one halts D2CMP on the
+ * loading screen ("Error opening file: DATA\LOCAL\UI\ENG\EXPANSION\.dc6", then an access violation reading it).
+ */
+export const ENTRY_IMAGE_DIR = 'data/local/ui/eng/expansion/';
+export const DEFAULT_ENTRY_FILE = 'A5L1';
+
 export const levelAct = (id: number) => (id >= 109 ? 4 : id >= 103 ? 3 : id >= 75 ? 2 : id >= 40 ? 1 : 0);
 
 export interface FieldChange {
@@ -249,7 +257,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     const off = freeOffset(levels, 4);
     const layers = dataRows(levels).map((r) => num(getCell(levels, r, 'Layer')));
     const shorten = (s: string) => s.slice(0, MAX_LEVEL_STRING);
-    if (name.length > MAX_LEVEL_STRING) warnings.push(`The name is cut to ${MAX_LEVEL_STRING} characters in LevelName/LevelWarp/EntryFile (the game's limit).`);
+    if (name.length > MAX_LEVEL_STRING) warnings.push(`The name is cut to ${MAX_LEVEL_STRING} characters in LevelName/LevelWarp (the game's limit).`);
     set('Levels.txt', row, label, 'Name', name);
     set('Levels.txt', row, label, 'Id', String(newLevelId), 'its row number: the game reads Levels.txt by row');
     set('Levels.txt', row, label, 'Act', '4', 'levels from 109 on are Act 5 in the game');
@@ -274,7 +282,10 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     set('Levels.txt', row, label, 'Waypoint', '255', 'no waypoint');
     set('Levels.txt', row, label, 'LevelName', shorten(name));
     set('Levels.txt', row, label, 'LevelWarp', shorten(name));
-    set('Levels.txt', row, label, 'EntryFile', shorten(name));
+    // EntryFile names the loading-screen image (not a string): keep the template's when it is an Act 5 level's, whose
+    // images are where an Act 5 level looks; otherwise use Harrogath's, which every game install has.
+    const entry = getCell(levels, row, 'EntryFile').trim();
+    if (levelAct(input.levelId) !== 4 || !entry) set('Levels.txt', row, label, 'EntryFile', DEFAULT_ENTRY_FILE, `the loading screen (${ENTRY_IMAGE_DIR}${DEFAULT_ENTRY_FILE}.dc6, Harrogath's)`);
     targetLevel = newLevelId;
     if (pal !== 4) warnings.push(`The level is in Act 5 but uses the ${['Act 1', 'Act 2', 'Act 3', 'Act 4', 'Act 5'][pal]} palette (Pal ${pal}), because ${typeName}'s tiles were drawn for that act.`);
   } else {
@@ -479,7 +490,13 @@ export function recordOrderFix(table: TableName, doc: TxtTableDoc, col: string):
  * Checks that the game's tables load a map the way Add to game sets it up (the rules at the top of this file). Used by
  * the compatibility check and the tests; `ds1` sizes as DS1 Studio reads them.
  */
-export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc }, mapRel: string, ds1: { width: number; height: number }): TableIssue[] {
+export function verifyInGame(
+  tables: { prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc },
+  mapRel: string,
+  ds1: { width: number; height: number },
+  /** Whether a loading-screen image exists (ENTRY_IMAGE_DIR + name + .dc6); without it only empty EntryFiles are flagged. */
+  opts: { entryImageExists?: (entryFile: string) => boolean } = {},
+): TableIssue[] {
   const { prest, levels, types } = tables;
   const out: TableIssue[] = [];
   for (const [t, doc, col] of [
@@ -627,6 +644,20 @@ export function verifyInGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc; 
           { row: lRow, col: 'QuestFlag', value: '' },
           { row: lRow, col: 'QuestFlagEx', value: '' },
         ]),
+      });
+    // The loading screen (see ENTRY_IMAGE_DIR): an Act 5 level whose image the game can't open crashes while loading.
+    const entry = getCell(levels, lRow, 'EntryFile').trim();
+    const noImage = !entry ? 'empty' : opts.entryImageExists && !opts.entryImageExists(entry) ? 'missing' : null;
+    if (levelAct(levelId) === 4 && has(levels, 'EntryFile') && noImage)
+      out.push({
+        severity: 'error',
+        title:
+          noImage === 'empty'
+            ? `Level ${levelId}: EntryFile is empty, so the game crashes on the loading screen`
+            : `Level ${levelId}: its loading-screen image ${entry}.dc6 doesn't exist, so the game crashes on the loading screen`,
+        detail: `EntryFile is the image shown while the level loads: ${ENTRY_IMAGE_DIR}<EntryFile>.dc6 (not a text string). The game halts when it can't open it. Use an image the game has (Harrogath's is ${DEFAULT_ENTRY_FILE}) or put your own DC6 in that folder.`,
+        columns: [{ table: 'Levels', col: 'EntryFile' }],
+        fix: cellFix('Levels.txt', levels, `Use Harrogath's loading screen (${DEFAULT_ENTRY_FILE})`, [{ row: lRow, col: 'EntryFile', value: DEFAULT_ENTRY_FILE }]),
       });
     for (const c of ['LevelName', 'LevelWarp', 'EntryFile'])
       if (getCell(levels, lRow, c).length > MAX_LEVEL_STRING)
