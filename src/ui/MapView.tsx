@@ -8,7 +8,7 @@ import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { blendFlag, InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
 import type { SpriteAnimation } from '../game/spriteAnim';
-import { AUTOMAP_SCALE, type AutomapPiece } from '../game/automap';
+import { AUTOMAP_CODES, AUTOMAP_SCALE, type AutomapPiece } from '../game/automap';
 import { automapCanvas, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, worldToSubTile, sameItem, type DrawItem, type Scene } from '../render/scene';
@@ -799,7 +799,7 @@ function renderAutomap(width: number, height: number, a: NonNullable<Props['auto
       if (!p.rule && a.kindOf(p.orientation, p.main, p.sub) === 'walls') missing.push([p.cellX, p.cellY]);
       continue;
     }
-    draw.push({ cellX: p.cellX, cellY: p.cellY, kind: a.kindOf(p.orientation, p.main, p.sub), cel: p.cel });
+    draw.push({ cellX: p.cellX, cellY: p.cellY, kind: a.kindOf(p.orientation, p.main, p.sub), code: AUTOMAP_CODES[p.orientation], cel: p.cel });
   }
   const { canvas, ox, oy } = automapCanvas(width, height, draw, a.cels, a.palette, a.style);
   return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing, suggested, style: a.style };

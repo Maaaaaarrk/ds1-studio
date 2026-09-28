@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SpriteFrame } from '../src/formats/dc6';
-import { DEFAULT_AUTOMAP_STYLE, isWaterTile, kindOfCode, looksLikeWater, normalizeAutomapStyle, paintAutomap, type AutomapStyle } from '../src/game/automapStyle';
+import { DEFAULT_AUTOMAP_STYLE, isWaterTile, kindOfCode, looksLikeWater, normalizeAutomapStyle, paintAutomap, partOfCode, type AutomapStyle } from '../src/game/automapStyle';
 
 const frame = (w: number, h: number, px: number[]): SpriteFrame => ({ width: w, height: h, offsetX: 0, offsetY: -h, pixels: Uint8Array.from(px) }) as SpriteFrame;
 const palette = new Uint8Array(256 * 4).map((_, i) => (i % 4 === 3 ? 255 : i % 256));
@@ -36,6 +36,25 @@ describe('automap look', () => {
     // Game colours: the palette entry of the pixel.
     const game = paintAutomap(4, 4, pieces, cels, palette, { ...DEFAULT_AUTOMAP_STYLE, thickness: 0, colours: 'game' });
     expect(at(game.data, [palette[28], palette[29], palette[30]])).toHaveLength(2);
+  });
+
+  it('draws a part (Left walls) in its own look; the rest of the category keeps the category look', () => {
+    const cels = [frame(1, 1, [7])];
+    const pieces = [
+      { cellX: 0, cellY: 0, kind: 'walls' as const, code: 'wl', cel: 0 },
+      { cellX: 2, cellY: 0, kind: 'walls' as const, code: 'wr', cel: 0 },
+    ];
+    const px = (d: Uint8ClampedArray) => {
+      const out: string[] = [];
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3]) out.push(`${d[i]},${d[i + 1]},${d[i + 2]},${d[i + 3]}`);
+      return out.sort();
+    };
+    const style = { ...DEFAULT_AUTOMAP_STYLE, thickness: 0, parts: { left: { show: true, colour: '#102030', opacity: 0.5 } } };
+    expect(px(paintAutomap(4, 4, pieces, cels, palette, style).data)).toEqual(['16,32,48,128', '255,210,74,255']);
+    expect(px(paintAutomap(4, 4, pieces, cels, palette, { ...style, parts: { left: { ...style.parts.left, show: false } } }).data)).toEqual(['255,210,74,255']);
+    expect(partOfCode('wtll')).toBe('corners');
+    expect(partOfCode('fl')).toBeNull();
+    expect(normalizeAutomapStyle({ parts: { left: { colour: '#abcdef' }, bogus: {} } }).parts).toEqual({ left: { show: true, colour: '#abcdef', opacity: 1 } });
   });
 
   it('takes stored settings safely, filling in anything missing or wrong, and carries older ones over', () => {

@@ -1,4 +1,56 @@
-import { AUTOMAP_KIND_LIST, DEFAULT_AUTOMAP_STYLE, type AutomapKind, type AutomapStyle } from '../game/automapStyle';
+import { useEffect, useState } from 'react';
+import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, DEFAULT_AUTOMAP_STYLE, lookOf, type AutomapKind, type AutomapLookOf, type AutomapStyle } from '../game/automapStyle';
+
+const hex2 = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+const toRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+/** A colour by picker, hex (#rrggbb, #rgb or rrggbb) or red/green/blue 0-255. */
+export function ColourField({ value, onChange, disabled = false }: { value: string; onChange: (hex: string) => void; disabled?: boolean }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const commitHex = (t: string) => {
+    let h = t.trim().replace(/^#/, '');
+    if (/^[0-9a-f]{3}$/i.test(h)) h = h.replace(/./g, (c) => c + c);
+    if (/^[0-9a-f]{6}$/i.test(h)) onChange(`#${h.toLowerCase()}`);
+    else setText(value);
+  };
+  const rgb = toRgb(value);
+  return (
+    <span className="colour-field">
+      <input type="color" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} title="Pick a colour" />
+      <input
+        className="colour-hex mono"
+        value={text}
+        disabled={disabled}
+        spellCheck={false}
+        maxLength={7}
+        title="Hex: #rrggbb"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => commitHex(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commitHex((e.target as HTMLInputElement).value)}
+      />
+      {(['R', 'G', 'B'] as const).map((c, i) => (
+        <label key={c} className="colour-chan" title={`${['Red', 'Green', 'Blue'][i]} 0-255`}>
+          <span className="tiny muted">{c}</span>
+          <input
+            type="number"
+            min={0}
+            max={255}
+            value={rgb[i]}
+            disabled={disabled}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              const next = rgb.slice();
+              next[i] = n;
+              onChange(`#${next.map(hex2).join('')}`);
+            }}
+          />
+        </label>
+      ))}
+    </span>
+  );
+}
 
 /** A small picture of a category of automap piece, in a colour: a wall run, a floor diamond, waves, a roof, a tree, a shade. */
 export function KindIcon({ kind, colour, size = 16 }: { kind: AutomapKind; colour: string; size?: number }) {
@@ -41,6 +93,7 @@ export function AutomapLook({
   compact = false,
   kinds,
   single = false,
+  part = null,
 }: {
   style: AutomapStyle;
   onChange: (s: AutomapStyle) => void;
@@ -49,31 +102,63 @@ export function AutomapLook({
   kinds?: AutomapKind[];
   /** Just one category's colour, opacity and showing, as a small form. */
   single?: boolean;
+  /** With single: one part of the category (Left walls…), which then gets a look of its own. */
+  part?: { id: string; label: string } | null;
 }) {
   const set = (patch: Partial<AutomapStyle>) => onChange({ ...style, ...patch });
   const setKind = (k: AutomapKind, patch: Partial<AutomapStyle['kinds'][AutomapKind]>) => set({ kinds: { ...style.kinds, [k]: { ...style.kinds[k], ...patch } } });
   const byKind = style.colours === 'kind';
   if (single && kinds?.length) {
     const id = kinds[0];
-    const v = style.kinds[id];
+    const own = part ? style.parts[part.id] : undefined;
+    const v = lookOf(style, id, part?.id);
+    const setLook = (patch: Partial<AutomapLookOf>) =>
+      part ? set({ parts: { ...style.parts, [part.id]: { ...v, ...patch } } }) : setKind(id, patch);
+    const kindLabel = AUTOMAP_KIND_LIST.find((k) => k.id === id)!.label;
+    const ownParts = AUTOMAP_PARTS.filter((pt) => pt.kind === id && style.parts[pt.id]);
+    const dropParts = (ids: string[]) => set({ parts: Object.fromEntries(Object.entries(style.parts).filter(([k]) => !ids.includes(k))) });
     return (
       <div className="am-look single">
-        <label className="am-look-row">
+        {part && (
+          <p className="small am-look-scope">
+            {own ? (
+              <>
+                <b>{part.label}</b> have their own look.{' '}
+                <button className="link" onClick={() => dropParts([part.id])}>
+                  Use the {kindLabel.toLowerCase()} look again
+                </button>
+              </>
+            ) : (
+              <span className="muted">
+                {part.label} follow the {kindLabel.toLowerCase()} look; change anything here to give them their own.
+              </span>
+            )}
+          </p>
+        )}
+        <div className="am-look-row">
           <span>Colour</span>
-          <input type="color" value={v.colour} disabled={!byKind} onChange={(e) => setKind(id, { colour: e.target.value })} />
-          <span className="small muted">{byKind ? '' : 'game colours'}</span>
-        </label>
+          <ColourField value={v.colour} disabled={!byKind} onChange={(colour) => setLook({ colour })} />
+        </div>
+        {!byKind && <p className="small muted">Colours follow the game&apos;s pieces now: switch Look → Colour by kind to use your own.</p>}
         <label className="am-look-row">
           <span>Opacity</span>
-          <input type="range" min={10} max={100} value={Math.round(v.opacity * 100)} onChange={(e) => setKind(id, { opacity: Number(e.target.value) / 100 })} />
+          <input type="range" min={10} max={100} value={Math.round(v.opacity * 100)} onChange={(e) => setLook({ opacity: Number(e.target.value) / 100 })} />
           <span className="mono small">{Math.round(v.opacity * 100)}%</span>
         </label>
         <label className="am-look-row">
           <span>Show</span>
-          <input type="checkbox" checked={v.show} onChange={(e) => setKind(id, { show: e.target.checked })} />
+          <input type="checkbox" checked={v.show} onChange={(e) => setLook({ show: e.target.checked })} />
           <span />
         </label>
-        <p className="muted small">How DS1 Studio draws it (all categories: Look, over the preview). The game draws its own colours.</p>
+        {!part && ownParts.length > 0 && (
+          <p className="small muted">
+            {ownParts.map((pt) => pt.label).join(', ')} {ownParts.length === 1 ? 'has' : 'have'} a look of {ownParts.length === 1 ? 'its' : 'their'} own.{' '}
+            <button className="link" onClick={() => dropParts(ownParts.map((pt) => pt.id))}>
+              Make all {kindLabel.toLowerCase()} look the same
+            </button>
+          </p>
+        )}
+        {!part && <p className="muted small">How DS1 Studio draws the automap. The game draws each piece in its own pixels from MaxiMap.dc6; AutoMap.txt has no colours.</p>}
       </div>
     );
   }

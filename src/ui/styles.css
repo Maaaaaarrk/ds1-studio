@@ -922,3 +922,19 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .am-look-op { width: 70px; }
 .am-look.single .am-look-row { grid-template-columns: 70px 1fr 44px; }
 .ame-list { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+
+/* Automap editor: a part's own look, colour by hex/RGB, a roomy piece gallery. */
+.am-look.single .am-look-row { grid-template-columns: 64px 1fr 44px; }
+.am-look.single div.am-look-row { grid-template-columns: 64px 1fr; }
+.am-look-scope { margin: 0; }
+.colour-field { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.colour-field input[type='color'] { width: 30px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+.colour-field .colour-hex { width: 70px; font-size: 12px; padding: 2px 4px; }
+.colour-chan { display: inline-flex; align-items: center; gap: 2px; }
+.colour-chan input { width: 46px; font-size: 12px; padding: 2px 2px 2px 4px; }
+.amb > .amb-section { flex: none; }
+.amb > .amb-texture { flex: 1 0 auto; display: flex; flex-direction: column; }
+.amb .ame-gallery { flex: 1 1 0; min-height: 260px; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; }
+.amb-hint { font-size: 11px; }
+.cel-cell.fits { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.amb .ame-actions { position: sticky; bottom: 0; background: var(--panel); padding: 6px 0; z-index: 1; }

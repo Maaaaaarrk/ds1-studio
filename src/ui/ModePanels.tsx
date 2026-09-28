@@ -4,7 +4,7 @@ import { popProblems, type PopArea } from '../game/pops';
 import { HelpTip } from './HelpTip';
 import { LevelLightEditor, type LevelLight } from './panels';
 import type { ViewMode } from './state';
-import { AUTOMAP_KIND_LIST, type AutomapStyle } from '../game/automapStyle';
+import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, type AutomapStyle } from '../game/automapStyle';
 import { KindIcon } from './AutomapLook';
 
 /**
@@ -134,12 +134,20 @@ export function AutomapLegend({ style }: { style: AutomapStyle }) {
     <div className="walk-legend floating">
       <div className="walk-legend-title">Automap</div>
       {style.colours === 'kind' ? (
-        kinds.map((k) => (
-          <div key={k.id} className="walk-legend-row">
-            <KindIcon kind={k.id} colour={style.kinds[k.id].colour} size={14} />
-            {k.label}
-          </div>
-        ))
+        <>
+          {kinds.map((k) => (
+            <div key={k.id} className="walk-legend-row">
+              <KindIcon kind={k.id} colour={style.kinds[k.id].colour} size={14} />
+              {k.label}
+            </div>
+          ))}
+          {AUTOMAP_PARTS.filter((pt) => style.parts[pt.id]?.show).map((pt) => (
+            <div key={pt.id} className="walk-legend-row">
+              <KindIcon kind={pt.kind} colour={style.parts[pt.id].colour} size={14} />
+              {pt.label}
+            </div>
+          ))}
+        </>
       ) : (
         <div className="walk-legend-row">Pieces in the game&apos;s own colours{kinds.length < AUTOMAP_KIND_LIST.length ? ` (${kinds.map((k) => k.label.toLowerCase()).join(', ')})` : ''}</div>
       )}

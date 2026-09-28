@@ -16,7 +16,7 @@ import {
   type AutomapEdit,
   type AutomapTable,
 } from '../game/automap';
-import { AUTOMAP_KIND_LIST, automapCanvas, automapFrame, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
+import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, automapCanvas, automapFrame, lookOf, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { OpenMap } from '../game/openMap';
 import { renderMapCanvas } from '../render/exportImage';
 import type { Scene } from '../render/scene';
@@ -59,21 +59,7 @@ interface Group {
 
 type Status = 'shown' | 'hidden' | 'missing';
 const statusOf = (cels: number[] | null): Status => (cels === null ? 'missing' : cels.length ? 'shown' : 'hidden');
-/** The parts a category opens into: walls by shape, objects by kind. Categories not listed are one part. */
-const SUBGROUPS: Partial<Record<AutomapKind, { id: string; label: string; codes: string[] }[]>> = {
-  walls: [
-    { id: 'left', label: 'Left walls', codes: ['wl'] },
-    { id: 'right', label: 'Right walls', codes: ['wr'] },
-    { id: 'corners', label: 'Corners', codes: ['wtlr', 'wtll', 'wtr', 'wbl', 'wbr'] },
-    { id: 'doors', label: 'Doors', codes: ['wld', 'wrd'] },
-    { id: 'ends', label: 'Wall ends', codes: ['wle', 'wre'] },
-    { id: 'lower', label: 'Lower walls', codes: ['ld', 'lr', 'lf', 'ls'] },
-  ],
-  objects: [
-    { id: 'trees', label: 'Trees', codes: ['tr'] },
-    { id: 'props', label: 'Columns & props', codes: ['co'] },
-  ],
-};
+const partsOf = (k: AutomapKind) => AUTOMAP_PARTS.filter((p) => p.kind === k);
 
 /** Categories where a tile without an entry is a hole in the automap (walls); for the rest (floors, trees…) it is normal. */
 const HOLE_KINDS: AutomapKind[] = ['walls'];
@@ -140,8 +126,8 @@ export function AutomapEditor({ map, scene, table, cels, palette, level, onLevel
   const present = AUTOMAP_KIND_LIST.filter((k) => summary.get(k.id)!.groups.length);
   const holes = HOLE_KINDS.reduce((n, k) => n + summary.get(k)!.none, 0);
   const allCatGroups = summary.get(category)!.groups;
-  const subsOf = (k: AutomapKind) => (SUBGROUPS[k] ?? []).filter((sg) => summary.get(k)!.groups.some((g) => sg.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')));
-  const subInfo = sub ? (SUBGROUPS[category] ?? []).find((sg) => sg.id === sub) ?? null : null;
+  const subsOf = (k: AutomapKind) => partsOf(k).filter((sg) => summary.get(k)!.groups.some((g) => sg.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')));
+  const subInfo = sub ? partsOf(category).find((sg) => sg.id === sub) ?? null : null;
   const catGroups = subInfo ? allCatGroups.filter((g) => subInfo.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')) : allCatGroups;
 
   const setCels = (targets: Group[], value: number[] | ((current: number[] | null) => number[])) =>
@@ -305,7 +291,7 @@ export function AutomapEditor({ map, scene, table, cels, palette, level, onLevel
                               <span className="muted small">
                                 {n} tiles{none ? <span className={hole ? 'amc-hole' : ''}> · {none} {hole ? 'missing' : 'not drawn'}</span> : null}
                               </span>
-                              <span className="amc-sub-piece">{top !== undefined ? <CelThumb frame={cels[top]} palette={palette} fit={26} tint={tint(k.id)} /> : <span className="ame-badge hidden">off</span>}</span>
+                              <span className="amc-sub-piece">{top !== undefined ? <CelThumb frame={cels[top]} palette={palette} fit={26} tint={style.colours === 'kind' ? lookOf(style, k.id, sg.id).colour : undefined} /> : <span className="ame-badge hidden">off</span>}</span>
                             </button>
                           );
                         })}
@@ -375,7 +361,7 @@ export function AutomapEditor({ map, scene, table, cels, palette, level, onLevel
             <CategoryPanel
               key={`${category}|${sub ?? ''}`}
               category={category}
-              part={subInfo?.label ?? null}
+              part={subInfo ? { id: subInfo.id, label: subInfo.label } : null}
               groups={catGroups}
               table={table}
               level={level}
@@ -442,7 +428,7 @@ function CategoryPanel({
 }: {
   category: AutomapKind;
   /** The part of the category shown (Left walls, Corners…), or null for all of it. */
-  part: string | null;
+  part: { id: string; label: string } | null;
   groups: Group[];
   table: AutomapTable;
   level: string;
@@ -482,10 +468,10 @@ function CategoryPanel({
   // What a code gets: the piece picked here, else (taking another level's set) that level's, else what it draws now, else the level's usual.
   const chosen = (code: string, list: Group[]): number[] =>
     pick.get(code) ?? (from !== level && usual.has(code) ? [usual.get(code)!] : current(list).length ? current(list) : usual.has(code) ? [usual.get(code)!] : []);
-  // A part with one shape (Left walls, Trees) shows its pieces straight away.
-  const [active, setActive] = useState<string | null>(() => (shapes.size === 1 ? [...shapes.keys()][0] : null));
+  // A part (Left walls, Corners…) shows its pieces straight away.
+  const [active, setActive] = useState<string | null>(() => (part || shapes.size === 1 ? ([...shapes.keys()][0] ?? null) : null));
   const [off, setOff] = useState<Set<string>>(new Set());
-  const tint = style.colours === 'kind' ? style.kinds[category].colour : undefined;
+  const tint = style.colours === 'kind' ? lookOf(style, category, part?.id).colour : undefined;
   const tiles = (list: Group[]) => list.reduce((n, g) => n + g.cells.length, 0);
   const targets = (list: Group[]) => list.filter((g) => !off.has(g.key) && (!keep || celsOf(g) === null));
   const missing = groups.filter((g) => celsOf(g) === null);
@@ -510,7 +496,7 @@ function CategoryPanel({
           leave off the automap
         </button>
       </div>
-      <PieceGallery table={table} level={level} cels={cels} palette={palette} codes={[code]} tint={tint} active={value} onPick={(c) => set([c])} />
+      <PieceGallery table={table} level={level} cels={cels} palette={palette} codes={[code]} tint={tint} active={value} onPick={(c) => set([c])} start={part ? 'all' : 'kind'} />
     </>
   );
   const piece = (value: number[]) =>
@@ -518,7 +504,7 @@ function CategoryPanel({
 
   const apply = () => {
     for (const [list, value] of changes()) if (list.length) onApply(list, value);
-    onMessage(`${part ?? info.label}: ${changing} tiles set${perShape && from !== level ? ` as in ${levelLabel(from)}` : ''}. Check the preview, then save.`);
+    onMessage(`${part?.label ?? info.label}: ${changing} tiles set${perShape && from !== level ? ` as in ${levelLabel(from)}` : ''}. Check the preview, then save.`);
   };
 
   return (
@@ -526,18 +512,18 @@ function CategoryPanel({
       <div className="field-label amb-head">
         <span className="amc-title">
           <KindIcon kind={category} colour={style.kinds[category].colour} size={18} /> {info.label}
-          {part && <span className="amc-part"> › {part}</span>}
+          {part && <span className="amc-part"> › {part.label}</span>}
         </span>
         <span className="muted small">
           {tiles(groups)} tiles · {groups.length} kinds
         </span>
       </div>
       <div className="amb-section">
-        <div className="amb-section-title">Look{part ? ` (all ${info.label.toLowerCase()})` : ''}</div>
-        <AutomapLook style={style} onChange={onStyle} kinds={[category]} compact single />
+        <div className="amb-section-title">Look{part ? `: ${part.label.toLowerCase()} only` : ''}</div>
+        <AutomapLook style={style} onChange={onStyle} kinds={[category]} compact single part={part} />
       </div>
 
-      <div className="amb-section">
+      <div className="amb-section amb-texture">
         <div className="amb-section-title">Texture: the piece the game draws</div>
         {category === 'water' && (
           <>
@@ -572,11 +558,11 @@ function CategoryPanel({
         )}
         {perShape ? (
           <>
-            <p className="muted small">
+            {!part && <p className="muted small">
               {category === 'walls'
                 ? 'Each wall shape has its own piece, so it faces the right way. Click a shape to choose another piece, or take a whole set from a level:'
                 : 'One piece per kind of object (trees, props). Click one to choose another piece:'}
-            </p>
+            </p>}
             <label className="small amb-from">
               Pieces as in{' '}
               <select
@@ -594,7 +580,7 @@ function CategoryPanel({
                 ))}
               </select>
             </label>
-            <div className="amb-rows">
+            {!(part && shapes.size === 1) && <div className="amb-rows">
               {[...shapes].map(([code, list]) => (
                 <button key={code} className={`amb-row${active === code ? ' active' : ''}`} onClick={() => setActive(active === code ? null : code)}>
                   <span className="amb-name">
@@ -604,7 +590,7 @@ function CategoryPanel({
                   <span className="amb-piece">{piece(chosen(code, list))}</span>
                 </button>
               ))}
-            </div>
+            </div>}
             {active && shapes.has(active) && gallery(active, chosen(active, shapes.get(active)!), (v) => setPick((m) => new Map(m).set(active, v)))}
           </>
         ) : (
@@ -767,6 +753,7 @@ function PieceGallery({
   tint,
   active,
   onPick,
+  start = 'kind',
 }: {
   table: AutomapTable;
   level: string;
@@ -776,8 +763,10 @@ function PieceGallery({
   tint?: string;
   active?: number[];
   onPick: (cel: number) => void;
+  /** Which pieces show first: those for this kind of tile, or every piece (those for this kind first). */
+  start?: 'kind' | 'all';
 }) {
-  const [which, setWhich] = useState<'kind' | 'level' | 'act' | 'all'>('kind');
+  const [which, setWhich] = useState<'kind' | 'level' | 'act' | 'all'>(start);
   const [filter, setFilter] = useState('');
   const act = /^(\d)\s/.exec(level)?.[1];
   const { lists, labels } = useMemo(() => {
@@ -797,7 +786,7 @@ function PieceGallery({
   }, [table, level, act, codes.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   const pool = which === 'all' ? cels.map((_, i) => i) : [...(which === 'kind' ? lists.kind : which === 'level' ? lists.level : lists.act)];
   const shown = pool
-    .sort((a, b) => a - b)
+    .sort((a, b) => Number(lists.kind.has(b)) - Number(lists.kind.has(a)) || a - b)
     .filter((c) => !filter || String(c) === filter.trim() || (labels.get(c) ?? '').toLowerCase().includes(filter.toLowerCase()));
   return (
     <>
@@ -810,9 +799,15 @@ function PieceGallery({
         </select>
         <input className="small-input" placeholder="name or #" value={filter} onChange={(e) => setFilter(e.target.value)} />
       </div>
+      {which !== 'kind' && lists.kind.size > 0 && <div className="muted amb-hint">Framed (and first): the pieces used for this kind of tile.</div>}
       <div className="ame-gallery">
         {shown.map((c) => (
-          <button key={c} className={`cel-cell${active?.includes(c) ? ' active' : ''}`} title={`Piece ${c}${labels.get(c) ? ` · ${labels.get(c)}` : ''}`} onClick={() => onPick(c)}>
+          <button
+            key={c}
+            className={`cel-cell${active?.includes(c) ? ' active' : ''}${which !== 'kind' && lists.kind.has(c) ? ' fits' : ''}`}
+            title={`Piece ${c}${labels.get(c) ? ` · ${labels.get(c)}` : ''}${lists.kind.has(c) ? ' · used for this kind of tile' : ''}`}
+            onClick={() => onPick(c)}
+          >
             <CelThumb frame={cels[c]} palette={palette} fit={56} tint={tint} />
             <span className="mono small">{c}</span>
             <span className="muted tiny">{labels.get(c) ?? ''}</span>
@@ -882,7 +877,7 @@ function AutomapPreview({
     for (const g of groups) {
       const list = celsOf(g);
       if (!list?.length) continue;
-      for (const [cx, cy] of g.cells) draw.push({ cellX: cx, cellY: cy, kind: g.kind, cel: list[(cx * 7 + cy * 13) % list.length] });
+      for (const [cx, cy] of g.cells) draw.push({ cellX: cx, cellY: cy, kind: g.kind, code: AUTOMAP_CODES[g.orientation], cel: list[(cx * 7 + cy * 13) % list.length] });
     }
     return automapCanvas(width, height, draw, cels, palette, style).canvas;
   }, [groups, celsOf, cels, palette, width, height, style]);

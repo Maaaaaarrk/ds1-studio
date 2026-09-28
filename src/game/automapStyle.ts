@@ -30,10 +30,40 @@ export function kindOfCode(code: string, water = false): AutomapKind {
   return 'walls';
 }
 
+/** The parts a category opens into: walls by shape, objects by kind. Each can have its own look and piece. */
+export const AUTOMAP_PARTS: { id: string; kind: AutomapKind; label: string; codes: string[] }[] = [
+  { id: 'left', kind: 'walls', label: 'Left walls', codes: ['wl'] },
+  { id: 'right', kind: 'walls', label: 'Right walls', codes: ['wr'] },
+  { id: 'corners', kind: 'walls', label: 'Corners', codes: ['wtlr', 'wtll', 'wtr', 'wbl', 'wbr'] },
+  { id: 'doors', kind: 'walls', label: 'Doors', codes: ['wld', 'wrd'] },
+  { id: 'ends', kind: 'walls', label: 'Wall ends', codes: ['wle', 'wre'] },
+  { id: 'lower', kind: 'walls', label: 'Lower walls', codes: ['ld', 'lr', 'lf', 'ls'] },
+  { id: 'trees', kind: 'objects', label: 'Trees', codes: ['tr'] },
+  { id: 'props', kind: 'objects', label: 'Columns & props', codes: ['co'] },
+];
+
+/** The part an AutoMap.txt tile code belongs to, if its category has parts. */
+export function partOfCode(code: string | undefined): string | null {
+  return (code && AUTOMAP_PARTS.find((p) => p.codes.includes(code))?.id) || null;
+}
+
+export interface AutomapLookOf {
+  show: boolean;
+  colour: string;
+  opacity: number;
+}
+
+/** How a piece is drawn: its part's own look if it has one, else its category's. */
+export function lookOf(style: AutomapStyle, kind: AutomapKind, part?: string | null): AutomapLookOf {
+  return (part && style.parts[part]) || style.kinds[kind];
+}
+
 export interface AutomapStyle {
   /** Pieces in the game's own colours, or in each category's colour. */
   colours: 'kind' | 'game';
-  kinds: Record<AutomapKind, { show: boolean; colour: string; opacity: number }>;
+  kinds: Record<AutomapKind, AutomapLookOf>;
+  /** Parts (Left walls, Trees…) drawn their own way; the others follow their category. */
+  parts: Record<string, AutomapLookOf>;
   /** Extra automap pixels around each piece pixel: 0 = as in game. */
   thickness: number;
   /** How dark the map under the automap is, 0-0.95. */
@@ -53,6 +83,7 @@ export const DEFAULT_AUTOMAP_STYLE: AutomapStyle = {
     objects: { show: true, colour: '#7ee081', opacity: 1 },
     shadows: { show: true, colour: '#9a8fc0', opacity: 0.7 },
   },
+  parts: {},
   thickness: 1,
   dim: 0.72,
   missing: true,
@@ -62,7 +93,7 @@ export const DEFAULT_AUTOMAP_STYLE: AutomapStyle = {
 /** A stored style made whole (missing or bad fields take the defaults; older styles carry over). */
 export function normalizeAutomapStyle(s: unknown): AutomapStyle {
   const d = DEFAULT_AUTOMAP_STYLE;
-  const o = (s && typeof s === 'object' ? s : {}) as { colours?: unknown; opacity?: unknown; thickness?: unknown; dim?: unknown; missing?: unknown; missingColour?: unknown; kinds?: Record<string, { show?: unknown; colour?: unknown; opacity?: unknown } | undefined> };
+  const o = (s && typeof s === 'object' ? s : {}) as { colours?: unknown; opacity?: unknown; thickness?: unknown; dim?: unknown; missing?: unknown; missingColour?: unknown; kinds?: Record<string, { show?: unknown; colour?: unknown; opacity?: unknown } | undefined>; parts?: Record<string, { show?: unknown; colour?: unknown; opacity?: unknown } | undefined> };
   const num = (v: unknown, lo: number, hi: number, dflt: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
   const colour = (v: unknown, dflt: string) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : dflt);
   const kinds = {} as AutomapStyle['kinds'];
@@ -75,9 +106,17 @@ export function normalizeAutomapStyle(s: unknown): AutomapStyle {
       opacity: num(v?.opacity ?? o.opacity, 0.1, 1, d.kinds[k.id].opacity),
     };
   }
+  const parts: AutomapStyle['parts'] = {};
+  for (const pt of AUTOMAP_PARTS) {
+    const v = o.parts?.[pt.id];
+    if (!v || typeof v !== 'object') continue;
+    const base = kinds[pt.kind];
+    parts[pt.id] = { show: typeof v.show === 'boolean' ? v.show : base.show, colour: colour(v.colour, base.colour), opacity: num(v.opacity, 0.1, 1, base.opacity) };
+  }
   return {
     colours: o.colours === 'game' ? 'game' : 'kind',
     kinds,
+    parts,
     thickness: Math.round(num(o.thickness, 0, 3, d.thickness)),
     dim: num(o.dim, 0, 0.95, d.dim),
     missing: typeof o.missing === 'boolean' ? o.missing : d.missing,
@@ -130,11 +169,12 @@ export function kindClassifier(lib: { pick(orientation: number, main: number, su
   };
 }
 
-/** A piece to draw: the cell it stands on, its category and its MaxiMap cel. */
+/** A piece to draw: the cell it stands on, its category (and AutoMap.txt tile code, for its part) and its MaxiMap cel. */
 export interface DrawPiece {
   cellX: number;
   cellY: number;
   kind: AutomapKind;
+  code?: string;
   cel: number;
 }
 
@@ -149,15 +189,17 @@ export function automapFrame(width: number, height: number) {
  */
 export function paintAutomap(width: number, height: number, pieces: DrawPiece[], cels: SpriteFrame[], palette: Palette, style: AutomapStyle): { data: Uint8ClampedArray; W: number; H: number; ox: number; oy: number } {
   const { ox, oy, W, H } = automapFrame(width, height);
-  // Per pixel: the category (1 + its index; 0 = empty) and the piece's own palette colour.
+  // Per pixel: the look it takes (1 + its index among categories then parts; 0 = empty) and the piece's own palette colour.
   const kindAt = new Uint8Array(W * H);
   const palAt = new Uint8Array(W * H);
   const kinds = AUTOMAP_KIND_LIST.map((k) => k.id);
+  const looks: AutomapLookOf[] = [...kinds.map((id) => style.kinds[id]), ...AUTOMAP_PARTS.map((pt) => style.parts[pt.id] ?? style.kinds[pt.kind])];
   for (const p of pieces) {
-    if (!style.kinds[p.kind].show) continue;
+    const part = partOfCode(p.code);
+    const ki = (part && style.parts[part] ? kinds.length + AUTOMAP_PARTS.findIndex((pt) => pt.id === part) : kinds.indexOf(p.kind)) + 1;
+    if (!looks[ki - 1].show) continue;
     const f = cels[p.cel];
     if (!f) continue;
-    const ki = kinds.indexOf(p.kind) + 1;
     const [ax, ay] = automapCellOrigin(p.cellX, p.cellY);
     // A cel's origin is the cell's west corner, 8 px below its north corner.
     const x0 = ox + ax - 8 + f.offsetX;
@@ -197,8 +239,8 @@ export function paintAutomap(width: number, height: number, pieces: DrawPiece[],
     k = nk;
     pl = np;
   }
-  const colours = kinds.map((id) => rgb(style.kinds[id].colour));
-  const alphas = kinds.map((id) => Math.round(style.kinds[id].opacity * 255));
+  const colours = looks.map((l) => rgb(l.colour));
+  const alphas = looks.map((l) => Math.round(l.opacity * 255));
   const data = new Uint8ClampedArray(W * H * 4);
   for (let i = 0; i < k.length; i++) {
     if (!k[i]) continue;
