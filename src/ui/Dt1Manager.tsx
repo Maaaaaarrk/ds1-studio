@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { tileKey } from '../game/dt1Review';
 import type { Dt1, Dt1Tile } from '../formats/dt1';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
@@ -24,130 +25,6 @@ interface Props {
 }
 
 const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
-
-/** Add or remove whole tile libraries (DT1 files) for the open map. */
-export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
-  const [paths, setPaths] = useState<string[]>(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path));
-  const [query, setQuery] = useState('');
-  const [preview, setPreview] = useState<string | null>(null);
-  const [previewDt1, setPreviewDt1] = useState<Dt1 | null>(null);
-
-  const all = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
-  const inMap = useMemo(() => new Set(paths.map(normalizePath)), [paths]);
-  const available = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return all.filter((p) => !inMap.has(normalizePath(p)) && (!q || p.toLowerCase().includes(q)));
-  }, [all, inMap, query]);
-
-  // DT1s are previewed in Act 1's palette (the game's palette 0), like the DT1 editor.
-  const [previewPal, setPreviewPal] = useState<{ act: number | null; palette: Palette } | null>(null);
-  useEffect(() => {
-    void loadAct0Palette(gd.fs).then((a) => setPreviewPal({ act: -1, palette: a.palette }));
-  }, [gd]);
-  useEffect(() => {
-    setPreviewDt1(null);
-    if (preview) void gd.dt1(preview).then(setPreviewDt1);
-  }, [preview, gd]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      e.stopPropagation();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
-
-  const original = map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => normalizePath(l.path));
-  const changed = paths.length !== original.length || paths.some((p, i) => normalizePath(p) !== original[i]);
-  const removeUsed = original.filter((p) => !inMap.has(p) && (usage.get(p) ?? 0) > 0);
-
-  return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal dt1-manager" role="dialog" aria-label="Tile libraries">
-        <div className="modal-title">Tile libraries (DT1) · {map.path.split('/').pop()}</div>
-        <div className="dt1m-cols">
-          <div className="dt1m-col">
-            <div className="field-label">
-              In this map <span className="muted small">{paths.length}</span>
-            </div>
-            <ul className="dt1m-list">
-              {paths.map((p) => {
-                const used = usage.get(normalizePath(p)) ?? 0;
-                const found = gd.fs.locate(p);
-                return (
-                  <li key={p} className={preview === p ? 'active' : ''} onClick={() => setPreview(p)}>
-                    <span className="mono">{short(p)}</span>
-                    <span className="muted small">{found ? (used ? `${used} tiles placed` : 'unused') : 'not found'}</span>
-                    <button
-                      className="icon-btn"
-                      title={used ? `Remove (${used} placed tiles will show as missing)` : 'Remove'}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPaths(paths.filter((x) => x !== p));
-                      }}
-                    >
-                      ×
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-          <div className="dt1m-col">
-            <div className="field-label">
-              Available <span className="muted small">{available.length}</span>
-            </div>
-            <input className="search small-input" placeholder="Filter… (e.g. act3/kurast)" value={query} onChange={(e) => setQuery(e.target.value)} />
-            <ul className="dt1m-list">
-              {available.map((p) => (
-                <li key={p} className={preview === p ? 'active' : ''} onClick={() => setPreview(p)} onDoubleClick={() => setPaths([...paths, p])}>
-                  <span className="mono">{short(p)}</span>
-                  <span className="muted small">{gd.fs.locate(p)?.split(/[\\/]/).pop()}</span>
-                  <button
-                    className="icon-btn add"
-                    title="Add to this map"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPaths([...paths, p]);
-                    }}
-                  >
-                    +
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-        <div className="dt1m-preview">
-          {preview ? (
-            <Dt1Viewer path={preview} dt1={previewDt1} palette={previewPal?.palette ?? map.palette} paletteNote={previewPal ? 'Act 0 palette (magenta = changes between acts)' : null} inMap={inMap.has(normalizePath(preview))} onAdd={() => setPaths([...paths, preview])} />
-          ) : (
-            <p className="muted small">Click a library to see all of its tiles. Double-click (or +) to add it.</p>
-          )}
-        </div>
-        {removeUsed.length > 0 && (
-          <p className="small error-text">
-            Removing {removeUsed.map(short).join(', ')} leaves placed tiles without graphics (they show as missing).
-          </p>
-        )}
-        <p className="muted small">
-          Changes apply to the editor and to the DS1&apos;s embedded file list (saved with the map). If the map is in LvlPrest.txt, the game&apos;s tables
-          are updated too: new DT1s go into free File slots of its level type in LvlTypes.txt (or, when other levels use that type too, a level type of the map&apos;s own) and its Dt1Mask is recomputed (originals kept as .bak).
-          {!map.resolution.preset && ' This map is not in LvlPrest.txt yet: use Data → Add to game so the game can load it.'}
-        </p>
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={!changed} onClick={() => onApply(paths)}>
-            Apply
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /** A tile drawn large with crisp pixels: fitted to the panel, or at a chosen zoom. */
 function BigTile({ tile, palette }: { tile: Dt1Tile; palette: Palette }) {
@@ -209,6 +86,9 @@ export function Dt1Viewer({
   addLabel = 'Add to map',
   picks,
   onPick,
+  usage,
+  headActions,
+  tileActions,
 }: {
   path: string;
   dt1: Dt1 | null;
@@ -220,8 +100,15 @@ export function Dt1Viewer({
   /** Tiles ticked for a custom DT1 (with onPick: clicking a tile ticks or unticks it, Shift+click a range). */
   picks?: Set<number>;
   onPick?: (indices: number[], on: boolean) => void;
+  /** How many of the map's cells place each tile key (tileKey): used tiles are marked, and can be shown alone. */
+  usage?: Map<string, number>;
+  /** More buttons for the library, in the header. */
+  headActions?: ReactNode;
+  /** Actions for the clicked tile, under its details. */
+  tileActions?: (index: number, tile: Dt1Tile, uses: number) => ReactNode;
 }) {
   const [kind, setKind] = useState('all');
+  const usesOf = (t: Dt1Tile) => usage?.get(tileKey(t.orientation, t.mainIndex, t.subIndex)) ?? 0;
   const lastClick = useRef<number | null>(null);
   const [hovered, hover, hideHover] = usePreview();
   const [picked, setPicked] = useState<number | null>(null);
@@ -232,7 +119,12 @@ export function Dt1Viewer({
     hideHover();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
-  const tiles = (dt1?.tiles ?? []).map((t, i) => ({ t, i })).filter(({ t }) => KINDS.find((k) => k.id === kind)!.test(t.orientation));
+  const tiles = (dt1?.tiles ?? []).map((t, i) => ({ t, i })).filter(({ t }) => (kind === 'used' ? usesOf(t) > 0 : KINDS.find((k) => k.id === kind)!.test(t.orientation)));
+  const usedCount = usage && dt1 ? dt1.tiles.filter((t) => usesOf(t) > 0).length : 0;
+  // A filter that hides the clicked tile moves the large view to the first tile shown.
+  useEffect(() => {
+    if (picked !== null && tiles.length && !tiles.some((x) => x.i === picked)) setPicked(tiles[0].i);
+  }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (dt1?.tiles.length) setPicked((p) => p ?? 0);
   }, [dt1]);
@@ -254,7 +146,13 @@ export function Dt1Viewer({
               </button>
             ) : null;
           })}
+          {usage && (
+            <button className={`chip used-chip${kind === 'used' ? ' active' : ''}`} onClick={() => setKind('used')} title="Only the tiles this map places">
+              Used in this map <span className="muted">{usedCount}</span>
+            </button>
+          )}
         </div>
+        {headActions}
         <label className="dt1v-size small" title="Thumbnail size (or Ctrl + scroll over the tiles)">
           Size <input type="range" min={36} max={200} value={size} onChange={(e) => setSize(Number(e.target.value))} />
         </label>
@@ -289,7 +187,7 @@ export function Dt1Viewer({
           {tiles.map(({ t, i }) => (
             <div
               key={i}
-              className={`thumb${picked === i ? ' active' : ''}${picks?.has(i) ? ' ticked' : ''}`}
+              className={`thumb${picked === i ? ' active' : ''}${picks?.has(i) ? ' ticked' : ''}${usage && usesOf(t) ? ' used' : ''}`}
               {...hover(() => {
                 const pic = tilePicture(t, palette);
                 return {
@@ -297,6 +195,7 @@ export function Dt1Viewer({
                   title: `#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · main ${t.mainIndex} · sub ${t.subIndex}`,
                   lines: [
                     [pic ? `${pic.width}×${pic.height} px` : '', `rarity ${t.rarity}`, t.animated ? 'animated' : ''].filter(Boolean).join(' · '),
+                    ...(usage ? [usesOf(t) ? `Used in this map: ${usesOf(t)} cell${usesOf(t) === 1 ? '' : 's'}` : 'Not used in this map'] : []),
                     onPick ? (picks?.has(i) ? 'Click: untick · Shift+click: a range' : 'Click: tick for the custom DT1 · Shift+click: a range') : 'Click: details',
                   ],
                 };
@@ -312,6 +211,7 @@ export function Dt1Viewer({
               }}
             >
               {onPick && <span className={`thumb-tick${picks?.has(i) ? ' on' : ''}`}>{picks?.has(i) ? '✓' : ''}</span>}
+              {usage && usesOf(t) > 0 && <span className="thumb-uses" title="Cells of this map using it">×{usesOf(t)}</span>}
               <Thumb tile={t} palette={palette} />
               <span className="thumb-label">
                 {t.mainIndex}/{t.subIndex}
@@ -333,6 +233,7 @@ export function Dt1Viewer({
                   {sel.animated ? ' · animated' : ''}
                 </div>
               </div>
+              {tileActions && picked !== null && tileActions(picked, sel, usesOf(sel))}
             </>
           ) : (
             <p className="muted small">Click a tile for a closer look.</p>

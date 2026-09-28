@@ -109,6 +109,7 @@ export function tauriSaveTarget(config: DesktopConfig): SaveTarget | null {
       const r = await invoke<{ written: string; backup: string | null }>('save_file', bytes.slice(), { headers: { 'x-path': encodeURIComponent(path) } });
       return r.backup ? `Saved ${r.written} (original kept as ${r.backup})` : `Saved ${r.written}`;
     },
+    retire: (path) => invoke<string>('retire_file', { path }),
   };
 }
 

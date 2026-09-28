@@ -87,7 +87,9 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { Splitter, usePersistentSize } from './Splitter';
 import { Modal, NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
 import { DataTables, type TableTarget } from './DataTables';
-import { Dt1LibraryDialog, Dt1Manager } from './Dt1Manager';
+import { Dt1LibraryDialog } from './Dt1Manager';
+import { MapDt1Review } from './Dt1Review';
+import { renameInLvlTypes, withoutTile } from '../game/dt1Review';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
@@ -1337,14 +1339,14 @@ export function App() {
   }, [scene, map]);
 
   const applyDt1s = useCallback(
-    async (paths: string[]) => {
+    async (paths: string[], opts: { keepOpen?: boolean } = {}) => {
       if (!gd || !map || !doc) return;
       // The DS1's embedded list mirrors the libraries (WinDS1 keeps its own DS1EDIT_* notes in there too).
       mutate((d) => {
         const notes = d.files.filter((f) => !/data[\\/]/i.test(f));
         d.files = [...paths.map(embeddedFileName), ...notes];
       });
-      setDialog(null);
+      if (!opts.keepOpen) setDialog(null);
       // Keep the game's tables in step, or the game won't load the new tiles: new DT1s go into free File slots of
       // the level type (LvlTypes.txt) and the preset's Dt1Mask (LvlPrest.txt) selects exactly these libraries.
       let tableNote = '';
@@ -1366,6 +1368,51 @@ export function App() {
       notify(`Tile libraries: ${paths.length}${tableNote}`, !!tableNote);
     },
     [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
+  );
+
+  /** Tile libraries: takes one tile out of a mod DT1 (the file is rewritten; the original is kept as .bak). */
+  const removeDt1Tile = useCallback(
+    async (path: string, index: number) => {
+      if (!gd) return;
+      const bytes = await gd.fs.read(path);
+      if (!bytes) throw new Error(`${path} was not found.`);
+      await writeFiles([{ path: gd.fs.exactPath(path) ?? path, bytes: withoutTile(bytes, index) }]);
+      await reloadTables();
+      notify(`Took tile #${index} out of ${path.split('/').pop()} (the original is kept as .bak).`);
+    },
+    [gd, writeFiles, reloadTables, notify],
+  );
+  /**
+   * Tile libraries: renames a mod DT1 in its folder. The file is written under the new name, every level type that
+   * loads it (LvlTypes.txt) and this map are pointed at it, and the old file is moved aside to .bak (never deleted).
+   */
+  const renameDt1 = useCallback(
+    async (path: string, name: string): Promise<string> => {
+      const target = data.status === 'ready' ? data.saveTarget : null;
+      if (!gd || !map || !target) throw new Error('No writable mod folder is configured.');
+      const rel = (gd.fs.exactPath(path) ?? path).replace(/^data\/global\/tiles\//i, '');
+      const newRel = `${rel.split('/').slice(0, -1).join('/')}/${name}.dt1`;
+      const newPath = `data/global/tiles/${newRel}`;
+      if (gd.fs.locate(newPath)) throw new Error(`${newRel} already exists.`);
+      const bytes = await gd.fs.read(path);
+      if (!bytes) throw new Error(`${path} was not found.`);
+      const writes: { path: string; bytes: Uint8Array }[] = [{ path: newPath, bytes }];
+      const types = await loadTable(gd.fs, 'LvlTypes.txt');
+      const renamed = types ? renameInLvlTypes(types, rel, newRel) : null;
+      if (renamed?.changed.length) writes.push({ path: 'data/global/excel/LvlTypes.txt', bytes: serializeTxtTable(renamed.doc) });
+      await writeFiles(writes);
+      let note: string;
+      if (target.retire) {
+        const moved = await target.retire(`data/global/tiles/${rel}`);
+        gd.fs.forget(path);
+        note = `the old file is kept as ${moved.split(/[\\/]/).pop()}`;
+      } else note = "the old file is still there (nothing loads it any more)";
+      const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => (normalizePath(l.path) === normalizePath(path) ? newPath : l.path));
+      await applyDt1s(libs, { keepOpen: true });
+      notify(`Renamed ${rel.split('/').pop()} to ${name}.dt1${renamed?.changed.length ? `; level types updated: ${renamed.changed.join(', ')}` : ''}; ${note}.`);
+      return newPath;
+    },
+    [gd, map, data, writeFiles, applyDt1s, notify],
   );
 
   /**
@@ -3365,7 +3412,25 @@ export function App() {
           onClose={() => setImporting(null)}
         />
       )}
-      {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
+      {dialog === 'dt1s' && map && doc && (
+        <MapDt1Review
+          map={map}
+          gd={data.gd}
+          ds1={doc.ds1}
+          usage={dt1Usage}
+          modRoot={data.saveTarget?.label ?? null}
+          onApply={(p) => void applyDt1s(p)}
+          onShowCells={(cells) => {
+            setMarks(cells);
+            setDialog(null);
+            notify(`${cells.length} cell${cells.length === 1 ? '' : 's'} marked · Esc to clear`);
+          }}
+          onRemoveTile={removeDt1Tile}
+          onRename={renameDt1}
+          onOpenLibrary={() => setDialog('dt1lib')}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === 'tables' && (
         <DataTables
           fs={data.gd.fs}

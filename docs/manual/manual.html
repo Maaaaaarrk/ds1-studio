@@ -535,8 +535,14 @@
   <figure><img src="../media/ribbon-map.png" alt="Map ribbon" /><figcaption>The Map ribbon.</figcaption></figure>
 
   <h2 id="s-libraries"><span class="num">8.1</span>Tile libraries</h2>
-  <figure class="medium"><img src="../media/tile-libraries.png" alt="Tile libraries" /><figcaption>Map → Tile libraries, with the DT1 viewer.</figcaption></figure>
-  <p><b>Map → Tile libraries</b> adds or removes DT1s for the map and lets you browse every tile of any DT1 before adding it. DS1 Studio keeps the game in step: new DT1s go into free <code>File</code> slots of the level type (<code>LvlTypes.txt</code>) and the map's <code>Dt1Mask</code> (<code>LvlPrest.txt</code>) is recomputed. When two loaded DT1s have the same tile, the one listed later replaces it, as in the game.</p>
+  <figure class="medium"><img src="../media/tile-libraries.png" alt="Tile libraries" /><figcaption>Map → Tile libraries (an earlier version of the window).</figcaption></figure>
+  <p><b>Map → Tile libraries</b> reviews the DT1s the map is attached to. The list says, for each, how many of its tiles the map places (<i>drawn from a later library</i> when another library with the same tile numbers is the one the game draws) and whether it is the game's or your mod's. Click one to see its tiles: the ones the map uses are outlined in green with how many cells use them, and <b>Used in this map</b> shows only those. For a tile you click:</p>
+  <ul>
+    <li><b>Show on map</b> marks every cell that uses it.</li>
+    <li><b>Remove this tile from the DT1…</b> rewrites the DT1 without it (the other tiles stay exactly as they were; the original is kept as <code>.bak</code>). You're told first if the map uses it, or if other level types load the DT1 too.</li>
+  </ul>
+  <p><b>Rename…</b> renames a DT1 in its folder (letters, digits and <code>_</code>): the file is written under the new name, every level type that loads it (<code>LvlTypes.txt</code>) and the map are pointed at it, and the old file is moved aside to <code>.bak</code>, never deleted. The × next to a library takes it off this map (<b>Remove from the map</b>); the file stays. <b>+ Add libraries…</b> opens the <a href="#s-import-dt1">DT1 library</a>. Removing tiles and renaming work on your mod's own DT1s only: one in the game's archives is shared by every map, so make your own copy with the <a href="#s-dt1editor">DT1 editor</a> first.</p>
+  <p>DS1 Studio keeps the game in step: new DT1s go into free <code>File</code> slots of the level type (<code>LvlTypes.txt</code>) and the map's <code>Dt1Mask</code> (<code>LvlPrest.txt</code>) is recomputed. When two loaded DT1s have the same tile, the one listed later replaces it, as in the game.</p>
 
   <h2 id="s-dt1editor"><span class="num">8.2</span>The DT1 editor</h2>
   <figure class="medium"><img src="../media/dt1-editor.png" alt="DT1 editor" /><figcaption>Map → DT1 editor.</figcaption></figure>

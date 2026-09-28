@@ -275,6 +275,37 @@ fn save_file(state: State<AppState>, request: Request) -> Result<SaveResult, Str
     Ok(SaveResult { written: file.display().to_string(), backup })
 }
 
+/// Moves a file of the save folder aside to `<name>.bak` (`.bak2`, `.bak3`… when taken), so nothing is ever lost: what a
+/// rename leaves behind. Only files `writable` allows. Returns where it went.
+#[tauri::command]
+fn retire_file(state: State<AppState>, path: String) -> Result<String, String> {
+    let rel_path = Path::new(&path);
+    let safe = rel_path.components().all(|c| matches!(c, Component::Normal(_)));
+    if !safe || !writable(&path) {
+        return Err(format!("refusing to move {path}"));
+    }
+    let root = state
+        .config
+        .lock()
+        .unwrap()
+        .save_root()
+        .ok_or("no mod folder configured")?;
+    let file = resolve_case_insensitive(&root, rel_path);
+    if !file.is_file() {
+        return Err(format!("{} is not in the mod folder", file.display()));
+    }
+    let mut n = 1;
+    let target = loop {
+        let t = PathBuf::from(format!("{}.bak{}", file.display(), if n == 1 { String::new() } else { n.to_string() }));
+        if !t.exists() {
+            break t;
+        }
+        n += 1;
+    };
+    fs::rename(&file, &target).map_err(|e| e.to_string())?;
+    Ok(target.display().to_string())
+}
+
 /// Saves bytes to a location the user picks in a native "Save as" dialog (exports: zips, .ds1 copies).
 /// Header `x-name` suggests a file name. Returns the chosen path, or null if cancelled.
 #[tauri::command]
@@ -483,6 +514,7 @@ pub fn run() {
             read_range,
             read_file,
             save_file,
+            retire_file,
             export_file,
             import_file,
             mcp_ready,

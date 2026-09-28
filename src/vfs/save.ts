@@ -3,6 +3,8 @@ export interface SaveTarget {
   readonly label: string;
   /** Writes the file; returns a human-readable description of what happened. */
   save(path: string, bytes: Uint8Array): Promise<string>;
+  /** Moves a file of the mod aside to <name>.bak (never deletes); returns where it went. Absent where unsupported. */
+  retire?(path: string): Promise<string>;
 }
 
 /** Dev mode: the Vite plugin writes into the configured mod folder. */
@@ -18,6 +20,12 @@ export async function devServerSaveTarget(): Promise<SaveTarget | null> {
         const body = await r.json();
         if (!r.ok) throw new Error(body.error ?? `save failed (${r.status})`);
         return body.backup ? `Saved ${body.written} (original kept as ${body.backup})` : `Saved ${body.written}`;
+      },
+      async retire(path) {
+        const r = await fetch(`/__d2/retire/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST' });
+        const body = await r.json();
+        if (!r.ok) throw new Error(body.error ?? `move failed (${r.status})`);
+        return body.moved as string;
       },
     };
   } catch {

@@ -1,4 +1,4 @@
-import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { Plugin } from 'vite';
 
@@ -140,6 +140,20 @@ export function gameDataPlugin(): Plugin {
 
         if (parts[0] === 'save-target') {
           return saveRoot ? json(200, { root: saveRoot }) : json(404, { error: 'No saveDir or modDirs configured in ds1studio.local.json' });
+        }
+
+        // Moves a mod file aside to <name>.bak (.bak2… when taken): what a rename leaves behind (same rules as saving).
+        if (parts[0] === 'retire' && req.method === 'POST') {
+          if (!saveRoot) return json(409, { error: 'No saveDir or modDirs configured in ds1studio.local.json' });
+          const rel = parts.slice(1).join('/');
+          const file = resolve(saveRoot, rel);
+          if (!writable(rel) || !file.startsWith(resolve(saveRoot) + sep)) return json(400, { error: `refusing to move ${rel}` });
+          if (!existsSync(file)) return json(404, { error: `${rel} is not in the mod folder` });
+          let n = 1;
+          while (existsSync(`${file}.bak${n === 1 ? '' : n}`)) n++;
+          const target = `${file}.bak${n === 1 ? '' : n}`;
+          renameSync(file, target);
+          return json(200, { moved: target });
         }
 
         if (parts[0] === 'save' && req.method === 'POST') {

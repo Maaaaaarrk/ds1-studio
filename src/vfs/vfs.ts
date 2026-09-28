@@ -103,10 +103,18 @@ export class LayeredFs {
   /** Records a file written by a save target. */
   remember(path: string, bytes: Uint8Array, label: string): void {
     const copy = bytes.slice();
+    this.gone.delete(normalizePath(path));
     this.saved.set(path, async () => copy.slice(), label);
   }
 
+  /** Files moved away this session (a renamed DT1's old name): no longer there for the editor either. */
+  private readonly gone = new Set<string>();
+  forget(path: string): void {
+    this.gone.add(normalizePath(path));
+  }
+
   async read(path: string): Promise<Uint8Array | null> {
+    if (this.gone.has(normalizePath(path))) return null;
     for (const s of this.sources) {
       const data = await s.read(path);
       if (data) return data;
@@ -122,6 +130,7 @@ export class LayeredFs {
 
   /** Which source provides a path (for the UI). */
   locate(path: string): string | null {
+    if (this.gone.has(normalizePath(path))) return null;
     if (this.saved.has(path)) return this.saved.labelOf(path);
     return this.sources.find((s) => s.has(path))?.label ?? null;
   }
@@ -143,6 +152,7 @@ export class LayeredFs {
     for (const s of this.sources)
       for (const p of s.list()) {
         const key = normalizePath(p);
+        if (this.gone.has(key)) continue;
         const prev = all.get(key);
         // Some listfiles are all lower-case; keep the first spelling that preserves the game's original casing.
         if (prev === undefined ? !filter || filter(key) : prev === prev.toLowerCase() && p !== p.toLowerCase()) all.set(key, p);
