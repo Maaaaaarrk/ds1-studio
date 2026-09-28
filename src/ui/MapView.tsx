@@ -94,6 +94,8 @@ interface Props {
   walkBrush?: { size: 1 | 3 | 5 | 'cell'; mode: 'block' | 'clear' } | null;
   /** Draw the map in this light (multiplies every colour), or as stored when null. */
   light?: [number, number, number] | null;
+  /** With `light`: a player's light radius (sub-tiles) around the cursor, as a player standing there would see. */
+  playerLight?: number;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -175,6 +177,8 @@ export function MapView(props: Props) {
   const resizeDrag = useRef<{ side: Side; delta: ResizeDelta } | null>(null);
   /** The sub-tile under the cursor in walkability mode (drawn as the brush's footprint). */
   const walkCursor = useRef<[number, number] | null>(null);
+  /** The cursor in world space (for the player's light preview). */
+  const cursorWorld = useRef<[number, number] | null>(null);
   const latest = useRef({ ...props, walk, resizeDrag, automapImage, walkCursor });
   latest.current = { ...props, walk, resizeDrag, automapImage, walkCursor };
 
@@ -223,6 +227,8 @@ export function MapView(props: Props) {
       if (!dirty.current) return;
       dirty.current = false;
       renderer.current!.light = latest.current.light ?? [1, 1, 1];
+      const glowAt = latest.current.light && latest.current.playerLight ? cursorWorld.current : null;
+      renderer.current!.glow = glowAt ? [glowAt[0], glowAt[1], latest.current.playerLight!] : [0, 0, 0];
       renderer.current!.draw(camera.current, BACKGROUND);
       drawOverlay(overlay.current!, camera.current, latest.current);
       minimapDraw.current?.();
@@ -342,7 +348,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight]);
 
   // Input.
   useEffect(() => {
@@ -406,6 +412,8 @@ export function MapView(props: Props) {
         dirty.current = true;
       }
       const [cx, cy] = toCell(ev);
+      cursorWorld.current = toWorld(ev);
+      if (latest.current.light && latest.current.playerLight) dirty.current = true;
       if (latest.current.walkBrush) {
         // Walkability: follow the cursor sub-tile by sub-tile (the brush footprint, and strokes within a cell).
         const [fx, fy] = worldToSubTile(...toWorld(ev));

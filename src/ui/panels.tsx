@@ -595,7 +595,7 @@ const toHex = (rgb: [number, number, number]) => `#${rgb.map((c) => c.toString(1
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
 
 /** The level's light: how bright and what colour the game lights it, previewable on the map and editable. */
-function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDraft }: { light: LevelLight; shown: boolean; canWrite: boolean; onShow: (on: boolean) => void; onApply: (intensity: number, rgb: [number, number, number]) => Promise<void>; onDraft: (d: LevelLight | null) => void }) {
+function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDraft, playerLight, onPlayerLight }: { light: LevelLight; shown: boolean; canWrite: boolean; onShow: (on: boolean) => void; onApply: (intensity: number, rgb: [number, number, number]) => Promise<void>; onDraft: (d: LevelLight | null) => void; playerLight: number; onPlayerLight: (r: number) => void }) {
   const [intensity, setIntensity] = useState(light.intensity);
   const [rgb, setRgb] = useState(light.rgb);
   const [busy, setBusy] = useState(false);
@@ -627,6 +627,11 @@ function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDraft }: 
         <input type="range" min={0} max={255} value={intensity} onChange={(e) => setIntensity(Number(e.target.value))} />
         <span className="small mono">{intensity || 'daylight'}</span>
       </div>
+      <div className="light-row" title="While previewing, the area around the mouse is lit as if a player stood there: their light radius, in sub-tiles (5 per cell). Characters start with a small radius; items and skills raise it.">
+        <span className="small">Player light</span>
+        <input type="range" min={0} max={20} value={playerLight} onChange={(e) => onPlayerLight(Number(e.target.value))} disabled={!shown} />
+        <span className="small mono">{playerLight ? `${playerLight} sub-tiles` : 'off'}</span>
+      </div>
       <div className="light-row">
         <span className="small">Colour</span>
         <input type="color" value={toHex(rgb)} onChange={(e) => setRgb(fromHex(e.target.value))} />
@@ -655,7 +660,7 @@ function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDraft }: 
   );
 }
 
-export function MapInfoPanel({ map, gd, onReopen, onPalette, light }: { map: OpenMap; gd: GameData; onReopen: (o?: MapOverride) => void; onPalette: (act: number) => void; light?: { value: LevelLight; shown: boolean; canWrite: boolean; onShow: (on: boolean) => void; onApply: (intensity: number, rgb: [number, number, number]) => Promise<void>; onDraft: (d: LevelLight | null) => void } | null }) {
+export function MapInfoPanel({ map, gd, onReopen, onPalette, light }: { map: OpenMap; gd: GameData; onReopen: (o?: MapOverride) => void; onPalette: (act: number) => void; light?: { value: LevelLight; shown: boolean; canWrite: boolean; onShow: (on: boolean) => void; onApply: (intensity: number, rgb: [number, number, number]) => Promise<void>; onDraft: (d: LevelLight | null) => void; playerLight: number; onPlayerLight: (r: number) => void } | null }) {
   const { ds1, resolution: r, lib } = map;
   const sourceText = {
     lvlprest: 'from LvlPrest.txt',
@@ -716,7 +721,7 @@ export function MapInfoPanel({ map, gd, onReopen, onPalette, light }: { map: Ope
         </select>
       </div>
 
-      {light && <LevelLightEditor light={light.value} shown={light.shown} canWrite={light.canWrite} onShow={light.onShow} onApply={light.onApply} onDraft={light.onDraft} />}
+      {light && <LevelLightEditor light={light.value} shown={light.shown} canWrite={light.canWrite} onShow={light.onShow} onApply={light.onApply} onDraft={light.onDraft} playerLight={light.playerLight} onPlayerLight={light.onPlayerLight} />}
 
       <div className="field-label">
         Tile libraries <span className="muted small">{lib.loaded.length}</span>

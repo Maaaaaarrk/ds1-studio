@@ -45,8 +45,10 @@ out vec2 vTex;
 flat out vec4 vRect;  // the instance's texels in the atlas: u0, v0, u1, v1 (exclusive)
 flat out float vLayer;
 flat out int vFlags;
+out vec2 vWorld;
 void main() {
   vec2 world = aDst.xy + aCorner * aDst.zw;
+  vWorld = world;
   vec2 screen = (world - uCamera.xy) * uCamera.z + uViewport * 0.5;
   gl_Position = vec4(screen / uViewport * 2.0 - 1.0, 0.0, 1.0);
   gl_Position.y = -gl_Position.y;
@@ -66,7 +68,9 @@ precision highp sampler2DArray;
 uniform sampler2DArray uAtlas;
 uniform sampler2D uPalette;
 uniform vec3 uLight;               // the level's ambient light (Levels.txt Intensity × Red/Green/Blue), 1 = unlit
+uniform vec3 uGlow;                // a player's light: world x, y and radius in sub-tiles (0 = none)
 in vec2 vTex;
+in vec2 vWorld;
 flat in vec4 vRect;
 flat in float vLayer;
 flat in int vFlags;
@@ -115,7 +119,16 @@ void main() {
     }
     rgb = toSrgb(sum / hits);
   }
-  rgb *= uLight;
+  // The player's light radius brightens the level's light around them, measured in sub-tiles on the ground (an
+  // ellipse on screen), full near them and fading to the level's light at the edge.
+  vec3 light = uLight;
+  if (uGlow.z > 0.0) {
+    vec2 d = vWorld - uGlow.xy;
+    float a = (d.x / 16.0 + d.y / 8.0) * 0.5;
+    float b = (d.y / 8.0 - d.x / 16.0) * 0.5;
+    light = mix(vec3(1.0), uLight, smoothstep(0.55, 1.0, length(vec2(a, b)) / uGlow.z));
+  }
+  rgb *= light;
   // Output is premultiplied (blendFunc ONE, ONE_MINUS_SRC_ALPHA), so alpha 0 with colour means "add".
   if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45 * coverage); return; }
   if ((vFlags & 2) != 0) rgb = mix(rgb, vec3(1.0, 0.78, 0.3), 0.35);
@@ -244,6 +257,8 @@ export class MapRenderer {
 
   /** Multiplies every drawn colour: the level's light when previewing it, else 1 (tiles as stored). */
   light: [number, number, number] = [1, 1, 1];
+  /** A player's light around a world point: x, y, radius in sub-tiles (0 = none). */
+  glow: [number, number, number] = [0, 0, 0];
 
   draw(camera: Camera, background: [number, number, number]): void {
     const gl = this.gl;
@@ -267,6 +282,7 @@ export class MapRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
     gl.uniform1i(gl.getUniformLocation(this.program, 'uPalette'), 1);
     gl.uniform3f(gl.getUniformLocation(this.program, 'uLight'), ...this.light);
+    gl.uniform3f(gl.getUniformLocation(this.program, 'uGlow'), ...this.glow);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.instanceCount);
     gl.bindVertexArray(null);

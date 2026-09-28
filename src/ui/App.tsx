@@ -280,6 +280,8 @@ export function App() {
   /** The open map's level light (Levels.txt), and light values being tried out in the Map panel (not applied yet). */
   const [levelLight, setLevelLight] = useState<LevelLight | null>(null);
   const [lightDraft, setLightDraft] = useState<LevelLight | null>(null);
+  /** The player's light radius previewed around the mouse (sub-tiles, 0 = off). */
+  const [playerLight, setPlayerLight] = useState(0);
   /** Applies a finished walkability stroke (set below, once the table helpers it uses exist). */
   const applyWalkRef = useRef<((paint: WalkPaint) => Promise<void>) | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
@@ -2342,6 +2344,7 @@ export function App() {
             walkMarks={walkMarks}
             walkBrush={visibility.walkable ? { size: walkBrush.size, mode: walkBrush.mode } : null}
             light={visibility.light ? lightMultiplier(lightDraft ?? levelLight) : null}
+            playerLight={playerLight}
           />
         ) : (
           <div className="empty-stage">
@@ -2617,6 +2620,8 @@ export function App() {
                   canWrite,
                   onShow: (on) => setVisibility((v) => ({ ...v, light: on })),
                   onDraft: setLightDraft,
+                  playerLight,
+                  onPlayerLight: setPlayerLight,
                   onApply: async (intensity, rgb) => {
                     const t = await loadTable(data.gd.fs, 'Levels.txt');
                     const r = t ? rowOfRecord(t, levelLight.levelId) : -1;
