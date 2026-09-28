@@ -140,7 +140,7 @@
       <li><a href="#ch-import"><span class="num">7</span>Importing DS1 and DT1 files</a>
         <ol>
           <li><a href="#s-import-ds1"><span class="num">7.1</span>Import DS1 (with its tile libraries)</a></li>
-          <li><a href="#s-import-dt1"><span class="num">7.2</span>Import DT1 (files or folders)</a></li>
+          <li><a href="#s-import-dt1"><span class="num">7.2</span>The DT1 library: import, browse, build</a></li>
         </ol>
       </li>
       <li><a href="#ch-tiles"><span class="num">8</span>Tile libraries and the DT1 editor</a>
@@ -499,19 +499,19 @@
     <figure><img src="img/import-ds1.png" alt="Import DS1 after" /><figcaption>After adding DT1 files: two provided (＋), one still missing (✗), one extra file listed separately.</figcaption></figure>
   </div>
 
-  <h2 id="s-import-dt1"><span class="num">7.2</span>Import DT1 (files or folders)</h2>
-  <div class="pair">
-    <figure><img src="img/import-dt1-menu.png" alt="Import DT1 menu" /><figcaption>Import ▾: DT1 files or folders.</figcaption></figure>
-    <figure><img src="img/import-dt1.png" alt="Import DT1" /><figcaption>Three DT1s ready to import into PD2assets/mytiles.</figcaption></figure>
-  </div>
+  <h2 id="s-import-dt1"><span class="num">7.2</span>The DT1 library: import, browse, build</h2>
+  <p>Everything to do with tile libraries happens in one window: <b>Home → File → Import ▾ → DT1s…</b> or <b>Map → DT1 library…</b>. It lists every DT1 the game and your mod have; you can bring in your own, look through any of them, add whole libraries to the map, or build a custom DT1 from single tiles.</p>
+  <figure class="medium"><img src="img/import-dt1.png" alt="Import DT1" /><figcaption>Three DT1s ready to import into PD2assets/mytiles.</figcaption></figure>
+  <p><b>Bringing in DT1s from your computer:</b></p>
   <ol class="steps">
-    <li><b>Import ▾ → DT1 files…</b> (one or several) or <b>DT1 folders…</b> (every <code>.dt1</code> inside, subfolders included).</li>
+    <li>In the library window, <b>+ Add DT1 files…</b> (one or several) or <b>+ Add a folder…</b> (every <code>.dt1</code> inside, subfolders included).</li>
     <li>Choose the folder under <code>PD2assets/</code> they go into. <i>Keep the folder structure</i> keeps the picked folders' subfolders.</li>
     <li>Check the list: each file's tile count, unreadable files (left out), files that will be replaced (the old one is kept as <code>.bak</code>). Untick any you don't want.</li>
     <li>With a map open, <b>add them to this map's tile libraries</b> puts each in a free <code>File</code> slot of the map's level type and in its <code>Dt1Mask</code>, so the game loads them. The free slots are shown; a level type has 32.</li>
+    <li>The library then shows the first one you brought in (under <code>PD2assets/</code> in its tree).</li>
   </ol>
   <h3 id="s-import-library">From the game library</h3>
-  <p><b>Import ▾ → DT1s from the game library…</b> (also <b>Map → From game library…</b>) lists every tile library the game and your mods already have, by folder, with a search box (the map's own libraries first). Click one to see all its tiles, filtered by kind; rest the pointer on a tile to see it enlarged, click it for its details. The tiles are shown in the library's own act colours; <b>Colours</b> switches to the map's act, or to Act 0, which shows in magenta the colours that change between acts. <b>Choose this library</b> for each one you want, then <b>Add to the map</b>: nothing is copied (the files are already in the game), and the map's level type and <code>Dt1Mask</code> are updated as in <a href="#s-libraries">Tile libraries</a>.</p>
+  <p>The window lists every tile library the game and your mods already have, by folder, with a search box (the map's own libraries first). Click one to see all its tiles, filtered by kind; rest the pointer on a tile to see it enlarged, click it for its details. The tiles are shown in the library's own act colours; <b>Colours</b> switches to the map's act, or to Act 0, which shows in magenta the colours that change between acts. <b>Choose this library</b> for each one you want, then <b>Add to the map</b>: nothing is copied (the files are already in the game), and the map's level type and <code>Dt1Mask</code> are updated as in <a href="#s-libraries">Tile libraries</a>.</p>
   <h3 id="s-custom-dt1">Building a custom DT1 from single tiles</h3>
   <p>Switch the window to <b>Build a custom DT1</b> to put together a new tile library from single tiles of any others.</p>
   <ol class="steps">

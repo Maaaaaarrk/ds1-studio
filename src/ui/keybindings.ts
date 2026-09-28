@@ -35,6 +35,8 @@ export const ACTIONS = [
   { id: 'view.pops', label: 'Roof hiding view', group: 'View', key: 'H' },
   { id: 'view.popsInside', label: 'Show roofs as hidden (as if inside)', group: 'View', key: 'Shift+H' },
   { id: 'view.light', label: 'Level light view', group: 'View', key: 'Shift+L' },
+  { id: 'view.focus', label: 'Just the map (fold both side panels, or bring them back)', group: 'View', key: 'Shift+F' },
+  { id: 'app.commands', label: 'Find a command by name', group: 'View', key: 'Ctrl+K' },
   { id: 'view.snapshot', label: 'Copy the map view as a picture (paste it anywhere)', group: 'View', key: 'PrintScreen' },
   { id: 'layer.floor1', label: 'Floor 1', group: 'Layers', key: '1' },
   { id: 'layer.floor2', label: 'Floor 2', group: 'Layers', key: '2' },

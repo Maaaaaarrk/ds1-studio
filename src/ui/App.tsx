@@ -5,6 +5,10 @@ import {
   Eye,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Fullscreen,
+  Search,
   ClipboardPaste,
   Copy,
   Eraser,
@@ -74,7 +78,9 @@ import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
-import { LightPanel, ModeFrame, RoofPanel } from './ModePanels';
+import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
+import { CommandPalette, ribbonCommands } from './CommandPalette';
+import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Splitter, usePersistentSize } from './Splitter';
@@ -174,13 +180,28 @@ export function App() {
   const [revision, setRevision] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
-  const [visibility, setVisibilityRaw] = useState<Visibility>(DEFAULT_VISIBILITY);
+  // The view mode used last comes back next time (per browser/app).
+  const [visibility, setVisibilityRaw] = useState<Visibility>(() => {
+    try {
+      const saved = localStorage.getItem('ds1studio.viewMode');
+      return saved && ['walk', 'automap', 'light', 'roofs'].includes(saved) ? withMode(DEFAULT_VISIBILITY, saved as ViewMode) : DEFAULT_VISIBILITY;
+    } catch {
+      return DEFAULT_VISIBILITY;
+    }
+  });
   /** Every visibility change keeps one view mode at a time (see ViewMode). */
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
   const viewMode = modeOf(visibility);
   /** Switches to a view mode, or back to editing tiles when it is already on. */
   const toggleMode = useCallback((m: ViewMode) => setVisibility((v) => withMode(v, modeOf(v) === m ? 'tiles' : m)), [setVisibility]);
   const exitMode = useCallback(() => setVisibility((v) => withMode(v, 'tiles')), [setVisibility]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('ds1studio.viewMode', viewMode);
+    } catch {
+      // per-viewer convenience only
+    }
+  }, [viewMode]);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fitSignal, setFitSignal] = useState(0);
@@ -321,6 +342,31 @@ export function App() {
       // per-viewer convenience only
     }
   }, [leftCollapsed]);
+  /** The side panels folded away to a thin strip at the right edge (remembered too). */
+  const [rightCollapsed, setRightCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('ds1studio.rightCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('ds1studio.rightCollapsed', rightCollapsed ? '1' : '0');
+    } catch {
+      // per-viewer convenience only
+    }
+  }, [rightCollapsed]);
+  const justTheMap = leftCollapsed && rightCollapsed;
+  /** "Just the map": both side panels folded away, or both back. */
+  const toggleJustTheMap = useCallback(() => {
+    const fold = !(leftCollapsed && rightCollapsed);
+    setLeftCollapsed(fold);
+    setRightCollapsed(fold);
+  }, [leftCollapsed, rightCollapsed]);
+  const [commandsOpen, setCommandsOpen] = useState(false);
+  /** The map's right-click menu: where it opened and the cell under it. */
+  const [mapMenu, setMapMenu] = useState<{ at: [number, number]; cell: [number, number]; world: [number, number] } | null>(null);
   const [rightW, setRightW] = usePersistentSize('right', 330, 260, 760);
 
   const bump = () => setRevision((r) => r + 1);
@@ -1625,6 +1671,8 @@ export function App() {
     [gd, notify, openPackage],
   );
 
+  /** The DT1 just imported, for the library window to show. */
+  const [revealDt1, setRevealDt1] = useState<string | null>(null);
   const importDt1 = useCallback(
     async (c: ImportDt1Choice) => {
       if (!importing || importing.kind !== 'dt1' || !c.files.length) return;
@@ -1637,6 +1685,7 @@ export function App() {
           // per-viewer convenience only
         }
         setImporting(null);
+        setRevealDt1(c.files[0].path);
         const n = c.files.length;
         const what = n === 1 ? c.files[0].path.split('/').pop() : `${n} DT1s`;
         if (c.addToMap && map) {
@@ -2107,6 +2156,8 @@ export function App() {
       'view.snapshot': () => void copyView(),
       'view.pops': vis((v) => ({ ...v, pops: !v.pops })),
       'view.light': vis((v) => ({ ...v, light: !v.light })),
+      'view.focus': toggleJustTheMap,
+      'app.commands': () => setCommandsOpen(true),
       'view.popsInside': vis((v) => ({ ...v, popsInside: !v.popsInside })),
       'tool.erase': () => setTool('erase'),
       'tool.pick': () => setTool('pick'),
@@ -2171,9 +2222,9 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
-  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null };
+  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -2271,9 +2322,7 @@ export function App() {
               title: canWrite ? 'Bring maps and tile libraries into your mod' : 'No writable mod folder',
               menu: [
                 { label: 'Map…', hint: '.ds1, or a map package (.zip)', title: 'A map package brings its tables too; a .ds1 on its own then needs Add to game', onClick: () => void pickImport('ds1') },
-                { label: 'DT1 files…', hint: 'one or several', title: 'Into PD2assets/<folder>, and added to the open map', onClick: () => void pickImport('dt1', 'files') },
-                { label: 'DT1 folders…', hint: 'with their subfolders', onClick: () => void pickImport('dt1', 'folders') },
-                { label: 'DT1s from the game library…', hint: 'browse, or build a custom DT1', onClick: () => (noMap ? notify('Open a map first: the libraries are added to it.', true) : setDialog('dt1lib')) },
+                { label: 'DT1s…', hint: 'the tile library: browse, add your own, build a custom DT1', title: 'Every tile library the game and your mod have; add DT1 files or folders from your computer to it there', onClick: () => (noMap ? notify('Open a map first: the libraries are added to it.', true) : setDialog('dt1lib')) },
               ],
             },
             {
@@ -2347,6 +2396,7 @@ export function App() {
             { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: kb['view.fit'] },
             { label: 'Game view', icon: <ScanEye />, onClick: toggleGameView, active: gameView.on, disabled: noMap, shortcut: kb['view.game'], title: `Zoom to what the character sees in game (${gameSize[0]}×${gameSize[1]}, centred on the selection)` },
             { custom: <GameSizePicker size={gameSize} onChange={setGameSize} /> },
+            { label: 'Just the map', icon: <Fullscreen />, onClick: toggleJustTheMap, active: justTheMap, shortcut: kb['view.focus'], title: 'Fold both side panels away for the most room, or bring them back' },
           ],
         },
         {
@@ -2414,7 +2464,7 @@ export function App() {
           label: 'Tile libraries',
           items: [
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
-            { label: 'From game library…', icon: <Grid2x2Plus />, onClick: () => setDialog('dt1lib'), disabled: noMap, size: 'sm', title: 'Browse every tile library the game and your mods have; add whole libraries or build a custom DT1 from single tiles' },
+            { label: 'DT1 library…', icon: <Grid2x2Plus />, onClick: () => setDialog('dt1lib'), disabled: noMap, size: 'sm', title: 'Browse every tile library the game and your mods have, add DT1s from your computer, add whole libraries to the map or build a custom DT1 from single tiles' },
             { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, size: 'sm', title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
             { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, size: 'sm', title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
           ],
@@ -2480,6 +2530,7 @@ export function App() {
         {
           label: 'Support',
           items: [
+            { label: 'Find a command', icon: <Search />, onClick: () => setCommandsOpen(true), shortcut: kb['app.commands'], title: 'Type any command\u2019s name and run it' },
             { label: 'User guide', icon: <BookOpen />, onClick: () => void openExternal(`${REPO_URL}#readme`), title: 'Features, shortcuts and how-tos' },
             { label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' },
             { label: 'Suggest a feature', icon: <Lightbulb />, onClick: () => void openExternal(featureRequestUrl({ map: map?.path })), size: 'sm', title: 'Open a pre-filled feature request on GitHub' },
@@ -2490,8 +2541,69 @@ export function App() {
     },
   ];
 
+  const sourcesText = data.gd.fs.baseSources.map((s) => s.label.split(/[\\/]/).slice(-2).join('/')).join('  ›  ');
+  /** What a click on the map does right now, in the status bar. */
+  const statusHint = !map
+    ? null
+    : viewMode === 'walk'
+      ? `Walkability: click or drag to ${walkBrush.mode === 'block' ? 'block' : 'make walkable'} (${walkBrush.size === 'cell' ? 'whole cells' : `${walkBrush.size}×${walkBrush.size} sub-tiles`}; the brush is in the panel) · right-drag pans`
+      : viewMode === 'automap'
+        ? 'Automap: click a cell to see and change its automap pieces in the panel'
+        : viewMode === 'light'
+          ? playerLight
+            ? "Level light: the lit circle at the mouse is a player's own light"
+            : "Level light: the map as the game lights it · raise Player light to see a player's light at the mouse"
+          : viewMode === 'roofs'
+            ? 'Roof hiding: filled = where a player must stand · outlined = the tiles that fade · click an area in the panel to find it'
+            : pasting
+              ? 'Paste: click to place · Esc to cancel'
+              : placing
+                ? 'Objects: click the map to place it · Esc to stop'
+                : tool === 'paint' && !brush
+                  ? 'Paint: choose a tile in the Tiles panel first (or Pick one from the map)'
+                  : `${TOOLS.find((t) => t.id === tool)!.hint} · right-click for more`;
+  /** The map's right-click menu for a cell. */
+  const mapMenuEntries = (m: { cell: [number, number]; world: [number, number] }): (MenuEntry | null)[] => {
+    if (!doc || !scene) return [];
+    const [x, y] = m.cell;
+    const inside = doc.inBounds(x, y);
+    const selectCell = () => {
+      setTool('select');
+      setSelection({ x0: x, y0: y, x1: x, y1: y });
+      const hit = hitTest(scene, m.world[0], m.world[1], hittable);
+      if (hit) focusTile(hit.tile, layerOfItem(hit));
+    };
+    return [
+      ...(inside
+        ? [
+            { label: 'Select this cell', onClick: selectCell },
+            {
+              label: 'Cell details',
+              onClick: () => {
+                selectCell();
+                exitMode();
+                setRightCollapsed(false);
+              },
+            },
+            { label: 'Pick this tile', onClick: () => pickAt(x, y, m.world), shortcut: kb['tool.pick'] },
+            null,
+          ]
+        : []),
+      { label: 'Copy', onClick: () => copy(false), disabled: !selection, shortcut: kb['edit.copy'] },
+      { label: 'Cut', onClick: () => copy(true), disabled: !selection, shortcut: kb['edit.cut'] },
+      { label: 'Paste', onClick: startPaste, disabled: !clipboard, shortcut: kb['edit.paste'] },
+      { label: 'Delete', onClick: () => clearSelection(false), disabled: !selection, shortcut: kb['edit.delete'] },
+      ...(selection ? [{ label: 'Deselect', onClick: () => setSelection(null) }] : []),
+      null,
+      { label: 'Centre the view here', onClick: () => setCenterOn((c) => ({ x: m.world[0], y: m.world[1], signal: (c?.signal ?? 0) + 1 })) },
+      { label: 'Fit the map', onClick: () => setFitSignal((n) => n + 1), shortcut: kb['view.fit'] },
+      { label: justTheMap ? 'Show the side panels' : 'Just the map', onClick: toggleJustTheMap, shortcut: kb['view.focus'] },
+      { label: 'Copy view (picture)', onClick: () => void copyView(), shortcut: kb['view.snapshot'] },
+    ];
+  };
+
   return (
-    <div className="app" style={{ gridTemplateColumns: `${leftCollapsed ? 30 : leftW}px 1fr ${rightW}px` }}>
+    <div className="app" style={{ gridTemplateColumns: `${leftCollapsed ? 30 : leftW}px 1fr ${rightCollapsed ? 30 : rightW}px` }}>
       <Ribbon
         tabs={ribbonTabs}
         brand={
@@ -2501,6 +2613,9 @@ export function App() {
         }
         right={
           <>
+            <button className="topbar-commands" onClick={() => setCommandsOpen(true)} title="Find any command by name">
+              <Search size={13} /> Commands <kbd>{kb['app.commands'] || 'Ctrl+K'}</kbd>
+            </button>
             <button className="topbar-idea" onClick={() => void openExternal(featureRequestUrl({ map: map?.path }))} title="Suggest a feature: opens a pre-filled idea on GitHub">
               <Lightbulb size={14} /> Suggest a feature
             </button>
@@ -2543,6 +2658,12 @@ export function App() {
 
       <main className="stage">
         {map && scene && visibility.walkable && <WalkLegend floating />}
+        {map && scene && viewMode === 'automap' && <AutomapLegend />}
+        {map && !rightCollapsed && (
+          <button className="stage-fold" onClick={() => setRightCollapsed(true)} title="Fold the side panels away (more room for the map)">
+            <PanelRightClose size={15} />
+          </button>
+        )}
         <ErrorBoundary
           what="the map view"
           resetKey={map}
@@ -2574,6 +2695,7 @@ export function App() {
             onStroke={onStroke}
             fitSignal={fitSignal}
             snapshotRef={snapshotRef}
+            onContextMenu={(at, cell, world) => setMapMenu({ at, cell, world })}
             gameView={{ ...gameView, width: gameSize[0], height: gameSize[1] }}
             focus={focus}
             onCycle={cycleStack}
@@ -2637,8 +2759,16 @@ export function App() {
         {loadingPath && <div className="toast">Loading {loadingPath.split('/').pop()}…</div>}
       </main>
 
-      <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />
-      <aside className="sidebar right">
+      {!rightCollapsed && <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />}
+      <aside className={`sidebar right${rightCollapsed ? ' collapsed' : ''}`}>
+        {rightCollapsed && (
+          <button className="sidebar-expand" onClick={() => setRightCollapsed(false)} title="Show the side panels">
+            <PanelRightOpen size={16} />
+            <span className="sidebar-expand-label">{viewMode === 'tiles' ? 'Panels' : { walk: 'Walkability', automap: 'Automap', light: 'Level light', roofs: 'Roof hiding' }[viewMode]}</span>
+          </button>
+        )}
+        {!rightCollapsed && (
+        <>
         <ErrorBoundary what="the side panel" resetKey={`${map?.path}:${tool}`} context={() => ({ map: map?.path })} compact>
         {map && scene && doc && viewMode !== 'tiles' && (
           <ModeFrame mode={viewMode} onDone={exitMode}>
@@ -2889,7 +3019,19 @@ export function App() {
           </>
         )}
         </ErrorBoundary>
+        </>
+        )}
       </aside>
+      {commandsOpen && <CommandPalette commands={ribbonCommands(ribbonTabs)} onClose={() => setCommandsOpen(false)} />}
+      {mapMenu && map && doc && scene && (
+        <ContextMenu
+          x={mapMenu.at[0]}
+          y={mapMenu.at[1]}
+          title={doc.inBounds(...mapMenu.cell) ? `Cell ${mapMenu.cell[0]}, ${mapMenu.cell[1]}` : 'Outside the map'}
+          onClose={() => setMapMenu(null)}
+          entries={mapMenuEntries(mapMenu)}
+        />
+      )}
 
       {dialog === 'new' && <NewMapDialog gd={data.gd} onCreate={createMap} onClose={() => setDialog(null)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
@@ -2908,17 +3050,6 @@ export function App() {
             setWarpEdit(null);
             setWarpInit(null);
           }}
-        />
-      )}
-      {importing?.kind === 'dt1' && (
-        <ImportDt1Dialog
-          files={importing.files}
-          exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
-          mapOpen={map?.path ?? null}
-          freeSlots={map?.resolution.lvlType ? map.resolution.lvlType.files.filter((f) => !f).length : null}
-          busy={importBusy}
-          onImport={(c) => void importDt1(c)}
-          onClose={() => setImporting(null)}
         />
       )}
       {importing?.kind === 'ds1' && (
@@ -3142,7 +3273,29 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === 'dt1lib' && map && <Dt1LibraryDialog map={map} gd={data.gd} onApply={(p) => void applyDt1s(p)} onCreateCustom={canWrite ? createCustomDt1 : null} onClose={() => setDialog(null)} />}
+      {dialog === 'dt1lib' && map && (
+        <Dt1LibraryDialog
+          map={map}
+          gd={data.gd}
+          onApply={(p) => void applyDt1s(p)}
+          onCreateCustom={canWrite ? createCustomDt1 : null}
+          onImportFiles={canWrite ? (mode) => void pickImport('dt1', mode) : null}
+          reveal={revealDt1}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {/* After the library window, which it opens from, so it shows on top. */}
+      {importing?.kind === 'dt1' && (
+        <ImportDt1Dialog
+          files={importing.files}
+          exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
+          mapOpen={map?.path ?? null}
+          freeSlots={map?.resolution.lvlType ? map.resolution.lvlType.files.filter((f) => !f).length : null}
+          busy={importBusy}
+          onImport={(c) => void importDt1(c)}
+          onClose={() => setImporting(null)}
+        />
+      )}
       {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
       {dialog === 'tables' && (
         <DataTables
@@ -3225,7 +3378,13 @@ export function App() {
       )}
 
       <footer className="statusbar">
-        <span>{data.gd.fs.baseSources.map((s) => s.label.split(/[\\/]/).slice(-2).join('/')).join('  ›  ')}</span>
+        {statusHint ? (
+          <span className="status-hint" title={`Data: ${sourcesText}`}>
+            {statusHint}
+          </span>
+        ) : (
+          <span>{sourcesText}</span>
+        )}
         <span className="spacer" />
         {map && doc && (
           <>

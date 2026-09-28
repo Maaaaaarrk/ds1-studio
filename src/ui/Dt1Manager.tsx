@@ -365,6 +365,10 @@ const FOLDER_OK = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/;
 interface LibraryProps extends Omit<Props, 'usage'> {
   /** Writes a custom DT1 built from picked tiles and adds it to the map (null: no writable mod folder). */
   onCreateCustom: ((req: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean }) => Promise<void>) | null;
+  /** Brings DT1 files, or folders of them, from the computer into the mod (null: no writable mod folder). */
+  onImportFiles: ((mode: 'files' | 'folders') => void) | null;
+  /** A library to show (one just imported). */
+  reveal: string | null;
 }
 
 /**
@@ -372,7 +376,7 @@ interface LibraryProps extends Omit<Props, 'usage'> {
  * through (hover to enlarge). Either whole libraries are chosen and added to the open map (like the Tile libraries
  * dialog), or single tiles from any of them are ticked and built into a new custom DT1 (see game/customDt1.ts).
  */
-export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onClose }: LibraryProps) {
+export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFiles, reveal, onClose }: LibraryProps) {
   const current = useMemo(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path), [map]);
   const inMap = useMemo(() => new Set(current.map(normalizePath)), [current]);
   const all = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
@@ -401,9 +405,14 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onClose }: 
     setDt1(null);
     if (selected) void gd.dt1(selected).then(setDt1);
   }, [selected, gd]);
+  // A DT1 just imported: show it.
+  useEffect(() => {
+    if (reveal) setSelected(reveal);
+  }, [reveal]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      // The import window opened from here closes itself first.
+      if (e.key === 'Escape' && document.querySelectorAll('[role=dialog]').length <= 1) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -436,7 +445,17 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onClose }: 
           </div>
         </div>
         <div className="dt1l-cols">
-          <Dt1Tree all={all} inMap={current} chosen={custom ? pickLibraries : chosen} chosenLabel={custom ? 'picked' : 'chosen'} selected={selected} onSelect={setSelected} />
+          <div className="dt1l-side">
+            <div className="dt1l-add">
+              <button className="btn small" disabled={!onImportFiles} onClick={() => onImportFiles?.('files')} title="Copy DT1 files from your computer into your mod (PD2assets/<folder>), so they are part of the library">
+                + Add DT1 files…
+              </button>
+              <button className="btn small" disabled={!onImportFiles} onClick={() => onImportFiles?.('folders')} title="Copy every DT1 in a folder (and its subfolders) into your mod">
+                + Add a folder…
+              </button>
+            </div>
+            <Dt1Tree all={all} inMap={current} chosen={custom ? pickLibraries : chosen} chosenLabel={custom ? 'picked' : 'chosen'} selected={selected} onSelect={setSelected} />
+          </div>
           <div className="dt1l-view">
             {selected ? (
               <Dt1Viewer

@@ -65,6 +65,8 @@ interface Props {
   onStroke: (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => void;
   /** Bumped by the parent to request "fit map to view". */
   fitSignal: number;
+  /** A right-click that didn't drag (a drag pans): the screen point, the cell under it and its world position. */
+  onContextMenu?: (screen: [number, number], cell: [number, number], world: [number, number]) => void;
   /** Receives a function that pictures the view exactly as shown (map, overlays, minimap) as a canvas. */
   snapshotRef?: MutableRefObject<(() => HTMLCanvasElement | null) | null>;
   /**
@@ -387,6 +389,8 @@ export function MapView(props: Props) {
   useEffect(() => {
     const el = overlay.current!;
     let pan: { x: number; y: number } | null = null;
+    /** Where a right/middle button went down, to tell a click from a pan. */
+    let panStart: { x: number; y: number } | null = null;
     let stroke: [number, number] | null = null;
     let space = false;
     const dpr = () => window.devicePixelRatio || 1;
@@ -426,6 +430,7 @@ export function MapView(props: Props) {
         latest.current.onStroke('start', [stroke], toWorld(ev), { alt: ev.altKey, shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey });
       } else if (ev.button <= 2) {
         pan = { x: ev.clientX, y: ev.clientY };
+        panStart = { x: ev.clientX, y: ev.clientY };
       }
       setCursor();
     };
@@ -486,7 +491,10 @@ export function MapView(props: Props) {
         const swallow = (e: Event) => e.preventDefault();
         window.addEventListener('contextmenu', swallow, { capture: true, once: true });
         setTimeout(() => window.removeEventListener('contextmenu', swallow, { capture: true }), 400);
+        // Barely moved: a click, which opens the map's menu instead of panning.
+        if (panStart && Math.hypot(ev.clientX - panStart.x, ev.clientY - panStart.y) < 5) latest.current.onContextMenu?.([ev.clientX, ev.clientY], toCell(ev), toWorld(ev));
       }
+      panStart = null;
       pan = null;
       if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
       setCursor();

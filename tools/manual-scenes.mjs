@@ -174,10 +174,6 @@ export function makeScenes(h) {
       await sleep(400);
       await shot('recent-menu', { x: 0, y: 0, width: 620, height: 230 });
       await press('Escape');
-      await ribbonButton('/^Import/');
-      await sleep(400);
-      await shot('import-dt1-menu', { x: 0, y: 0, width: 620, height: 200 });
-      await press('Escape');
     },
 
     async warps() {
@@ -222,10 +218,9 @@ export function makeScenes(h) {
       await ribbonTab('Home');
       await ribbonButton('/^Import/');
       await sleep(300);
-      await chooseFile([`${INPUTS}/treegroups.dt1`, `${INPUTS}/stonewall.dt1`, `${INPUTS}/mytown_tiles/mytown/floor.dt1`], async () => {
-        const r = await js(`const b = [...document.querySelectorAll('.rb-menu-item')].find((b) => /DT1 files/.test(b.innerText)); const q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 };`);
-        await click(r.x, r.y);
-      });
+      await menuItem('/^DT1s/');
+      await sleep(800);
+      await chooseFile([`${INPUTS}/treegroups.dt1`, `${INPUTS}/stonewall.dt1`, `${INPUTS}/mytown_tiles/mytown/floor.dt1`], () => button('+ Add DT1 files…'));
       await sleep(1500);
       await js(`const i = document.querySelector('[role=dialog] input.text-input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'mytiles'); i.dispatchEvent(new Event('input', { bubbles: true }));`);
       await sleep(300);

@@ -111,7 +111,7 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
   libraries — every DT1 it names is listed as already in your game/mod, provided by a DT1 you pick (files or whole
   folders, matched by name and folder), or missing, and the import waits until they're all there (or you choose to go
   on without) — then goes straight on to *Add to game* (a level, LvlPrest row and tile libraries, pre-filled from a
-  level using the same tiles); tile libraries come in
+  level using the same tiles); tile libraries come in (in the DT1 library window: *Add DT1 files* / *Add a folder*)
   as `PD2assets/<folder>/…` — pick several DT1 files, or whole folders (every DT1 inside, subfolders included, keeping
   their structure) — and can be added to the open map at once (LvlTypes slots + Dt1Mask). Files are checked before
   import (unreadable ones are left out), and names are kept plain so the game's tables can use them.

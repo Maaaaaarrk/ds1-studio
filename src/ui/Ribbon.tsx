@@ -103,7 +103,22 @@ function Button({ b }: { b: RibbonButton }) {
 
 /** Office-style ribbon: tabs of labelled command groups. */
 export function Ribbon({ tabs, brand, right }: Props) {
-  const [active, setActive] = useState(tabs[0]?.id);
+  // The last tab used comes back next time (per browser/app).
+  const [active, setActive] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ds1studio.ribbonTab');
+      return tabs.some((t) => t.id === saved) ? saved! : tabs[0]?.id;
+    } catch {
+      return tabs[0]?.id;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (active) localStorage.setItem('ds1studio.ribbonTab', active);
+    } catch {
+      // per-viewer convenience only
+    }
+  }, [active]);
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
   return (
     <header className="ribbon">

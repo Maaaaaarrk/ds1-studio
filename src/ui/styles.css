@@ -746,7 +746,9 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .modal.dt1-manager.dt1-library { width: calc(100vw - 24px); height: calc(100vh - 24px); max-width: none; max-height: none; overflow: hidden; display: flex; flex-direction: column; }
 .dt1l-cols { display: grid; grid-template-columns: 300px 1fr; gap: 12px; flex: 1; min-height: 0; }
 .dt1l-view { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
-.dt1-library .dtt { height: 100%; max-height: none; }
+.dt1-library .dtt { flex: 1; min-height: 0; height: auto; max-height: none; }
+.dt1l-side { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.dt1l-add { display: flex; gap: 6px; flex-wrap: wrap; }
 .dt1-library .dt1v { flex: 1; min-height: 0; }
 .dt1-library .dt1v-body { flex: 1; min-height: 0; grid-template-columns: 1fr minmax(320px, 36%); }
 .dt1-library .dt1v-grid { height: auto; max-height: none; min-height: 0; overflow-y: auto; }
@@ -798,3 +800,35 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 /* View modes: the side panel's bar */
 .mode-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--accent-dim, rgba(212, 168, 79, 0.18)); border-bottom: 1px solid var(--border); }
 .mode-list { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+
+/* Side panels folded away */
+.sidebar.right.collapsed { overflow: hidden; }
+.stage-fold { position: absolute; top: 8px; right: 8px; z-index: 6; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 1px solid var(--border); background: rgba(8, 9, 12, 0.7); color: var(--muted); cursor: pointer; opacity: 0.7; }
+.stage-fold:hover { opacity: 1; color: var(--text, #e6e6e6); }
+
+/* Status bar hint */
+.status-hint { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text, #d8d8d8); }
+
+/* Map right-click menu */
+.ctx-menu { position: fixed; z-index: 70; min-width: 220px; padding: 4px; background: rgba(18, 20, 25, 0.98); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column; }
+.ctx-title { padding: 4px 8px 5px; }
+.ctx-item { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 5px 8px; border: 0; background: none; color: inherit; text-align: left; font-size: 12.5px; border-radius: 4px; cursor: pointer; }
+.ctx-item:hover:not(:disabled) { background: var(--accent-dim, rgba(212, 168, 79, 0.18)); }
+.ctx-item:disabled { opacity: 0.4; cursor: default; }
+.ctx-item kbd, .cp-item kbd, .topbar-commands kbd { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; background: none; }
+.ctx-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+
+/* Command search (Ctrl+K) */
+.cp-backdrop { align-items: flex-start; padding-top: 12vh; }
+.cp { width: min(620px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; overflow: hidden; }
+.cp-input { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 12px 14px; font-size: 15px; background: transparent; }
+.cp-input:focus { outline: none; }
+.cp-list { max-height: 50vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; }
+.cp-item { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 12px; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: inherit; text-align: left; cursor: pointer; }
+.cp-item.active { background: var(--accent-dim, rgba(212, 168, 79, 0.18)); }
+.cp-item:disabled { opacity: 0.4; }
+.cp-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-empty { padding: 12px; }
+.cp-foot { padding: 6px 12px; border-top: 1px solid var(--border); }
+.topbar-commands { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
+.topbar-commands:hover { color: var(--text, #e6e6e6); }

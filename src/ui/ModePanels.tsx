@@ -125,6 +125,34 @@ export function RoofPanel({ ds1, areas, preset, inside, onInside, onShowCells, o
   );
 }
 
+/** What the Automap view's colours mean (floats over the map, like the walkability legend). */
+export function AutomapLegend() {
+  const rows: { stroke: string; text: string }[] = [
+    { stroke: 'rgba(255, 90, 200, 0.9)', text: 'Wall with no AutoMap.txt entry: the automap draws nothing there' },
+    { stroke: 'rgba(110, 230, 255, 0.85)', text: 'Suggested piece, not applied yet' },
+  ];
+  return (
+    <div className="walk-legend floating">
+      <div className="walk-legend-title">Automap</div>
+      <div className="walk-legend-row">
+        <svg className="walk-legend-swatch" viewBox="0 0 20 10" aria-hidden>
+          <path d="M2 8 L10 2 L18 8" fill="none" stroke="#e6e0c8" strokeWidth={1.4} />
+        </svg>
+        The automap as players see it
+      </div>
+      {rows.map((r) => (
+        <div key={r.text} className="walk-legend-row">
+          <svg className="walk-legend-swatch" viewBox="0 0 20 10" aria-hidden>
+            <polygon points="10,0.8 19.2,5 10,9.2 0.8,5" fill="none" stroke={r.stroke} strokeWidth={1.3} />
+          </svg>
+          {r.text}
+        </div>
+      ))}
+      <div className="walk-legend-note">Click a cell to see and change its pieces in the panel.</div>
+    </div>
+  );
+}
+
 /** A mode's panel with its bar. */
 export function ModeFrame({ mode, onDone, children }: { mode: Exclude<ViewMode, 'tiles'>; onDone: () => void; children: ReactNode }) {
   return (
