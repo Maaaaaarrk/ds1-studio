@@ -260,3 +260,43 @@ export function missingForPaste(clip: Clipboard, lib: TileLibrary): { tiles: num
   const dt1s = clip.tileSources ? [...needed].sort() : missing.size ? (clip.dt1s ?? []).filter((p) => !loaded.has(normalizePath(p))) : [];
   return { tiles: missing.size, different: different.size, dt1s };
 }
+
+/** What a copied tile is, for choosing what a preset keeps. */
+export type ClipPart = 'floors' | 'walls' | 'roofs' | 'shadows' | 'markers' | 'objects';
+export const CLIP_PARTS: { id: ClipPart; label: string }[] = [
+  { id: 'floors', label: 'Floors' },
+  { id: 'walls', label: 'Walls' },
+  { id: 'roofs', label: 'Roofs' },
+  { id: 'shadows', label: 'Shadows' },
+  { id: 'markers', label: 'Markers' },
+  { id: 'objects', label: 'Objects & NPCs' },
+];
+
+/** The part a cell of a layer belongs to (wall layers hold walls, roofs and special-tile markers). */
+export function partOf(layer: LayerRef, cell: TileCell | WallCell): ClipPart {
+  if (layer.kind === 'floor') return 'floors';
+  if (layer.kind === 'shadow') return 'shadows';
+  const o = (cell as WallCell).orientation;
+  if (o === 15) return 'roofs';
+  if (o === 10 || o === 11) return 'markers';
+  return 'walls';
+}
+
+/** How many tiles (or objects) of each part a clipboard holds. */
+export function countParts(clip: Clipboard): Record<ClipPart, number> {
+  const n: Record<ClipPart, number> = { floors: 0, walls: 0, roofs: 0, shadows: 0, markers: 0, objects: clip.objects?.length ?? 0 };
+  for (const { layer, cells } of clip.layers) for (const c of cells) if (!isEmptyCell(c)) n[partOf(layer, c)]++;
+  return n;
+}
+
+/** The clipboard with only the parts in `keep` (the rest empty; layers left empty dropped). */
+export function filterClipboard(clip: Clipboard, keep: ReadonlySet<ClipPart>): Clipboard {
+  const empty = (layer: LayerRef): TileCell | WallCell => (layer.kind === 'wall' ? { ...EMPTY_CELL, orientation: 0, orientationHigh: 0 } : EMPTY_CELL);
+  return {
+    ...clip,
+    layers: clip.layers
+      .map(({ layer, cells }) => ({ layer, cells: cells.map((c) => (isEmptyCell(c) || keep.has(partOf(layer, c)) ? c : empty(layer))) }))
+      .filter((l) => l.cells.some((c) => !isEmptyCell(c))),
+    objects: keep.has('objects') ? clip.objects : [],
+  };
+}

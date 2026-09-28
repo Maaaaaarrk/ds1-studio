@@ -64,10 +64,10 @@ import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, type CustomDt1Plan } from '../game/customDt1';
-import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
+import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
-import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
+import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
@@ -80,6 +80,7 @@ import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, Map
 import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
 import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
 import { ClipboardPanel } from './ClipboardPanel';
+import { SavePresetDialog } from './SavePresetDialog';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
@@ -1915,13 +1916,24 @@ export function App() {
     },
     [gd, writeFiles, notify],
   );
+  /** Save as preset: the block to save (a selection, or what was copied) and its suggested name. */
+  const [presetSave, setPresetSave] = useState<{ clip: Clipboard; name: string } | null>(null);
   const saveSelectionPreset = useCallback(async () => {
     if (!doc || !map || !selection) return;
-    const name = window.prompt('Preset name', `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${selection.cells ? `${selectionCount(selection)} cells` : rectSize(selection).join('×')}`);
-    if (!name) return;
-    const category = window.prompt('Category', 'My presets') || 'My presets';
-    await savePreset(presetFromSelection(doc, map.lib, selection, name, category));
-  }, [doc, map, selection, savePreset]);
+    setPresetSave({
+      clip: copyRect(doc, selection),
+      name: `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${selection.cells ? `${selectionCount(selection)} cells` : rectSize(selection).join('×')}`,
+    });
+  }, [doc, map, selection]);
+  /** What Save as preset starts with ticked: what the view shows (roofs left out while As if inside is on). */
+  const presetParts = useMemo((): Set<ClipPart> => {
+    const on = new Set<ClipPart>(['walls', 'objects']);
+    if (visibility.floors.some(Boolean)) on.add('floors');
+    if (visibility.roofs && !visibility.popsInside) on.add('roofs');
+    if (visibility.shadows) on.add('shadows');
+    if (visibility.specials) on.add('markers');
+    return on;
+  }, [visibility]);
   const placePreset = useCallback((p: Preset) => beginPaste(presetToClipboard(p), `Placing "${p.name}"`), [beginPaste]);
   const suggest = useCallback(async () => {
     if (!gd || !map) return;
@@ -2950,9 +2962,8 @@ export function App() {
                 palette={map.palette}
                 pasting={pasting}
                 canSave={canWrite}
-                defaultName={`${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${clipboard.width}×${clipboard.height}`}
                 onPaste={startPaste}
-                onSavePreset={savePreset}
+                onSaveAsPreset={() => setPresetSave({ clip: clipboard, name: `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${clipboard.width}×${clipboard.height}` })}
                 onClose={() => {
                   setClipPane(false);
                   setPasting(false);
@@ -3138,6 +3149,19 @@ export function App() {
         </>
         )}
       </aside>
+      {presetSave && map && (
+        <SavePresetDialog
+          clip={presetSave.clip}
+          lib={map.lib}
+          palette={map.palette}
+          defaultName={presetSave.name}
+          categories={[...new Set(presets.map((p) => p.category))].sort()}
+          initial={presetParts}
+          insideNote={visibility.popsInside}
+          onSave={savePreset}
+          onClose={() => setPresetSave(null)}
+        />
+      )}
       {commandsOpen && <CommandPalette commands={ribbonCommands(ribbonTabs)} onClose={() => setCommandsOpen(false)} />}
       {mapMenu && map && doc && scene && (
         <ContextMenu

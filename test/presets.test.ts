@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newDs1 } from '../src/formats/ds1ops';
-import { copyRect } from '../src/game/clipboard';
+import { copyRect, countParts, filterClipboard } from '../src/game/clipboard';
 import { TileLibrary } from '../src/game/GameData';
 import { MapDocument } from '../src/game/MapDocument';
 import { presetFromClipboard, presetToClipboard } from '../src/game/presets';
@@ -21,5 +21,23 @@ describe('presets from the clipboard', () => {
     const cells = (kind: string) => back.layers.find((l) => l.layer.kind === kind)!.cells;
     expect(cells('floor')[0]).toMatchObject({ mainIndex: 3, subIndex: 7 });
     expect(cells('wall')[1]).toMatchObject({ mainIndex: 1, subIndex: 2, orientation: 15 });
+  });
+});
+
+describe('choosing what a preset keeps', () => {
+  it('sorts copied tiles into floors, walls, roofs, markers and objects, and keeps only the chosen ones', () => {
+    const ds1 = newDs1({ width: 3, height: 1, act: 0, floorLayers: 1, wallLayers: 2, tagType: 0, files: [] });
+    Object.assign(ds1.floors[0][0], { prop1: 1, mainIndex: 1 });
+    Object.assign(ds1.floors[0][1], { prop1: 1, mainIndex: 1 });
+    Object.assign(ds1.walls[0][0], { prop1: 1, mainIndex: 2, orientation: 1 });
+    Object.assign(ds1.walls[1][1], { prop1: 1, mainIndex: 3, orientation: 15 });
+    Object.assign(ds1.walls[1][2], { prop1: 1, mainIndex: 8, subIndex: 46, orientation: 10 });
+    ds1.objects.push({ type: 2, id: 1, x: 2, y: 2, flags: 0, path: [] } as never);
+    const clip = copyRect(new MapDocument('data/global/tiles/t.ds1', ds1), { x0: 0, y0: 0, x1: 2, y1: 0 });
+    expect(countParts(clip)).toEqual({ floors: 2, walls: 1, roofs: 1, shadows: 0, markers: 1, objects: 1 });
+    const noRoof = filterClipboard(clip, new Set(['floors', 'walls', 'markers']));
+    expect(countParts(noRoof)).toEqual({ floors: 2, walls: 1, roofs: 0, shadows: 0, markers: 1, objects: 0 });
+    // Only floors: the wall layers go.
+    expect(filterClipboard(clip, new Set(['floors'])).layers.map((l) => l.layer.kind)).toEqual(['floor']);
   });
 });

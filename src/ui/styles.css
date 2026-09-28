@@ -844,3 +844,15 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .dt1r-tile { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
 .btn.danger { border-color: rgba(255, 90, 90, 0.5); color: #ff9b9b; }
 .btn.danger:hover:not(:disabled) { background: rgba(255, 90, 90, 0.12); }
+
+/* Save as preset */
+.sp-body { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: start; }
+.sp-thumb { display: flex; align-items: center; justify-content: center; min-height: 150px; background: #000; border-radius: 6px; padding: 6px; }
+.sp-thumb img, .sp-thumb canvas { max-width: 100%; }
+.sp-form { display: flex; flex-direction: column; gap: 6px; }
+.sp-parts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-part { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.sp-part input { margin: 0; }
+@media (max-width: 560px) { .sp-body { grid-template-columns: 1fr; } }
+.sp-thumb .preset-img { width: 100%; height: 150px; background: center / contain no-repeat; }
+.clip-thumb .preset-img { width: 100%; height: 110px; background: center / contain no-repeat; }

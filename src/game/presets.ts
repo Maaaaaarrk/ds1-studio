@@ -1,9 +1,9 @@
 import { decodeCell, encodeCell, isEmptyCell, parseDs1, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { normalizePath } from '../vfs/vfs';
-import { selectionMask, type CellRect, type CellSelection, type Clipboard } from './clipboard';
+import { type CellRect, type Clipboard } from './clipboard';
 import type { GameData, TileLibrary } from './GameData';
-import type { LayerKind, LayerRef, MapDocument } from './MapDocument';
+import type { LayerKind, LayerRef } from './MapDocument';
 import { isBuiltinPath } from './specialTiles';
 
 /** Where presets live: inside the mod, so they travel with it (and with exported map packages). */
@@ -95,12 +95,6 @@ export function capturePreset(ds1: Ds1, lib: TileLibrary, r: CellRect, name: str
     pathOrder: undefined,
   }));
   return { format: 'ds1studio-preset', version: 1, id: newId(), name, category, width, height, dt1s: dt1sOf(lib, layers), layers, objects };
-}
-
-/** Selection → preset, from an open document. */
-/** A preset of the selection: its bounding rectangle, with only the selected cells (and their objects) when irregular. */
-export function presetFromSelection(doc: MapDocument, lib: TileLibrary, r: CellSelection, name: string, category: string): Preset {
-  return capturePreset(doc.ds1, lib, r, name, category, selectionMask(r) ?? undefined);
 }
 
 /** A copied block (the clipboard) as a preset: its layers with anything in them, and its objects. */

@@ -142,7 +142,7 @@ export function PresetsPanel(props: Props) {
           <span className="muted small">{saved.length} saved</span>
         </div>
         <div className="button-grid">
-          <button className="btn" disabled={!hasSelection || !canSave} onClick={onSaveSelection} title={canSave ? 'Save the selected cells (all layers + objects) as a preset' : 'No writable mod folder'}>
+          <button className="btn" disabled={!hasSelection || !canSave} onClick={onSaveSelection} title={canSave ? 'Save the selected cells as a preset (you choose what it keeps)' : 'No writable mod folder'}>
             Save selection…
           </button>
           <button className="btn" disabled={!!suggesting} onClick={onSuggest} title="Find recurring structures in maps that use these tile libraries">
