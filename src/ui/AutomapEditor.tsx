@@ -190,9 +190,10 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
           <label className="small">
             AutoMap.txt level{' '}
             <select value={level} onChange={(e) => (!edits.size || window.confirm('Discard the unsaved automap changes?')) && onLevel(e.target.value)}>
-              {table.levels.map((l) => (
+              {(table.levels.includes(level) ? table.levels : [level, ...table.levels]).map((l) => (
                 <option key={l} value={l}>
                   {levelLabel(l)}
+                  {table.levels.includes(l) ? '' : ' (new: no entries yet)'}
                 </option>
               ))}
             </select>

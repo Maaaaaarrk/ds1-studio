@@ -1,4 +1,4 @@
-import type { AutomapPiece } from './automap';
+import { automapLevelFor, GAME_AUTOMAP_LEVELS, parseAutomap, unknownAutomapLevels, type AutomapPiece } from './automap';
 import { Orientation } from '../formats/dt1';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { SubTileFlag, walkability, type Scene } from '../render/scene';
@@ -452,7 +452,41 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   if (!offMap.length && !blocked.length && !stacked) out.push({ severity: 'ok', area: 'Objects', title: `${ds1.objects.length} objects placed on valid ground` });
 
   // --- Automap ------------------------------------------------------------------------------------------------------
-  if (automap) {
+  const automapDoc = await loadTable(gd.fs, 'AutoMap.txt');
+  const amTable = automapDoc ? parseAutomap(automapDoc) : null;
+  let noEntries = false;
+  if (amTable) {
+    const unknown = unknownAutomapLevels(amTable);
+    if (unknown.length)
+      out.push({
+        severity: 'warning',
+        area: 'Tables',
+        title: `AutoMap.txt names level${unknown.length === 1 ? '' : 's'} the game doesn't know: ${unknown.slice(0, 4).map((u) => `"${u}"`).join(', ')}`,
+        detail: `The game only accepts its own ${GAME_AUTOMAP_LEVELS.length} automap level names ("1 Town" … "5 Lava"), and mods like PD2 also a level type's number ("47"). An unknown name stops the game with an error at start-up. Rename those rows to the level type's number (Map panel: Level type).`,
+        columns: [{ table: 'AutoMap', col: 'LevelName' }],
+        fixes: [{ kind: 'open-table', label: 'Open AutoMap.txt', table: 'AutoMap.txt' }],
+      });
+    const type = map.resolution.lvlType;
+    const level = type ? automapLevelFor(amTable, type.name, ds1.act + 1, type.id) : null;
+    if (type && level && !amTable.doc.rows.some((r) => (r[0] ?? '').trim() === level)) {
+      noEntries = true;
+      out.push({
+        severity: 'warning',
+        area: 'Map',
+        title: `This level type (${type.id} "${type.name}") has no automap entries, so the automap stays empty here`,
+        detail: `AutoMap.txt gives each tile of a level type the piece the automap draws for it, under the level type's number ("${level}"). This one has none yet. In the automap editor, "Select missing" then "Suggest" picks pieces for every tile from look-alike tiles the game already maps; save to add them.`,
+        columns: [{ table: 'AutoMap', col: 'LevelName' }],
+        fixes: [{ kind: 'automap-editor', label: 'Open the automap editor (then Suggest)' }],
+      });
+    } else if (type && !level && type.id >= GAME_AUTOMAP_LEVELS.length)
+      out.push({
+        severity: 'info',
+        area: 'Map',
+        title: `The automap can't show this level type (${type.id} "${type.name}")`,
+        detail: `The game only knows automap entries for its own ${GAME_AUTOMAP_LEVELS.length} level types. Mods like PD2 read a level type's number too; this install's AutoMap.txt doesn't use numbers, so it probably doesn't.`,
+      });
+  }
+  if (automap && !noEntries) {
     const missingWalls = automap.pieces.filter((p) => p.layer === 'wall' && !p.rule);
     if (missingWalls.length)
       out.push({

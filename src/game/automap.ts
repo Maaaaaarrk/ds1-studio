@@ -97,14 +97,41 @@ export function findRule(t: AutomapTable, level: string, orientation: number, ma
 }
 
 /**
- * AutoMap.txt's level name for a level type: its Id ("47"), its exact name, or the vanilla short form ("Act 1 - Town" →
- * "1 Town"), falling back to a prefix match ("Act 5 - Ice Caves" → "5 Ice").
+ * The automap level names the game knows, by level type id (D2Common's built-in list: AutoMap.txt rows must use one of
+ * these, the game stops with an error at start-up otherwise). Mods like PD2 also read a level type's Id ("47") for the
+ * level types they add.
+ */
+export const GAME_AUTOMAP_LEVELS = [
+  'None', '1 Town', '1 Wilderness', '1 Cave', '1 Crypt', '1 Monestary', '1 Courtyard', '1 Barracks', '1 Jail', '1 Cathedral', '1 Catacombs', '1 Tristram',
+  '2 Town', '2 Sewer', '2 Harem', '2 Basement', '2 Desert', '2 Tomb', '2 Lair', '2 Arcane', '3 Town', '3 Jungle', '3 Kurast', '3 Spider', '3 Dungeon', '3 Sewer',
+  '4 Town', '4 Mesa', '4 Lava', '5 Town', '5 Siege', '5 Barricade', '5 Temple', '5 Ice', '5 Baal', '5 Lava',
+];
+
+const isNumber = (l: string) => /^\d+$/.test(l.trim());
+
+/** Whether this AutoMap.txt names level types by number (a mod that reads them, like PD2). */
+export const readsLevelNumbers = (t: AutomapTable) => t.levels.some(isNumber);
+
+/** AutoMap.txt level names the game (and a mod reading numbers) wouldn't accept. */
+export function unknownAutomapLevels(t: AutomapTable): string[] {
+  return t.levels.filter((l) => !GAME_AUTOMAP_LEVELS.includes(l.trim()) && !(isNumber(l) && readsLevelNumbers(t)));
+}
+
+/**
+ * AutoMap.txt's level name for a level type: the game's own name for its level types, the Id ("47") of a level type a
+ * mod added (when the mod reads numbers, even before it has rows), else its exact name or the vanilla short form ("Act
+ * 1 - Town" → "1 Town"), falling back to a prefix match ("Act 5 - Ice Caves" → "5 Ice").
  */
 export function automapLevelFor(t: AutomapTable, lvlTypeName: string | undefined | null, act?: number, lvlTypeId?: number): string | null {
-  // Mods key their own level types by LvlTypes Id (PD2: "47" = Dark Temple) or by the exact LvlTypes name.
   if (lvlTypeId !== undefined && lvlTypeId > 0) {
+    // Mods key their own level types by LvlTypes Id (PD2: "47" = Dark Temple).
     const byId = t.levels.find((l) => l.trim() === String(lvlTypeId));
     if (byId) return byId;
+    // A level type the game didn't have: its number where the mod reads numbers, else none (the game has no automap
+    // entries for it at all).
+    if (lvlTypeId >= GAME_AUTOMAP_LEVELS.length) return readsLevelNumbers(t) ? String(lvlTypeId) : null;
+    const own = GAME_AUTOMAP_LEVELS[lvlTypeId];
+    if (own && t.levels.includes(own)) return own;
   }
   if (!lvlTypeName) return null;
   const byName = t.levels.find((l) => l.trim().toLowerCase() === lvlTypeName.trim().toLowerCase());

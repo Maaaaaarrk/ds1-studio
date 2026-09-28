@@ -179,6 +179,17 @@ describe('automap level names', () => {
     expect(automapLevelFor(t, 'Act 1 - Town')).toBe('1 Town');
     expect(automapLevelFor(t, 'Act 5 - Ice Caves')).toBe('5 Ice');
     expect(automapLevelFor(t, 'Dark Temple', 5, 47)).toBe('47');
+    // A level type the game didn't have, in a mod that reads numbers: its Id, even before it has rows (not a guess).
+    expect(automapLevelFor(t, 'Guild', 5, 52)).toBe('52');
+    // The game's own level types by their built-in name (type 33 = "5 Ice").
+    expect(automapLevelFor(t, 'Act 5 - Anything', 5, 33)).toBe('5 Ice');
+  });
+  it('knows which names the game accepts', async () => {
+    const { unknownAutomapLevels, readsLevelNumbers } = await import('../src/game/automap');
+    const bad = parseAutomap(ptt(enc('LevelName\tTileName\tStyle\tStartSequence\tEndSequence\tType1\tCel1\r\n1 Town\tfl\t0\t-1\t-1\tA\t1\r\nGuild\tfl\t0\t-1\t-1\tA\t1\r\n')));
+    expect(readsLevelNumbers(bad)).toBe(false);
+    expect(unknownAutomapLevels(bad)).toEqual(['Guild']);
+    expect(unknownAutomapLevels(t)).toEqual([]);
   });
 });
 
