@@ -58,6 +58,33 @@ export const DEFAULT_VISIBILITY: Visibility = {
   light: false,
 };
 
+/**
+ * What the right-hand panel is for. Views with options of their own are modes, one at a time: each replaces the
+ * side panel with just its options. Plain overlays (grid, rooms, sprites…) are not modes and combine freely.
+ */
+export type ViewMode = 'tiles' | 'walk' | 'automap' | 'light' | 'roofs';
+
+/** Each mode's visibility flag. */
+const MODE_FLAGS = { walk: 'walkable', automap: 'automap', light: 'light', roofs: 'pops' } as const;
+
+export function modeOf(v: Visibility): ViewMode {
+  for (const [mode, flag] of Object.entries(MODE_FLAGS)) if (v[flag]) return mode as ViewMode;
+  return 'tiles';
+}
+
+/** `v` in mode `mode` (the others off). */
+export function withMode(v: Visibility, mode: ViewMode): Visibility {
+  const out = { ...v };
+  for (const [m, flag] of Object.entries(MODE_FLAGS)) out[flag] = m === mode;
+  return out;
+}
+
+/** A visibility change that keeps one mode at a time: a mode just switched on switches the one before off. */
+export function oneMode(prev: Visibility, next: Visibility): Visibility {
+  const turnedOn = (Object.entries(MODE_FLAGS) as [ViewMode, keyof typeof prev][]).find(([, flag]) => next[flag] && !prev[flag]);
+  return turnedOn ? withMode(next, turnedOn[0]) : next;
+}
+
 export const ORIENTATION_NAMES: Record<number, string> = {
   0: 'Floor',
   1: 'Left wall',

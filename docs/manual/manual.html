@@ -108,7 +108,7 @@
           <li><a href="#s-nav"><span class="num">2.1</span>Moving around and zooming</a></li>
           <li><a href="#s-minimap"><span class="num">2.2</span>The minimap</a></li>
           <li><a href="#s-layers"><span class="num">2.3</span>Layers: showing and hiding</a></li>
-          <li><a href="#s-overlays"><span class="num">2.4</span>Grid, rooms, walkability, automap</a></li>
+          <li><a href="#s-overlays"><span class="num">2.4</span>View modes, grid, rooms</a></li>
           <li><a href="#s-gameview"><span class="num">2.5</span>Game view</a></li>
           <li><a href="#s-sprites"><span class="num">2.6</span>Objects, sprites and animation</a></li>
           <li><a href="#s-special"><span class="num">2.7</span>Special tiles</a></li>
@@ -210,18 +210,18 @@
     <figcaption>The main window with Act 1's Rogue Encampment open.</figcaption>
   </figure>
   <ol class="legend">
-    <li><span class="dot">1</span><b>Tabs</b>: Home, Map, Data and Help switch the ribbon below.</li>
-    <li><span class="dot">2</span><b>Ribbon</b>: the commands, in labelled groups (File, Edit, Tools, Paint / erase, Layer, View…). Hover any button for what it does and its shortcut.</li>
+    <li><span class="dot">1</span><b>Tabs</b>: Home (files and editing), View (how the map is shown, and the view modes), Map (the map and its tile libraries), Game (the game's tables, and checks) and Help switch the ribbon below.</li>
+    <li><span class="dot">2</span><b>Ribbon</b>: the commands, in labelled groups (File, Edit, Tools, Paint / erase, Layer on Home). Hover any button for what it does and its shortcut.</li>
     <li><span class="dot">3</span><b>Suggest a feature</b> and the open map's name and path. A dot after the name means unsaved changes.</li>
-    <li><span class="dot">4</span><b>Presets list</b>: every DS1 in the game and your mod. Type in the box to filter (<a href="#s-open">see Opening a map</a>).</li>
+    <li><span class="dot">4</span><b>Presets list</b>: every DS1 in the game and your mod. Type in the box to filter (<a href="#s-open">see Opening a map</a>). The button left of its title folds it away to a thin strip for more map room; click the strip to bring it back.</li>
     <li><span class="dot">5</span><b>Map view</b>: the map as the game draws it (<a href="#ch-view">see Viewing maps</a>).</li>
     <li><span class="dot">6</span><b>Minimap</b>: the whole map; click it to move there (<a href="#s-minimap">2.2</a>).</li>
-    <li><span class="dot">7</span><b>Side panels</b>: Tiles/Presets, Selection, Cell, History, Layers, Map… (they change with the tool).</li>
+    <li><span class="dot">7</span><b>Side panels</b>: Tiles/Presets, Selection, Cell, History, Layers, Map… (they change with the tool). In a view mode (Walkability, Automap, Level light, Roof hiding) they make way for that mode's own panel (<a href="#s-modes">see View modes</a>).</li>
     <li><span class="dot">8</span><b>Status bar</b>: the data sources, the tool and layer, the cell under the mouse, zoom, size and act.</li>
   </ol>
   <figure>
     <img src="img/ribbon-home-full.png" alt="The Home ribbon" />
-    <figcaption>The Home ribbon. The other tabs are shown in their chapters: <a href="#ch-tiles">Map</a>, <a href="#ch-data">Data</a>, <a href="#ch-help">Help</a>.</figcaption>
+    <figcaption>The Home ribbon. The other tabs are described in their chapters: <a href="#s-modes">View</a>, <a href="#ch-tiles">Map</a>, <a href="#ch-data">Game</a>, <a href="#ch-help">Help</a>.</figcaption>
   </figure>
 
   <h2 id="s-open"><span class="num">1.4</span>Opening a map</h2>
@@ -267,7 +267,7 @@
 
   <h2 id="s-minimap"><span class="num">2.2</span>The minimap</h2>
   <figure class="small"><img src="img/minimap.png" alt="Minimap" /><figcaption>The minimap. The outlined part is what the map view shows.</figcaption></figure>
-  <p>The bottom-left corner shows the whole map with the visible area outlined. Click or drag on it to move the view there. Toggle it with <kbd>K</kbd> or <b>View → Minimap</b>.</p>
+  <p>The bottom-left corner shows the whole map with the visible area outlined. Click or drag on it to move the view there. Toggle it with <kbd>K</kbd> or <b>View → Show → Minimap</b>.</p>
 
   <h2 id="s-layers"><span class="num">2.3</span>Layers: showing and hiding</h2>
   <div class="pair">
@@ -279,13 +279,16 @@
     </div>
   </div>
 
-  <h2 id="s-overlays"><span class="num">2.4</span>Grid, rooms, walkability, automap</h2>
+  <h2 id="s-overlays"><span class="num">2.4</span>View modes, grid, rooms</h2>
+  <p id="s-modes"><b>View modes.</b> The <b>View</b> tab's <b>Mode</b> group switches what the right-hand panel is for, one mode at a time: <b>Tiles</b> (editing: the Tiles, Cell, History, Layers and Map panels), <b>Walkability</b> (<kbd>W</kbd>), <b>Automap</b> (<kbd>A</kbd>), <b>Level light</b> (<kbd>Shift</kbd>+<kbd>L</kbd>) and <b>Roof hiding</b> (<kbd>H</kbd>). Each mode draws its view on the map and replaces the side panels with only its own options; <b>Done</b> at the top of the panel (or the mode's button or key again) goes back to Tiles. The <b>Show</b> group's overlays (grid, rooms, minimap, sprites, markers, As if inside) are not modes: they work in any mode.</p>
+  <figure><img src="img/ribbon-view.png" alt="The View ribbon" /><figcaption>The View ribbon: Navigate, Mode (one at a time), Show (overlays), Colours and Picture.</figcaption></figure>
+  <figure class="medium"><img src="img/mode-light.png" alt="Level light mode" /><figcaption>View → Level light on the Worldstone Chamber (Intensity 40): the side panel holds only the light's settings.</figcaption></figure>
   <div class="pair">
     <figure><img src="../media/walkability.png" alt="Walkability" /><figcaption><b>Walkability</b> (<kbd>W</kbd>): amber sub-tiles block walking; red also block jumping/teleporting.</figcaption></figure>
     <figure><img src="../media/rooms.png" alt="Rooms" /><figcaption><b>Rooms 8×8</b> (<kbd>R</kbd>) and <b>Grid</b> (<kbd>G</kbd>): the rooms the game builds levels from, and the cell grid.</figcaption></figure>
   </div>
   <p><b>Automap</b> (<kbd>A</kbd>) draws the in-game automap over the map, as players will see it (<a href="#s-automap">see The automap</a>).</p>
-  <p><b>Level light</b> (Layers panel) draws the map as brightly and in the colour the game lights its level: Levels.txt's <code>Intensity</code> (1-255) and <code>Red</code>/<code>Green</code>/<code>Blue</code>; 0 means the act's own daylight, as towns and outdoor levels use. The <b>Map</b> panel shows and changes them (<b>Level light</b>: slider, colour, <b>Apply to Levels.txt</b>), previewing while you move the slider. In game the player's own light radius also brightens the area around them.</p>
+  <p><b>Level light</b> (View → Level light, <kbd>Shift</kbd>+<kbd>L</kbd>) draws the map as brightly and in the colour the game lights its level: Levels.txt's <code>Intensity</code> (1-255) and <code>Red</code>/<code>Green</code>/<code>Blue</code>; 0 means the act's own daylight, as towns and outdoor levels use. The <b>Map</b> panel shows and changes them (<b>Level light</b>: slider, colour, <b>Apply to Levels.txt</b>), previewing while you move the slider. In game the player's own light radius also brightens the area around them.</p>
 
   <h2 id="s-gameview"><span class="num">2.5</span>Game view</h2>
   <figure class="medium"><img src="../media/game-view.png" alt="Game view" /><figcaption>Game view: the 800×600 screen around the selection.</figcaption></figure>
@@ -300,9 +303,9 @@
   <h3 id="s-pops">Roof hiding</h3>
   <p>When a player walks into a building, the game fades its roof. This is set by a <b>hide area</b>: two special tiles (main index 8–29) at opposite corners of the inside, whose sub index is the <i>main index</i> of the tiles that fade. Every wall-layer tile with that number in the area, plus one cell around it, fades while the player stands inside. The trigger is the rectangle, grown or shrunk toward the south and east by LvlPrest's <code>PopPad</code> (in sub-tiles; the game's houses use −4). The game ignores hide areas unless LvlPrest's <code>Pops</code> counts them.</p>
   <ul>
-    <li><b>View → Hide areas</b> (<kbd>H</kbd>) fills the area the player must stand in, outlines the area whose tiles can fade, and marks those tiles.</li>
-    <li><b>View → As if inside</b> (<kbd>Shift</kbd>+<kbd>H</kbd>) hides those tiles, as the game shows the map while a player is inside.</li>
-    <li><b>Map → Roof hiding</b>: select the inside of a building (the floor players walk on), open it, tick what should fade (roofs are ticked for you), and click <b>Add hide area</b>. DS1 Studio places the corner markers and sets <code>Pops</code>/<code>PopPad</code>. The dialog also lists and removes existing areas.</li>
+    <li><b>View → Roof hiding</b> (<kbd>H</kbd>) fills the area the player must stand in, outlines the area whose tiles can fade, and marks those tiles.</li>
+    <li><b>View → Show → As if inside</b> (<kbd>Shift</kbd>+<kbd>H</kbd>) hides those tiles, as the game shows the map while a player is inside.</li>
+    <li><b>Map → Roof hiding…</b> (or <b>Change roof hiding…</b> in the Roof hiding panel): select the inside of a building (the floor players walk on), open it, tick what should fade (roofs are ticked for you), and click <b>Add hide area</b>. DS1 Studio places the corner markers and sets <code>Pops</code>/<code>PopPad</code>. The dialog also lists and removes existing areas.</li>
     <li>The <a href="#s-check">Compatibility check</a> reports hide areas the game would ignore (<code>Pops</code> 0 or too small) and markers it would merge into one rectangle, such as the same number used for two buildings.</li>
   </ul>
 
@@ -393,7 +396,7 @@
   </div>
 
   <h2 id="s-subtiles"><span class="num">3.8</span>Walkability: sub-tile flags</h2>
-  <p><b>Painting walkability on the map (this map only).</b> Turn on <b>Walkability</b> (<kbd>W</kbd>): the side panels make way for the <b>Walkability</b> panel and the map shows every sub-tile (5×5 per cell) that blocks walking (amber) or jumping and teleporting too (red). Choose <b>Blocked</b> or <b>Walkable</b>, what it blocks or allows (walking, jumping &amp; teleport, sight &amp; light, players only) and a brush (1×1, 3×3, 5×5 sub-tiles or a whole cell), then click or drag over the map. <kbd>Shift</kbd>+drag paints a rectangle and holding <kbd>Ctrl</kbd> does the opposite. Each stroke is one undo step; <b>Done</b> brings the other panels back.</p>
+  <p><b>Painting walkability on the map (this map only).</b> Switch to <b>View → Walkability</b> (<kbd>W</kbd>): the side panels make way for the <b>Walkability</b> panel and the map shows every sub-tile (5×5 per cell) that blocks walking (amber) or jumping and teleporting too (red). Choose <b>Blocked</b> or <b>Walkable</b>, what it blocks or allows (walking, jumping &amp; teleport, sight &amp; light, players only) and a brush (1×1, 3×3, 5×5 sub-tiles or a whole cell), then click or drag over the map. <kbd>Shift</kbd>+drag paints a rectangle and holding <kbd>Ctrl</kbd> does the opposite. Each stroke is one undo step; <b>Done</b> brings the other panels back.</p>
   <p>It changes nothing for other maps. The game adds up the sub-tile flags of every tile in a cell, hidden tiles included, so blocking puts an invisible floor tile holding just those flags into a free floor layer of the cell (like Tal Rasha's tomb's own blockers), and making a sub-tile walkable that a tile blocks gives that cell its own copy of the tile without the flag (same picture and variants; a north-corner wall's other half comes along). Both go into a small tile library made for the map, <code>&lt;map&gt;_walk.dt1</code> next to it, which is added to the map's tile libraries and level type. A cell whose two floor layers both hold real tiles has no room for a blocker; the panel says which cells it skipped.</p>
   <p><b>Changing a tile everywhere.</b> To change the flags of a tile itself, for every cell and map using it, use the Cell panel:</p>
   <div class="pair">
@@ -478,11 +481,11 @@
 <!-- ============================================================ 7 IMPORT -->
 <section class="chapter" id="ch-import">
   <h1><span class="num">7</span>Importing DS1 and DT1 files <a class="top" href="#contents">↑ Contents</a></h1>
-  <p>Bring maps and tile libraries from anywhere on your computer into your mod, with the game's tables updated so they load without crashing. Both are on <b>Home → File</b>.</p>
+  <p>Bring maps and tile libraries from anywhere on your computer into your mod, with the game's tables updated so they load without crashing. Both are in <b>Home → File → Import ▾</b>.</p>
 
   <h2 id="s-import-ds1"><span class="num">7.1</span>Import DS1 (with its tile libraries)</h2>
   <ol class="steps">
-    <li><b>Import DS1…</b> and pick the <code>.ds1</code> file. It's checked first: a file the game couldn't read is refused. (A map package <code>.zip</code> from <a href="#s-package">Export map</a> can be picked here too: it opens the package import, tables included.)</li>
+    <li><b>Import ▾ → Map…</b> and pick the <code>.ds1</code> file. It's checked first: a file the game couldn't read is refused. (A map package <code>.zip</code> from <a href="#s-package">Export map</a> can be picked here too: it opens the package import, tables included.)</li>
     <li>A <code>.ds1</code> on its own brings none of its rows from the game's tables (Levels, LvlPrest, LvlTypes, CubeMain, AutoMap), so a warning says your own are used as they are: if they don't match the map and its tile libraries, the game can crash when it loads or while walking in it. Add it to the game afterwards and run the Compatibility check.</li>
     <li>Give the map a name (letters, digits, <code>-</code> and <code>_</code>). It will be saved as <code>expansion/Map/&lt;name&gt;.ds1</code>.</li>
     <li>Check <b>Tile libraries this map uses</b>: every DT1 the map names is <b>✓</b> in your game/mod, <b>＋</b> provided by a DT1 you picked, or <b>✗</b> missing.</li>
@@ -498,17 +501,17 @@
 
   <h2 id="s-import-dt1"><span class="num">7.2</span>Import DT1 (files or folders)</h2>
   <div class="pair">
-    <figure><img src="img/import-dt1-menu.png" alt="Import DT1 menu" /><figcaption>Import DT1 ▾: files or folders.</figcaption></figure>
+    <figure><img src="img/import-dt1-menu.png" alt="Import DT1 menu" /><figcaption>Import ▾: DT1 files or folders.</figcaption></figure>
     <figure><img src="img/import-dt1.png" alt="Import DT1" /><figcaption>Three DT1s ready to import into PD2assets/mytiles.</figcaption></figure>
   </div>
   <ol class="steps">
-    <li><b>Import DT1 ▾ → DT1 files…</b> (one or several) or <b>Folders…</b> (every <code>.dt1</code> inside, subfolders included).</li>
+    <li><b>Import ▾ → DT1 files…</b> (one or several) or <b>DT1 folders…</b> (every <code>.dt1</code> inside, subfolders included).</li>
     <li>Choose the folder under <code>PD2assets/</code> they go into. <i>Keep the folder structure</i> keeps the picked folders' subfolders.</li>
     <li>Check the list: each file's tile count, unreadable files (left out), files that will be replaced (the old one is kept as <code>.bak</code>). Untick any you don't want.</li>
     <li>With a map open, <b>add them to this map's tile libraries</b> puts each in a free <code>File</code> slot of the map's level type and in its <code>Dt1Mask</code>, so the game loads them. The free slots are shown; a level type has 32.</li>
   </ol>
   <h3 id="s-import-library">From the game library</h3>
-  <p><b>Import DT1 ▾ → From game library…</b> lists every tile library the game and your mods already have, by folder, with a search box (the map's own libraries first). Click one to see all its tiles, filtered by kind; rest the pointer on a tile to see it enlarged, click it for its details. The tiles are shown in the library's own act colours; <b>Colours</b> switches to the map's act, or to Act 0, which shows in magenta the colours that change between acts. <b>Choose this library</b> for each one you want, then <b>Add to the map</b>: nothing is copied (the files are already in the game), and the map's level type and <code>Dt1Mask</code> are updated as in <a href="#s-libraries">Tile libraries</a>.</p>
+  <p><b>Import ▾ → DT1s from the game library…</b> (also <b>Map → From game library…</b>) lists every tile library the game and your mods already have, by folder, with a search box (the map's own libraries first). Click one to see all its tiles, filtered by kind; rest the pointer on a tile to see it enlarged, click it for its details. The tiles are shown in the library's own act colours; <b>Colours</b> switches to the map's act, or to Act 0, which shows in magenta the colours that change between acts. <b>Choose this library</b> for each one you want, then <b>Add to the map</b>: nothing is copied (the files are already in the game), and the map's level type and <code>Dt1Mask</code> are updated as in <a href="#s-libraries">Tile libraries</a>.</p>
   <h3 id="s-custom-dt1">Building a custom DT1 from single tiles</h3>
   <p>Switch the window to <b>Build a custom DT1</b> to put together a new tile library from single tiles of any others.</p>
   <ol class="steps">
@@ -574,11 +577,11 @@
   <figure><img src="../media/ribbon-data.png" alt="Data ribbon" /><figcaption>The Data ribbon.</figcaption></figure>
 
   <h2 id="s-tables"><span class="num">9.1</span>Data tables</h2>
-  <figure class="medium"><img src="../media/data-tables.png" alt="Data tables" /><figcaption>Data → Data tables.</figcaption></figure>
+  <figure class="medium"><img src="../media/data-tables.png" alt="Data tables" /><figcaption>Game → Data tables.</figcaption></figure>
   <p>Browse and edit any <code>.txt</code> table of the game in a spreadsheet view. Column headers have a <b>?</b> explaining what the column does. The shortcuts (LvlPrest, LvlTypes, Levels, Objects, MonPreset, CubeMain) jump to the open map's row where there is one. Saving writes the table into your mod.</p>
 
   <h2 id="s-addgame"><span class="num">9.2</span>Add to game</h2>
-  <figure class="medium"><img src="img/add-to-game.png" alt="Add to game" /><figcaption>Data → Add to game.</figcaption></figure>
+  <figure class="medium"><img src="img/add-to-game.png" alt="Add to game" /><figcaption>Game → Add to game.</figcaption></figure>
   <p>Makes the game load the open map. The dialog lists every field it will write, with the old value, the new value and the reason, before you click <b>Apply</b>. There are two ways to add a map:</p>
   <ul>
     <li><b>A new level</b>, with settings (monsters, lighting, sound, tile set) copied from a level you choose. A <code>Levels.txt</code> row is added as the next record, and its <code>LvlPrest.txt</code> row points at the map.</li>
@@ -599,7 +602,7 @@
   <p>The <a href="#s-check">Compatibility check</a> checks the same rules for any map already in the game, and offers one-click fixes: rows out of order (put back in Id order; no Id changes), a preset pointing at a missing level, the level size, act, palette, an overlapping position, the file count and a copied quest requirement. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>. Set the DS1 header to Act 5 (the check offers it), so the map's object numbers are read as Act 5 objects.</p>
 
   <h2 id="s-cube"><span class="num">9.3</span>Cube recipe</h2>
-  <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Data → Cube recipe.</figcaption></figure>
+  <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Game → Cube recipe.</figcaption></figure>
   <p>Creates a new item and a Horadric Cube recipe that makes it. Pick the template item and the ingredients from lists with icons, or type your own item code (checked against the game's items). DS1 Studio takes care of the rules that otherwise crash or break the game:</p>
   <ul>
     <li><b>Placement:</b> the new item is added at the <b>end</b> of <code>Misc.txt</code>. Items are numbered by their position, so one inserted in the middle renumbers every item after it.</li>
@@ -619,7 +622,7 @@
   <p>Recipes and items DS1 Studio made are listed under <b>Made by DS1 Studio</b> in the dialog, where you can remove them. Remove an item only when no character holds it: a character with an item whose code is gone may not load.</p>
 
   <h2 id="s-check"><span class="num">9.4</span>Compatibility check</h2>
-  <figure class="medium"><img src="../media/compatibility.png" alt="Compatibility check" /><figcaption>Home → Compatibility.</figcaption></figure>
+  <figure class="medium"><img src="../media/compatibility.png" alt="Compatibility check" /><figcaption>Game → Compatibility.</figcaption></figure>
   <p>Checks the map will load and play in game: missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled <code>.bin</code> reminders. Most results offer one-click <b>fixes</b>, and <b>Show on map</b> marks the cells involved. Map edits made by fixes can be undone.</p>
   <p><b>Ways out.</b> A warp tile whose link has no level in <code>Levels.txt</code> leads nowhere; the fix opens the <a href="#ch-warps">warp link</a> editor for it. A level built from this map alone, with no working warp and no waypoint, can only be left by town portal (a player without a scroll or tome is stuck): <b>Add an exit warp…</b> opens the link editor with the act's town chosen, then gives you the warp tile to click where players should leave. Pick a <b>Kind of warp</b> that suits the map before applying. If leaving by town portal is what you want, ignore the warning.</p>
 
@@ -628,7 +631,7 @@
     <figure><img src="../media/automap.png" alt="Automap preview" /><figcaption>Automap preview (<kbd>A</kbd>).</figcaption></figure>
     <figure><img src="../media/automap-suggest.png" alt="Automap suggestions" /><figcaption>Suggested pieces previewed in cyan.</figcaption></figure>
   </div>
-  <p><b>Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined in <b>pink</b> have no <code>AutoMap.txt</code> entry, so the automap draws nothing there. <b>Map → Automap editor</b> lists every kind of tile the map uses with the automap piece it gets: select kinds (or click spots on the preview) and pick pieces, add random variants, <b>hide</b> a kind on purpose, or <b>Suggest</b> pieces from look-alike tiles. Nothing is written until <b>Save to AutoMap.txt</b>.</p>
+  <p><b>Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined in <b>pink</b> have no <code>AutoMap.txt</code> entry, so the automap draws nothing there. <b>Game → Automap editor</b> lists every kind of tile the map uses with the automap piece it gets: select kinds (or click spots on the preview) and pick pieces, add random variants, <b>hide</b> a kind on purpose, or <b>Suggest</b> pieces from look-alike tiles. Nothing is written until <b>Save to AutoMap.txt</b>.</p>
   <figure class="medium"><img src="../media/automap-editor.png" alt="Automap editor" /><figcaption>The Automap editor.</figcaption></figure>
 </section>
 
@@ -636,15 +639,15 @@
 <section class="chapter" id="ch-share">
   <h1><span class="num">10</span>Sharing and exporting <a class="top" href="#contents">↑ Contents</a></h1>
   <h2 id="s-package"><span class="num">10.1</span>Map packages</h2>
-  <figure class="medium"><img src="img/export-package.png" alt="Export package" /><figcaption>Map → Export package.</figcaption></figure>
-  <p><b>Export map</b> (Home → File, or Map → Export package) puts the DS1, its DT1s, any modded object sprites and every table row the map needs into one <code>.zip</code>: its <b>LvlPrest</b>, <b>Levels</b> and <b>LvlTypes</b> rows, the <b>CubeMain</b> recipe made for it (with its Misc.txt item), the <b>AutoMap</b> rows of its level type, and LvlWarp/LvlMaze rows. The dialog lists the five main tables with how many rows each gives, and warns about any the map has none in (not added to the game yet, no cube recipe, no automap pieces). <b>DS1 only…</b> saves just the map file.</p>
-  <p><b>Import package</b> (or Import DS1… with a <code>.zip</code>) merges such a zip into your mod safely: same-named rows are reused, clashing ids get new numbers (AutoMap rows follow a renumbered level type), DT1s go into free slots and the <code>Dt1Mask</code> is recomputed; AutoMap rows already there aren't added twice. Importing the same map twice changes nothing. The import lists which of the five tables came with the map and warns about missing ones: your own rows are used for those, and the game can crash if they don't match the map.</p>
+  <figure class="medium"><img src="img/export-package.png" alt="Export package" /><figcaption>Home → File → Export ▾ → Map package.</figcaption></figure>
+  <p><b>Export ▾ → Map package…</b> (Home → File) puts the DS1, its DT1s, any modded object sprites and every table row the map needs into one <code>.zip</code>: its <b>LvlPrest</b>, <b>Levels</b> and <b>LvlTypes</b> rows, the <b>CubeMain</b> recipe made for it (with its Misc.txt item), the <b>AutoMap</b> rows of its level type, and LvlWarp/LvlMaze rows. The dialog lists the five main tables with how many rows each gives, and warns about any the map has none in (not added to the game yet, no cube recipe, no automap pieces). <b>DS1 only…</b> saves just the map file.</p>
+  <p><b>Import ▾ → Map…</b> with a <code>.zip</code> merges such a zip into your mod safely: same-named rows are reused, clashing ids get new numbers (AutoMap rows follow a renumbered level type), DT1s go into free slots and the <code>Dt1Mask</code> is recomputed; AutoMap rows already there aren't added twice. Importing the same map twice changes nothing. The import lists which of the five tables came with the map and warns about missing ones: your own rows are used for those, and the game can crash if they don't match the map.</p>
   <p>The maker's <b>cube recipe and map item aren't copied</b>: their item code, the level number the item opens and its name only fit the maker's tables. Instead, with <b>make a cube recipe and map item for it next</b> (on by default), the imported map opens and the <a href="#s-cube">Cube recipe</a> tool starts with the maker's ingredients and item name. <b>Create</b> makes an item with a free code that opens the map's level number in <i>your</i> tables, names it and the level, and refuses a recipe your mod already uses: enter a game, cube it, and use the portal.</p>
   <h2 id="s-exportimg"><span class="num">10.2</span>Export image</h2>
-  <figure class="medium"><img src="img/export-image.png" alt="Export image" /><figcaption>Home → File → Export image.</figcaption></figure>
+  <figure class="medium"><img src="img/export-image.png" alt="Export image" /><figcaption>View → Export picture (also Home → File → Export ▾ → Picture).</figcaption></figure>
   <p>Saves the whole map or the selection as a PNG at 100%, 50%, 25% or 12.5%, with or without objects, drawn with the layers currently shown. Sizes too large for one image are greyed out.</p>
   <h3 id="s-copyview">Copy view (Print Screen)</h3>
-  <p><b>Home → File → Copy view</b>, or the <b>Print Screen</b> key, copies the map pane exactly as it is on screen (zoom, overlays, selection, minimap) as a picture: paste it anywhere with <b>Ctrl+V</b>, into a chat, a document or an image editor. Windows 11 opens its own Snipping Tool on Print Screen unless <i>Settings → Accessibility → Keyboard → Use the Print screen key to open screen capture</i> is off; either use the button, turn that off, or give Copy view another key in <a href="#s-shortcuts">Keyboard shortcuts</a>.</p>
+  <p><b>View → Copy view</b> (also Home → File → Export ▾), or the <b>Print Screen</b> key, copies the map pane exactly as it is on screen (zoom, overlays, selection, minimap) as a picture: paste it anywhere with <b>Ctrl+V</b>, into a chat, a document or an image editor. Windows 11 opens its own Snipping Tool on Print Screen unless <i>Settings → Accessibility → Keyboard → Use the Print screen key to open screen capture</i> is off; either use the button, turn that off, or give Copy view another key in <a href="#s-shortcuts">Keyboard shortcuts</a>.</p>
   <h2 id="s-exportds1"><span class="num">10.3</span>Export .ds1</h2>
   <p><b>Export map → DS1 only…</b> saves a copy of just the map file anywhere on your computer, without touching your mod. It carries no tile libraries or table rows: to hand a map to someone, export the package.</p>
 </section>
@@ -655,7 +658,7 @@
   <figure><img src="../media/help-menu.png" alt="Help ribbon" /><figcaption>The Help ribbon.</figcaption></figure>
   <h2 id="s-shortcuts"><span class="num">11.1</span>Keyboard shortcuts</h2>
   <figure class="medium"><img src="img/shortcuts.png" alt="Shortcuts" /><figcaption>Help → Shortcuts: click a key to change it.</figcaption></figure>
-  <p>Every shortcut can be changed in <b>Help → Shortcuts</b> (or <b>Home → Shortcuts</b>): click a key, then press the new key or combination. The full list is in <a href="#ap-keys">Appendix A</a>.</p>
+  <p>Every shortcut can be changed in <b>Help → Shortcuts</b>: click a key, then press the new key or combination. The full list is in <a href="#ap-keys">Appendix A</a>.</p>
   <h2 id="s-feedback"><span class="num">11.2</span>Suggest a feature, report a bug</h2>
   <figure class="small"><img src="img/topbar.png" alt="Suggest a feature" style="max-width: 100%" /><figcaption>The top bar.</figcaption></figure>
   <p><b>Suggest a feature</b> (always in the top bar, and in Help) and <b>Help → Report a bug</b> open a pre-filled GitHub issue with your version, system and the open map. Screenshots help: paste them straight into the issue.</p>
@@ -676,7 +679,7 @@
   <h2 id="s-errors"><span class="num">12.2</span>If something goes wrong</h2>
   <p>If part of the app fails, it shows what happened instead of a blank window, with <b>Try again</b>, <b>Close this map</b>, <b>Report this bug</b> (pre-filled with the error details) and <b>Reload DS1 Studio</b>. Your unsaved changes are kept in the autosave.</p>
   <h3 id="s-crashlog">When the game crashes</h3>
-  <p>Diablo II writes every crash to a log in its folder (<code>D2&lt;date&gt;.txt</code>). <b>Home → Crash log</b> reads the newest crashes from your game and mod folders and says, in plain words, what they mean and what to do: a missing loading-screen image (<code>EntryFile</code>), a level placed too far out for the automap, <code>AutoMap</code> 1 on a level that isn't a town, a damaged <code>.tbl</code>, or a tile library, map or sprite the game couldn't open just before. The same crash repeated is shown once with a count. When the latest crash is one a map can cause, <b>Run compatibility check</b> finds and fixes it. Crashes it doesn't recognise are shown with where they happened, for reporting.</p>
+  <p>Diablo II writes every crash to a log in its folder (<code>D2&lt;date&gt;.txt</code>). <b>Game → Crash log</b> reads the newest crashes from your game and mod folders and says, in plain words, what they mean and what to do: a missing loading-screen image (<code>EntryFile</code>), a level placed too far out for the automap, <code>AutoMap</code> 1 on a level that isn't a town, a damaged <code>.tbl</code>, or a tile library, map or sprite the game couldn't open just before. The same crash repeated is shown once with a count. When the latest crash is one a map can cause, <b>Run compatibility check</b> finds and fixes it. Crashes it doesn't recognise are shown with where they happened, for reporting.</p>
   <h2 id="s-bin"><span class="num">12.3</span>Compiled .bin tables</h2>
   <p>The game reads compiled <code>.bin</code> copies of the <code>.txt</code> tables. After changing tables (Add to game, warps, tile libraries, cube recipes…), start the game once with <code>-direct -txt</code> so it rebuilds them, if your mod ships <code>.bin</code> files.</p>
   <h2 id="s-faq"><span class="num">12.4</span>Common questions</h2>

@@ -68,9 +68,9 @@ downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` pac
   preset's `Dt1Mask`, and the right act palette. When two loaded DT1s have the same tile, the one listed later in
   `LvlTypes.txt` replaces it, as in the game (mods use this to swap tiles).
 - Special tiles (warps, town and map entries, corpse and portal spots) are invisible in game: DS1 Studio labels them.
-- **Roof hiding**: roofs (or any wall-layer tiles) that fade while a player is inside a building. **View → Hide
-  areas** (<kbd>H</kbd>) shows where the player must stand and which tiles fade, **As if inside** (<kbd>Shift</kbd>+<kbd>H</kbd>)
-  shows the map the way the game draws it then, and **Map → Roof hiding** makes a new area from your selection: tick
+- **Roof hiding**: roofs (or any wall-layer tiles) that fade while a player is inside a building. **View → Roof
+  hiding** (<kbd>H</kbd>) shows where the player must stand and which tiles fade, **As if inside** (<kbd>Shift</kbd>+<kbd>H</kbd>)
+  shows the map the way the game draws it then, and **Map → Roof hiding…** makes a new area from your selection: tick
   what should fade, and the corner markers and LvlPrest's Pops/PopPad are set for you. The compatibility check
   catches areas the game would ignore or merge.
   **Warps show where they lead** ("Warp · link 1 → Catacombs Level 1", from Levels.txt): select one to open the
@@ -107,7 +107,7 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
   you're offered them when you open the map again. **Recent maps** on the Home tab and the start page, with an option
   to reopen the last map on start.
 - **Export image**: the map or the selection as a PNG.
-- **Import DS1 / DT1** (Home → File): a map comes in as `expansion/Map/<name>.ds1` together with its tile
+- **Import ▾ → Map / DT1s** (Home → File): a map comes in as `expansion/Map/<name>.ds1` together with its tile
   libraries — every DT1 it names is listed as already in your game/mod, provided by a DT1 you pick (files or whole
   folders, matched by name and folder), or missing, and the import waits until they're all there (or you choose to go
   on without) — then goes straight on to *Add to game* (a level, LvlPrest row and tile libraries, pre-filled from a
@@ -183,7 +183,7 @@ tree groups.
 Toggle the in-game automap over your map (**A**) to see what players will see. Walls outlined in **pink** have no
 AutoMap.txt entry, so the automap draws nothing there.
 
-The **Automap editor** (Map → Automap editor) lists every kind of tile the map uses, grouped (floors, walls, corners,
+The **Automap editor** (Game → Automap editor) lists every kind of tile the map uses, grouped (floors, walls, corners,
 doors, columns, trees…), with the real tile image next to the automap piece it gets — or a **missing** / **hidden**
 badge. Select kinds in the list (Shift/Ctrl for several) or click spots on the live automap preview, then pick pieces
 from the gallery: set one, add up to four random variants, **hide** a kind on purpose (so it's no longer "missing"), or
@@ -232,7 +232,7 @@ again replaces the editor's earlier rows instead of piling them up.
 
 ### Share maps
 
-**Map → Export package** puts the DS1, its DT1s, any modded object sprites and every table row the map needs
+**Home → File → Export ▾ → Map package** puts the DS1, its DT1s, any modded object sprites and every table row the map needs
 (`LvlPrest`, `Levels`, `LvlTypes`, its `LvlWarp`/`LvlMaze` rows and a cube recipe made for it) into one `.zip`.
 **Import package** merges it into someone else's mod safely: same-named rows are reused, clashing ids get new numbers,
 DT1s go into free slots and `Dt1Mask` is recomputed against their tables. Importing the same map twice changes nothing.

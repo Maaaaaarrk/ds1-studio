@@ -1,9 +1,12 @@
 import {
   Box,
   Camera,
+  Sun,
+  Eye,
+  PanelLeftClose,
+  PanelLeftOpen,
   ClipboardPaste,
   Copy,
-  Download,
   Eraser,
   Expand,
   FilePlus2,
@@ -23,8 +26,6 @@ import {
   Library,
   Maximize,
   MousePointer2,
-  PackageOpen,
-  PackagePlus,
   Paintbrush,
   Pipette,
   Redo2,
@@ -67,12 +68,13 @@ import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type Laye
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
-import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
+import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
-import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
+import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
+import { LightPanel, ModeFrame, RoofPanel } from './ModePanels';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Splitter, usePersistentSize } from './Splitter';
@@ -172,7 +174,13 @@ export function App() {
   const [revision, setRevision] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
-  const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
+  const [visibility, setVisibilityRaw] = useState<Visibility>(DEFAULT_VISIBILITY);
+  /** Every visibility change keeps one view mode at a time (see ViewMode). */
+  const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
+  const viewMode = modeOf(visibility);
+  /** Switches to a view mode, or back to editing tiles when it is already on. */
+  const toggleMode = useCallback((m: ViewMode) => setVisibility((v) => withMode(v, modeOf(v) === m ? 'tiles' : m)), [setVisibility]);
+  const exitMode = useCallback(() => setVisibility((v) => withMode(v, 'tiles')), [setVisibility]);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fitSignal, setFitSignal] = useState(0);
@@ -298,6 +306,21 @@ export function App() {
   const lastTileTool = useRef<Tool>('select');
   const keys = useKeybindings();
   const [leftW, setLeftW] = usePersistentSize('left', 260, 180, 560);
+  /** The presets list folded away to a thin strip at the left edge (remembered in this browser/app). */
+  const [leftCollapsed, setLeftCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('ds1studio.leftCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('ds1studio.leftCollapsed', leftCollapsed ? '1' : '0');
+    } catch {
+      // per-viewer convenience only
+    }
+  }, [leftCollapsed]);
   const [rightW, setRightW] = usePersistentSize('right', 330, 260, 760);
 
   const bump = () => setRevision((r) => r + 1);
@@ -1194,6 +1217,24 @@ export function App() {
     [writeFiles, reloadTables, notify],
   );
 
+  /** Level light mode: writes Intensity and Red/Green/Blue into the map's Levels.txt row. */
+  const applyLevelLight = useCallback(
+    async (intensity: number, rgb: [number, number, number]) => {
+      if (!gd || !levelLight) return;
+      const t = await loadTable(gd.fs, 'Levels.txt');
+      const r = t ? rowOfRecord(t, levelLight.levelId) : -1;
+      if (!t || r < 0) return notify('Levels.txt: the level was not found', true);
+      const fix = cellFix('Levels.txt', t, 'Level light', [
+        { row: r, col: 'Intensity', value: String(intensity) },
+        { row: r, col: 'Red', value: String(rgb[0]) },
+        { row: r, col: 'Green', value: String(rgb[1]) },
+        { row: r, col: 'Blue', value: String(rgb[2]) },
+      ]);
+      await applyTableWrites(fix.writes);
+    },
+    [gd, levelLight, notify, applyTableWrites],
+  );
+
   /** DT1s the placed tiles come from, with counts (for the DT1 manager and checks). */
   const dt1Usage = useMemo(() => {
     const usage = new Map<string, number>();
@@ -1940,10 +1981,6 @@ export function App() {
     [gd, map, doc, notify],
   );
 
-  const startImport = useCallback(async () => {
-    const bytes = await importBytes('zip');
-    if (bytes) await openPackage(bytes);
-  }, [openPackage]);
   /** Export map: the package dialog, with the map's table rows read for it. */
   const openExport = useCallback(() => {
     if (!gd || !doc) return;
@@ -2069,6 +2106,7 @@ export function App() {
       'view.minimap': vis((v) => ({ ...v, minimap: !v.minimap })),
       'view.snapshot': () => void copyView(),
       'view.pops': vis((v) => ({ ...v, pops: !v.pops })),
+      'view.light': vis((v) => ({ ...v, light: !v.light })),
       'view.popsInside': vis((v) => ({ ...v, popsInside: !v.popsInside })),
       'tool.erase': () => setTool('erase'),
       'tool.pick': () => setTool('pick'),
@@ -2206,28 +2244,6 @@ export function App() {
           items: [
             { label: 'Save', icon: <Save />, onClick: () => void save(), disabled: noMap, active: !!doc?.dirty, shortcut: kb['file.save'], title: data.saveTarget ? `Save into ${data.saveTarget.label}` : 'Save (downloads: no mod folder)' },
             { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
-            { label: 'Export map…', icon: <FileOutput />, onClick: openExport, disabled: noMap, size: 'sm', title: 'A package (.zip) with the map, its tile libraries and its Levels / LvlPrest / LvlTypes / CubeMain / AutoMap rows (or the .ds1 on its own)' },
-            { label: 'Export image', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the map (or the selection) as a PNG picture' },
-            { label: 'Copy view', icon: <Camera />, onClick: () => void copyView(), disabled: noMap, size: 'sm', shortcut: kb['view.snapshot'], title: 'Copy the map view exactly as shown, as a picture: paste it anywhere with Ctrl+V' },
-            { label: 'Import DS1…', icon: <FileInput />, onClick: () => void pickImport('ds1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a map into your mod: a map package (.zip, with its tables) or a .ds1 on its own (then add it to the game)' : 'No writable mod folder' },
-            {
-              label: 'Import DT1',
-              icon: <Grid2x2Plus />,
-              onClick: () => undefined,
-              disabled: !canWrite,
-              size: 'sm',
-              title: canWrite ? 'Bring tile libraries (.dt1) into your mod under PD2assets/<folder>, and add them to the open map' : 'No writable mod folder',
-              menu: [
-                { label: 'DT1 files…', hint: 'one or several', onClick: () => void pickImport('dt1', 'files') },
-                { label: 'Folders…', hint: 'with their subfolders', onClick: () => void pickImport('dt1', 'folders') },
-                {
-                  label: 'From game library…',
-                  hint: 'browse the game and mod DT1s',
-                  title: 'Look through every tile library the game and your mods have, by folder, and add the ones you choose to the open map',
-                  onClick: () => (noMap ? notify('Open a map first: the libraries are added to it.', true) : setDialog('dt1lib')),
-                },
-              ],
-            },
             {
               label: 'Recent',
               icon: <Clock />,
@@ -2246,7 +2262,34 @@ export function App() {
                 },
               ],
             },
-            ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const }] : []),
+            {
+              label: 'Import',
+              icon: <FileInput />,
+              onClick: () => undefined,
+              disabled: !canWrite,
+              size: 'sm',
+              title: canWrite ? 'Bring maps and tile libraries into your mod' : 'No writable mod folder',
+              menu: [
+                { label: 'Map…', hint: '.ds1, or a map package (.zip)', title: 'A map package brings its tables too; a .ds1 on its own then needs Add to game', onClick: () => void pickImport('ds1') },
+                { label: 'DT1 files…', hint: 'one or several', title: 'Into PD2assets/<folder>, and added to the open map', onClick: () => void pickImport('dt1', 'files') },
+                { label: 'DT1 folders…', hint: 'with their subfolders', onClick: () => void pickImport('dt1', 'folders') },
+                { label: 'DT1s from the game library…', hint: 'browse, or build a custom DT1', onClick: () => (noMap ? notify('Open a map first: the libraries are added to it.', true) : setDialog('dt1lib')) },
+              ],
+            },
+            {
+              label: 'Export',
+              icon: <FileOutput />,
+              onClick: () => undefined,
+              disabled: noMap,
+              size: 'sm',
+              title: 'Share the map',
+              menu: [
+                { label: 'Map package…', hint: 'map, tile libraries and table rows (.zip), or the .ds1 alone', onClick: openExport },
+                { label: 'Picture…', hint: 'the whole map or the selection (.png)', onClick: () => setDialog('image') },
+                { label: 'Copy view', hint: `the map pane as a picture${kb['view.snapshot'] ? ` (${kb['view.snapshot']})` : ''}`, onClick: () => void copyView() },
+              ],
+            },
+            ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const, title: 'The game and mod folders DS1 Studio works with' }] : []),
           ],
         },
         {
@@ -2292,34 +2335,67 @@ export function App() {
             },
           ],
         },
+      ],
+    },
+    {
+      id: 'view',
+      label: 'View',
+      groups: [
         {
-          label: 'View',
+          label: 'Navigate',
           items: [
             { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: kb['view.fit'] },
             { label: 'Game view', icon: <ScanEye />, onClick: toggleGameView, active: gameView.on, disabled: noMap, shortcut: kb['view.game'], title: `Zoom to what the character sees in game (${gameSize[0]}×${gameSize[1]}, centred on the selection)` },
-            {
-              custom: (
-                <GameSizePicker size={gameSize} onChange={setGameSize} />
-              ),
-            },
-            { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, size: 'sm', shortcut: kb['view.grid'] },
-            { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
-            { label: 'Walkability', icon: <Footprints />, onClick: () => setVisibility((v) => ({ ...v, walkable: !v.walkable })), active: visibility.walkable, size: 'sm', shortcut: kb['view.walkable'] },
-            { label: 'Automap', icon: <MapIcon />, onClick: () => setVisibility((v) => ({ ...v, automap: !v.automap })), active: visibility.automap, size: 'sm', shortcut: kb['view.automap'], title: 'Preview the in-game automap and see/change the AutoMap.txt piece of each tile' },
-            { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, size: 'sm', shortcut: kb['view.sprites'] },
-            { label: 'Minimap', icon: <MapPinned />, onClick: () => setVisibility((v) => ({ ...v, minimap: !v.minimap })), active: visibility.minimap, size: 'sm', shortcut: kb['view.minimap'], title: 'Overview of the whole map in the corner: click it to move there' },
-            { label: 'Hide areas', icon: <House />, onClick: () => setVisibility((v) => ({ ...v, pops: !v.pops })), active: visibility.pops, size: 'sm', shortcut: kb['view.pops'], title: 'Show where roofs (or other tiles) fade when a player walks in, and which tiles fade' },
-            { label: 'As if inside', icon: <EyeOff />, onClick: () => setVisibility((v) => ({ ...v, popsInside: !v.popsInside })), active: visibility.popsInside, size: 'sm', shortcut: kb['view.popsInside'], title: 'Hide the tiles of every hide area, as the game does while a player is inside' },
+            { custom: <GameSizePicker size={gameSize} onChange={setGameSize} /> },
           ],
         },
         {
-          label: 'Check',
+          label: 'Mode',
           items: [
-            { label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' },
-            { label: 'Crash log', icon: <FileWarning />, onClick: openCrashLog, title: "Read the game's crash log and see what the latest crash means for your map" },
+            { label: 'Tiles', icon: <Paintbrush />, onClick: exitMode, active: viewMode === 'tiles', disabled: noMap, title: 'Edit tiles and objects: the Tiles, Cell, History, Layers and Map panels' },
+            { label: 'Walkability', icon: <Footprints />, onClick: () => toggleMode('walk'), active: viewMode === 'walk', disabled: noMap, shortcut: kb['view.walkable'], title: 'See and paint where units can walk, sub-tile by sub-tile' },
+            { label: 'Automap', icon: <MapIcon />, onClick: () => toggleMode('automap'), active: viewMode === 'automap', disabled: noMap, shortcut: kb['view.automap'], title: 'Preview the in-game automap and see/change the AutoMap.txt piece of each tile' },
+            { label: 'Level light', icon: <Sun />, onClick: () => toggleMode('light'), active: viewMode === 'light', disabled: noMap, shortcut: kb['view.light'], title: "The map in its level's light (Levels.txt Intensity and colour), with a player's light at the mouse; change and apply it" },
+            { label: 'Roof hiding', icon: <House />, onClick: () => toggleMode('roofs'), active: viewMode === 'roofs', disabled: noMap, shortcut: kb['view.pops'], title: 'Where roofs (or other tiles) fade when a player walks in, which tiles fade, and what would stop it' },
           ],
         },
-        { label: 'Settings', items: [{ label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' }] },
+        {
+          label: 'Show',
+          items: [
+            { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, disabled: noMap, size: 'sm', shortcut: kb['view.grid'] },
+            { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, disabled: noMap, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
+            { label: 'Minimap', icon: <MapPinned />, onClick: () => setVisibility((v) => ({ ...v, minimap: !v.minimap })), active: visibility.minimap, disabled: noMap, size: 'sm', shortcut: kb['view.minimap'], title: 'Overview of the whole map in the corner: click it to move there' },
+            { label: 'Sprites', icon: <Box />, onClick: () => setVisibility((v) => ({ ...v, sprites: !v.sprites })), active: visibility.sprites, disabled: noMap, size: 'sm', shortcut: kb['view.sprites'], title: 'Draw objects and NPCs as they look in game' },
+            { label: 'Markers', icon: <Eye />, onClick: () => setVisibility((v) => ({ ...v, objects: !v.objects })), active: visibility.objects, disabled: noMap, size: 'sm', shortcut: kb['view.markers'], title: 'Object and NPC markers' },
+            { label: 'As if inside', icon: <EyeOff />, onClick: () => setVisibility((v) => ({ ...v, popsInside: !v.popsInside })), active: visibility.popsInside, disabled: noMap, size: 'sm', shortcut: kb['view.popsInside'], title: 'Hide the roofs of every hide area, as the game does while a player is inside: clicks then reach the floors under them' },
+          ],
+        },
+        {
+          label: 'Colours',
+          items: [
+            {
+              custom: (
+                <>
+                  <span className="muted small">Palette</span>
+                  <select value={map?.paletteAct ?? 0} disabled={noMap} onChange={(e) => map && void withPalette(data.gd, map, Number(e.target.value)).then(setMap)}>
+                    {PALETTE_NAMES.map((n, i) => (
+                      <option key={i} value={i}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ),
+            },
+          ],
+        },
+        {
+          label: 'Picture',
+          items: [
+            { label: 'Copy view', icon: <Camera />, onClick: () => void copyView(), disabled: noMap, shortcut: kb['view.snapshot'], title: 'Copy the map pane exactly as shown, as a picture: paste it anywhere with Ctrl+V' },
+            { label: 'Export picture…', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the whole map (or the selection) as a PNG' },
+          ],
+        },
       ],
     },
     {
@@ -2335,59 +2411,44 @@ export function App() {
           ],
         },
         {
-          label: 'Palette',
-          items: [
-            {
-              custom: (
-                <>
-                  <span className="muted small">Colours</span>
-                  <select value={map?.paletteAct ?? 0} disabled={noMap} onChange={(e) => map && void withPalette(data.gd, map, Number(e.target.value)).then(setMap)}>
-                    {PALETTE_NAMES.map((n, i) => (
-                      <option key={i} value={i}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              ),
-            },
-          ],
-        },
-        {
-          label: 'Tiles',
+          label: 'Tile libraries',
           items: [
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
-            { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
-            { label: 'Roof hiding', icon: <House />, onClick: () => setDialog('pops'), disabled: noMap, title: 'Make roofs (or other tiles) disappear when a player walks into a building' },
-            { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
-            { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
+            { label: 'From game library…', icon: <Grid2x2Plus />, onClick: () => setDialog('dt1lib'), disabled: noMap, size: 'sm', title: 'Browse every tile library the game and your mods have; add whole libraries or build a custom DT1 from single tiles' },
+            { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, size: 'sm', title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+            { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, size: 'sm', title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
           ],
         },
         {
           label: 'Presets',
           items: [
-            { label: 'Presets', icon: <Stamp />, onClick: () => setSidePanel((p) => (p === 'presets' ? 'tiles' : 'presets')), active: sidePanel === 'presets', disabled: noMap },
+            { label: 'Presets', icon: <Stamp />, onClick: () => { exitMode(); setSidePanel((p) => (p === 'presets' && viewMode === 'tiles' ? 'tiles' : 'presets')); }, active: sidePanel === 'presets' && viewMode === 'tiles', disabled: noMap },
             { label: 'Save selection', icon: <Save />, onClick: () => void saveSelectionPreset(), disabled: !selection || !canWrite, size: 'sm' },
-            { label: 'Suggest', icon: <Sparkles />, onClick: () => { setSidePanel('presets'); void suggest(); }, disabled: noMap || !!suggesting, size: 'sm' },
+            { label: 'Suggest', icon: <Sparkles />, onClick: () => { exitMode(); setSidePanel('presets'); void suggest(); }, disabled: noMap || !!suggesting, size: 'sm' },
           ],
         },
         {
-          label: 'Share',
-          items: [
-            { label: 'Export package', icon: <PackagePlus />, onClick: openExport, disabled: noMap, title: 'Zip the map with everything it needs' },
-            { label: 'Import package', icon: <PackageOpen />, onClick: () => void startImport(), disabled: !canWrite, title: canWrite ? 'Import a map package into your mod' : 'No writable mod folder' },
-          ],
+          label: 'Buildings',
+          items: [{ label: 'Roof hiding…', icon: <House />, onClick: () => setDialog('pops'), disabled: noMap, title: 'Make roofs (or other tiles) disappear when a player walks into a building' }],
         },
       ],
     },
     {
-      id: 'data',
-      label: 'Data',
+      id: 'game',
+      label: 'Game',
       groups: [
+        {
+          label: 'Level',
+          items: [
+            { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
+            { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
+            { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
+          ],
+        },
         {
           label: 'Tables',
           items: [
-            { label: 'Data tables', icon: <Table2 />, onClick: () => openTable('LvlPrest'), title: 'Edit the game\u2019s .txt tables' },
+            { label: 'Data tables', icon: <Table2 />, onClick: () => openTable('LvlPrest'), title: 'Edit the game’s .txt tables' },
             { label: 'LvlPrest', icon: <Table2 />, onClick: () => openTable('LvlPrest', map?.resolution.preset?.name), size: 'sm' },
             { label: 'LvlTypes', icon: <Table2 />, onClick: () => openTable('LvlTypes', map?.resolution.lvlType?.name), size: 'sm' },
             { label: 'Levels', icon: <Table2 />, onClick: () => openTable('Levels'), size: 'sm' },
@@ -2397,20 +2458,12 @@ export function App() {
           ],
         },
         {
-          label: 'Game',
-          items: [
-            { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
-            { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
-          ],
-        },
-        {
           label: 'Check',
           items: [
-            { label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap },
-            { label: 'Crash log', icon: <FileWarning />, onClick: openCrashLog },
+            { label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' },
+            { label: 'Crash log', icon: <FileWarning />, onClick: openCrashLog, title: "Read the game's crash log and see what the latest crash means for your map" },
           ],
         },
-        { label: 'Share', items: [{ label: 'Export map', icon: <Download />, onClick: openExport, disabled: noMap }] },
       ],
     },
     {
@@ -2427,10 +2480,10 @@ export function App() {
         {
           label: 'Support',
           items: [
-            { label: 'Suggest a feature', icon: <Lightbulb />, onClick: () => void openExternal(featureRequestUrl({ map: map?.path })), title: 'Open a pre-filled feature request on GitHub' },
-            { label: 'Report a bug', icon: <Bug />, onClick: () => void openExternal(bugReportUrl({ map: map?.path })), title: 'Open a pre-filled bug report on GitHub' },
             { label: 'User guide', icon: <BookOpen />, onClick: () => void openExternal(`${REPO_URL}#readme`), title: 'Features, shortcuts and how-tos' },
             { label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' },
+            { label: 'Suggest a feature', icon: <Lightbulb />, onClick: () => void openExternal(featureRequestUrl({ map: map?.path })), size: 'sm', title: 'Open a pre-filled feature request on GitHub' },
+            { label: 'Report a bug', icon: <Bug />, onClick: () => void openExternal(bugReportUrl({ map: map?.path })), size: 'sm', title: 'Open a pre-filled bug report on GitHub' },
           ],
         },
       ],
@@ -2438,7 +2491,7 @@ export function App() {
   ];
 
   return (
-    <div className="app" style={{ gridTemplateColumns: `${leftW}px 1fr ${rightW}px` }}>
+    <div className="app" style={{ gridTemplateColumns: `${leftCollapsed ? 30 : leftW}px 1fr ${rightW}px` }}>
       <Ribbon
         tabs={ribbonTabs}
         brand={
@@ -2466,9 +2519,26 @@ export function App() {
         }
       />
 
-      <Splitter axis="x" direction={1} size={leftW} onResize={setLeftW} className="edge-right" title="Drag to widen or narrow the presets list" />
-      <aside className="sidebar left">
-        <FileBrowser files={data.files} current={map?.path ?? null} loading={loadingPath} onOpen={open} />
+      {!leftCollapsed && <Splitter axis="x" direction={1} size={leftW} onResize={setLeftW} className="edge-right" title="Drag to widen or narrow the presets list" />}
+      <aside className={`sidebar left${leftCollapsed ? ' collapsed' : ''}`}>
+        {leftCollapsed ? (
+          <button className="sidebar-expand" onClick={() => setLeftCollapsed(false)} title="Show the presets list">
+            <PanelLeftOpen size={16} />
+            <span className="sidebar-expand-label">Presets</span>
+          </button>
+        ) : (
+          <FileBrowser
+            files={data.files}
+            current={map?.path ?? null}
+            loading={loadingPath}
+            onOpen={open}
+            collapse={
+              <button className="icon-btn" title="Fold the presets list away (more room for the map)" onClick={() => setLeftCollapsed(true)}>
+                <PanelLeftClose size={15} />
+              </button>
+            }
+          />
+        )}
       </aside>
 
       <main className="stage">
@@ -2570,18 +2640,78 @@ export function App() {
       <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />
       <aside className="sidebar right">
         <ErrorBoundary what="the side panel" resetKey={`${map?.path}:${tool}`} context={() => ({ map: map?.path })} compact>
-        {map && scene && doc && visibility.walkable && (
-          <WalkPanel
-            brush={walkBrush}
-            onChange={setWalkBrush}
-            busy={walkBusy}
-            canWrite={canWrite}
-            libraryPath={walkDt1Path(map.path).replace(/^data\/global\/tiles\//i, '')}
-            last={walkLast}
-            onDone={() => setVisibility((v) => ({ ...v, walkable: false }))}
-          />
+        {map && scene && doc && viewMode !== 'tiles' && (
+          <ModeFrame mode={viewMode} onDone={exitMode}>
+            {viewMode === 'walk' && (
+              <WalkPanel
+                brush={walkBrush}
+                onChange={setWalkBrush}
+                busy={walkBusy}
+                canWrite={canWrite}
+                libraryPath={walkDt1Path(map.path).replace(/^data\/global\/tiles\//i, '')}
+                last={walkLast}
+                onDone={exitMode}
+              />
+            )}
+            {viewMode === 'automap' &&
+              (automapData ? (
+                <AutomapPanel
+                  onOpenEditor={openAutomapEditor}
+                  table={automapData.table}
+                  cels={automapData.cels}
+                  palette={map.palette}
+                  level={automapLevel}
+                  onLevel={(level) => setAutomapLevelOverride({ path: map.path, level })}
+                  pieces={automapPiecesNow ?? []}
+                  cell={selection && isSingleCell(selection) ? { x: selection.x0, y: selection.y0 } : null}
+                  canSave={canWrite}
+                  onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
+                  suggestions={automapSuggestions}
+                  onSuggest={(floors) => {
+                    if (!automapLevel) return;
+                    notify('Analysing tiles for automap suggestions…');
+                    void makeAutomapColors().then((colors) => setAutomapSuggestions(suggestAutomap(automapData.table, automapLevel, automapPiecesNow ?? [], { floors, colors })));
+                  }}
+                  onSuggestionCel={(code, cel) => setAutomapSuggestions((list) => list && list.map((sg) => (sg.code === code ? { ...sg, cel } : sg)))}
+                  onSkipCode={(code) => setAutomapSuggestions((list) => list && list.filter((sg) => sg.code !== code))}
+                  onApplySuggestions={() => void applyAutomapSuggestionsNow()}
+                  onCancelSuggestions={() => setAutomapSuggestions(null)}
+                  levelLabel={(l) => {
+                    const t = /^\d+$/.test(l.trim()) ? data.gd.lvlType(Number(l)) : null;
+                    return t && t.name !== l.trim() ? `${l} · ${t.name}` : l;
+                  }}
+                />
+              ) : (
+                <p className="muted small panel-body">Reading AutoMap.txt…</p>
+              ))}
+            {viewMode === 'light' && (
+              <LightPanel
+                light={levelLight}
+                canWrite={canWrite}
+                playerLight={playerLight}
+                onPlayerLight={setPlayerLight}
+                onDraft={setLightDraft}
+                onApply={applyLevelLight}
+                onAddToGame={() => setDialog('register')}
+              />
+            )}
+            {viewMode === 'roofs' && (
+              <RoofPanel
+                ds1={map.ds1}
+                areas={popAreas}
+                preset={popPreset ? { pops: popPreset.pops, popPad: popPreset.popPad } : null}
+                inside={visibility.popsInside}
+                onInside={(on) => setVisibility((v) => ({ ...v, popsInside: on }))}
+                onShowCells={(cells) => {
+                  setMarks(cells);
+                  notify(`${cells.length} markers marked · Esc to clear`);
+                }}
+                onSetUp={() => setDialog('pops')}
+              />
+            )}
+          </ModeFrame>
         )}
-        {map && scene && doc && !visibility.walkable && (
+        {map && scene && doc && viewMode === 'tiles' && (
           <>
             {tool === 'object' && (
               <section className="panel object-preview-panel">
@@ -2715,34 +2845,6 @@ export function App() {
                 }}
               />
             )}
-            {visibility.automap && automapData && (
-              <AutomapPanel
-                onOpenEditor={openAutomapEditor}
-                table={automapData.table}
-                cels={automapData.cels}
-                palette={map.palette}
-                level={automapLevel}
-                onLevel={(level) => setAutomapLevelOverride({ path: map.path, level })}
-                pieces={automapPiecesNow ?? []}
-                cell={selection && isSingleCell(selection) ? { x: selection.x0, y: selection.y0 } : null}
-                canSave={canWrite}
-                onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
-                suggestions={automapSuggestions}
-                onSuggest={(floors) => {
-                  if (!automapLevel) return;
-                  notify('Analysing tiles for automap suggestions…');
-                  void makeAutomapColors().then((colors) => setAutomapSuggestions(suggestAutomap(automapData.table, automapLevel, automapPiecesNow ?? [], { floors, colors })));
-                }}
-                onSuggestionCel={(code, cel) => setAutomapSuggestions((list) => list && list.map((sg) => (sg.code === code ? { ...sg, cel } : sg)))}
-                onSkipCode={(code) => setAutomapSuggestions((list) => list && list.filter((sg) => sg.code !== code))}
-                onApplySuggestions={() => void applyAutomapSuggestionsNow()}
-                onCancelSuggestions={() => setAutomapSuggestions(null)}
-                levelLabel={(l) => {
-                  const t = /^\d+$/.test(l.trim()) ? data.gd.lvlType(Number(l)) : null;
-                  return t && t.name !== l.trim() ? `${l} · ${t.name}` : l;
-                }}
-              />
-            )}
             <CellPanel
               map={map}
               doc={doc}
@@ -2783,29 +2885,6 @@ export function App() {
               gd={data.gd}
               onReopen={reresolve}
               onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)}
-              light={
-                levelLight && {
-                  value: levelLight,
-                  shown: visibility.light,
-                  canWrite,
-                  onShow: (on) => setVisibility((v) => ({ ...v, light: on })),
-                  onDraft: setLightDraft,
-                  playerLight,
-                  onPlayerLight: setPlayerLight,
-                  onApply: async (intensity, rgb) => {
-                    const t = await loadTable(data.gd.fs, 'Levels.txt');
-                    const r = t ? rowOfRecord(t, levelLight.levelId) : -1;
-                    if (!t || r < 0) return notify('Levels.txt: the level was not found', true);
-                    const fix = cellFix('Levels.txt', t, 'Level light', [
-                      { row: r, col: 'Intensity', value: String(intensity) },
-                      { row: r, col: 'Red', value: String(rgb[0]) },
-                      { row: r, col: 'Green', value: String(rgb[1]) },
-                      { row: r, col: 'Blue', value: String(rgb[2]) },
-                    ]);
-                    await applyTableWrites(fix.writes);
-                  },
-                }
-              }
             />
           </>
         )}

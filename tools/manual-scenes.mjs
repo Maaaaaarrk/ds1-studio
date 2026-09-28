@@ -34,6 +34,11 @@ export function makeScenes(h) {
     const r = await js(`const b = [...document.querySelectorAll('.rb-btn')].find((b) => ${re}.test(b.innerText)); const q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 };`);
     await click(r.x, r.y);
   };
+  /** Clicks an item of the open ribbon menu. */
+  const menuItem = async (re) => {
+    const r = await js(`const b = [...document.querySelectorAll('.rb-menu-item')].find((b) => ${re}.test(b.innerText)); const q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 };`);
+    await click(r.x, r.y);
+  };
 
   return {
     async window() {
@@ -41,6 +46,23 @@ export function makeScenes(h) {
       await shot('window');
       await shot('topbar', { x: 0, y: 0, width: W, height: 34 });
       await shot('ribbon-home-full', { x: 0, y: 0, width: W, height: 124 });
+      await ribbonTab('View');
+      await sleep(300);
+      await shot('ribbon-view', { x: 0, y: 0, width: W, height: 124 });
+      await ribbonTab('Home');
+    },
+
+    async modes() {
+      // A level with a light of its own (the Worldstone Chamber, Intensity 40), in the Level light mode.
+      await openMap('expansion/baallair', 'wstone01.ds1');
+      await press('f');
+      await sleep(1500);
+      await ribbonTab('View');
+      await button('Level light');
+      await sleep(1500);
+      await shot('mode-light');
+      await button('Done');
+      await ribbonTab('Home');
     },
 
     async panels() {
@@ -152,9 +174,9 @@ export function makeScenes(h) {
       await sleep(400);
       await shot('recent-menu', { x: 0, y: 0, width: 620, height: 230 });
       await press('Escape');
-      await ribbonButton('/Import DT1/');
+      await ribbonButton('/^Import/');
       await sleep(400);
-      await shot('import-dt1-menu', { x: 0, y: 0, width: 620, height: 170 });
+      await shot('import-dt1-menu', { x: 0, y: 0, width: 620, height: 200 });
       await press('Escape');
     },
 
@@ -179,7 +201,11 @@ export function makeScenes(h) {
       await town();
       await js(`window.confirm = () => true;`);
       await ribbonTab('Home');
-      await chooseFile(`${INPUTS}/My_Town.ds1`, () => ribbonButton('/Import DS1/'));
+      await chooseFile(`${INPUTS}/My_Town.ds1`, async () => {
+        await ribbonButton('/^Import/');
+        await sleep(300);
+        await menuItem('/^Map/');
+      });
       await sleep(1200);
       await shot('import-ds1-before', await dialog());
       await chooseFile([`${INPUTS}/mytown_tiles/mytown/floor.dt1`, `${INPUTS}/mytown_tiles/mytown/fence.dt1`, `${INPUTS}/mytown_tiles/mytown/trees.dt1`], async () => {
@@ -194,7 +220,7 @@ export function makeScenes(h) {
     async importDt1() {
       await town();
       await ribbonTab('Home');
-      await ribbonButton('/Import DT1/');
+      await ribbonButton('/^Import/');
       await sleep(300);
       await chooseFile([`${INPUTS}/treegroups.dt1`, `${INPUTS}/stonewall.dt1`, `${INPUTS}/mytown_tiles/mytown/floor.dt1`], async () => {
         const r = await js(`const b = [...document.querySelectorAll('.rb-menu-item')].find((b) => /DT1 files/.test(b.innerText)); const q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 };`);
@@ -209,12 +235,12 @@ export function makeScenes(h) {
 
     async dialogs() {
       await town();
-      await ribbonTab('Home');
-      await ribbonButton('/Export image/');
+      await ribbonTab('View');
+      await ribbonButton('/Export picture/');
       await sleep(600);
       await shot('export-image', await dialog());
       await press('Escape');
-      await ribbonTab('Data');
+      await ribbonTab('Game');
       await button('Add to game');
       await sleep(1500);
       await js(`const s = [...document.querySelectorAll('[role=dialog] select')][0]; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, '1'); s.dispatchEvent(new Event('change', { bubbles: true }));`);
@@ -226,11 +252,14 @@ export function makeScenes(h) {
       await sleep(800);
       await shot('new-map', await dialog());
       await press('Escape');
-      await button('Export package');
+      await ribbonTab('Home');
+      await ribbonButton('/^Export/');
+      await sleep(300);
+      await menuItem('/Map package/');
       await sleep(800);
       await shot('export-package', await dialog());
       await press('Escape');
-      await ribbonTab('Home');
+      await ribbonTab('Help');
       await button('Shortcuts');
       await sleep(600);
       await shot('shortcuts', await dialog());

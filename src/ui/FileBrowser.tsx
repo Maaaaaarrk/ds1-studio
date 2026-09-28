@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 interface Props {
+  /** A button that folds the list away, shown first in its header. */
+  collapse?: ReactNode;
   files: string[]; // original-case paths under data/global/tiles/
   current: string | null;
   loading: string | null;
@@ -16,7 +18,7 @@ const dirOf = (f: string) => {
 };
 
 /** Folder-grouped, filterable list of every DS1 known to the file system. Folders start collapsed. */
-export function FileBrowser({ files, current, loading, onOpen }: Props) {
+export function FileBrowser({ files, current, loading, onOpen, collapse }: Props) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
@@ -52,7 +54,10 @@ export function FileBrowser({ files, current, loading, onOpen }: Props) {
   return (
     <div className="browser">
       <div className="panel-header static">
-        <span>Presets</span>
+        <span className="browser-title">
+          {collapse}
+          Presets
+        </span>
         <span className="browser-tools">
           <span className="muted small">{files.length.toLocaleString()}</span>
           <button
