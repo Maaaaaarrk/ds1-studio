@@ -204,20 +204,22 @@ interface WarpProps {
   levelId: number;
   vis: number;
   busy: boolean;
+  /** Level to preselect for a new link (an exit usually leads to the act's town); the way back is then off. */
+  initialTarget?: number;
   onApply: (write: TableWrite) => void;
   onClose: () => void;
 }
 
 /** Sets where link `vis` of a level leads (Levels.txt VisN / WarpN), optionally with the way back. */
-export function WarpLinkDialog({ tables, levelId, vis, busy, onApply, onClose }: WarpProps) {
+export function WarpLinkDialog({ tables, levelId, vis, busy, initialTarget, onApply, onClose }: WarpProps) {
   const current = useMemo(() => levelLinks(tables, levelId), [tables, levelId]);
   const link = current?.links[vis] ?? null;
   const levels = useMemo(() => allLevels(tables), [tables]);
   const warps = useMemo(() => allWarps(tables), [tables]);
-  const [target, setTarget] = useState(link?.target.id ?? 0);
+  const [target, setTarget] = useState(link?.target.id ?? initialTarget ?? 0);
   const [warp, setWarp] = useState(link?.warp?.id ?? warps[0]?.id ?? 0);
   const [query, setQuery] = useState('');
-  const [back, setBack] = useState(!link);
+  const [back, setBack] = useState(!link && !initialTarget);
   const [backWarp, setBackWarp] = useState(link?.warp?.id ?? warps[0]?.id ?? 0);
   const q = query.trim().toLowerCase();
   const shown = levels.filter((l) => !q || l.name.toLowerCase().includes(q) || String(l.id) === q);

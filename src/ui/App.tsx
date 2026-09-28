@@ -224,6 +224,8 @@ export function App() {
   /** Levels / LvlWarp / LvlPrest, for showing and changing where warps lead. */
   const [warpTables, setWarpTables] = useState<WarpTables | null>(null);
   const [warpEdit, setWarpEdit] = useState<number | null>(null);
+  /** How the link editor opens from a compatibility fix: the suggested target, and whether to place the warp tile after. */
+  const [warpInit, setWarpInit] = useState<{ target: number; place: boolean } | null>(null);
   const [warpBusy, setWarpBusy] = useState(false);
   /** A DT1 or DS1 picked for importing (with what it contains, or why it can't be used). */
   const [importing, setImporting] = useState<
@@ -1401,6 +1403,18 @@ export function App() {
     }
   }, [gd, writeFiles, reloadTables, notify]);
 
+  /** Arms the brush with the warp tile of link `vis`, on the first wall layer, to click where players leave. */
+  const armWarpTile = useCallback(
+    (vis: number) => {
+      setBrush({ orientation: Orientation.SpecialTile1, main: vis, sub: 0 });
+      setMix([]);
+      setTool('paint');
+      setActiveLayer((l) => (l.kind === 'wall' ? l : { kind: 'wall', index: 0 }));
+      notify(`Click the map where players should leave (warp tile for link ${vis}) · Esc to stop`);
+    },
+    [notify],
+  );
+
   /** Saves a warp link change (Levels.txt) and reloads the tables so labels and panels show it. */
   const applyWarpLink = useCallback(
     async (write: TableWrite) => {
@@ -1408,15 +1422,18 @@ export function App() {
       try {
         await writeFiles([write]);
         await reloadTables();
+        const vis = warpEdit;
         setWarpEdit(null);
         notify(`Levels.txt: ${write.summary.join('; ')}`);
+        if (warpInit?.place && vis !== null) armWarpTile(vis);
+        setWarpInit(null);
       } catch (e) {
         notify(`Couldn't save Levels.txt: ${(e as Error).message}`, true);
       } finally {
         setWarpBusy(false);
       }
     },
-    [writeFiles, reloadTables, notify],
+    [writeFiles, reloadTables, notify, warpEdit, warpInit, armWarpTile],
   );
 
   /** What a DT1 contains (for the import list), or why it can't be used. */
@@ -1703,6 +1720,11 @@ export function App() {
             return setDialog('register');
           case 'automap-editor':
             return setDialog('automap');
+          case 'warp-link':
+            setDialog(null);
+            if (!fix.edit) return armWarpTile(fix.vis);
+            setWarpInit({ target: fix.toTown ?? 0, place: fix.place });
+            return setWarpEdit(fix.vis);
           case 'keep': {
             // "Keep it as it is": remembered for this map, so the check doesn't ask again.
             const kept = keptAnswers();
@@ -2678,7 +2700,18 @@ export function App() {
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
       {dialog === 'about' && <AboutDialog onClose={() => setDialog(null)} />}
       {warpEdit !== null && warpTables && mapLevelId > 0 && (
-        <WarpLinkDialog tables={warpTables} levelId={mapLevelId} vis={warpEdit} busy={warpBusy} onApply={(w) => void applyWarpLink(w)} onClose={() => setWarpEdit(null)} />
+        <WarpLinkDialog
+          tables={warpTables}
+          levelId={mapLevelId}
+          vis={warpEdit}
+          busy={warpBusy}
+          initialTarget={warpInit?.target}
+          onApply={(w) => void applyWarpLink(w)}
+          onClose={() => {
+            setWarpEdit(null);
+            setWarpInit(null);
+          }}
+        />
       )}
       {importing?.kind === 'dt1' && (
         <ImportDt1Dialog

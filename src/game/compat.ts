@@ -9,6 +9,7 @@ import { isBuiltinPath } from './specialTiles';
 import { clashingDt1s, duplicateDt1s } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
 import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
+import { ACT_TOWNS, exitProblems } from './exits';
 import { loadTable } from './levelTables';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
@@ -44,6 +45,8 @@ export type Fix = { label: string } & (
   | { kind: 'place-object'; type: number; id: number }
   | { kind: 'set-act'; act: number }
   | { kind: 'automap-editor' }
+  /** Sets up warp link `vis` (Levels.txt VisN, in the link editor) and/or arms the brush with its warp tile. */
+  | { kind: 'warp-link'; vis: number; edit: boolean; place: boolean; toTown?: number }
   /** Answers a check's question with "keep it as it is": remembered, so it isn't asked again. */
   | { kind: 'keep'; key: string }
 );
@@ -304,6 +307,23 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
             fixes: wp ? [{ kind: 'place-object', label: `Place a waypoint (${wp.name})`, type: 2, id: wp.id }] : undefined,
           });
         }
+        // Ways out: warps that lead somewhere, or a waypoint.
+        const hasWaypoint = ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, 2, o.id)));
+        const presets = prest?.rows.filter((r) => Number(r['LevelId']) === levelId).length ?? 0;
+        const levelName = (id: number) => {
+          const r = levels?.rows.find((x) => Number(x['Id']) === id);
+          return r ? r['LevelName'] || r['Name'] || `level ${id}` : `level ${id}`;
+        };
+        for (const p of exitProblems(ds1, level, { hasWaypoint, onlyPreset: presets <= 1, isTown: TOWNS.has(levelId), levelName }))
+          out.push({
+            severity: p.severity,
+            area: 'Map',
+            title: p.title,
+            detail: p.detail,
+            cells: p.cells,
+            columns: [{ table: 'Levels', col: 'Vis0' }],
+            fixes: p.fix ? [{ kind: 'warp-link', label: p.fix.label, vis: p.fix.vis, edit: p.fix.edit, place: p.fix.place, toTown: ACT_TOWNS[act] }] : undefined,
+          });
       }
     }
   }
