@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { Dt1 } from '../formats/dt1';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Dt1, Dt1Tile } from '../formats/dt1';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
@@ -145,6 +145,41 @@ export function Dt1Manager({ map, gd, usage, onApply, onClose }: Props) {
   );
 }
 
+/** A tile drawn large with crisp pixels: fitted to the panel, or at a chosen zoom. */
+function BigTile({ tile, palette }: { tile: Dt1Tile; palette: Palette }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 300, h: 300 });
+  const [zoom, setZoom] = useState<number | 'fit'>('fit');
+  useEffect(() => {
+    const el = ref.current!;
+    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const pic = tilePicture(tile, palette);
+  const fit = pic ? Math.min(6, (box.w - 16) / pic.width, (box.h - 16) / pic.height) : 1;
+  // Whole-number zoom keeps every pixel the same size; below 2× that would waste too much of the panel.
+  const scale = zoom === 'fit' ? (fit >= 2 ? Math.floor(fit) : fit) : zoom;
+  return (
+    <>
+      <div className="chips dt1v-zoom">
+        {(['fit', 1, 2, 3, 4] as const).map((z) => (
+          <button key={z} className={`chip${zoom === z ? ' active' : ''}`} onClick={() => setZoom(z)}>
+            {z === 'fit' ? 'Fit' : `${z}×`}
+          </button>
+        ))}
+      </div>
+      <div ref={ref} className="dt1v-big">
+        {pic ? (
+          <img src={pic.url} alt="" width={pic.width * scale} height={pic.height * scale} className="tile-preview-img" />
+        ) : (
+          <span className="muted small">No picture (invisible in game)</span>
+        )}
+      </div>
+    </>
+  );
+}
+
 const KINDS: { id: string; label: string; test: (o: number) => boolean }[] = [
   { id: 'all', label: 'All', test: () => true },
   { id: 'floor', label: 'Floors', test: (o) => o === 0 },
@@ -171,6 +206,9 @@ export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
   const tiles = (dt1?.tiles ?? []).map((t, i) => ({ t, i })).filter(({ t }) => KINDS.find((k) => k.id === kind)!.test(t.orientation));
+  useEffect(() => {
+    if (dt1?.tiles.length) setPicked((p) => p ?? 0);
+  }, [dt1]);
   const sel = picked !== null ? dt1?.tiles[picked] : undefined;
   return (
     <div className="dt1v">
@@ -190,6 +228,9 @@ export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLa
             ) : null;
           })}
         </div>
+        <label className="dt1v-size small" title="Thumbnail size (or Ctrl + scroll over the tiles)">
+          Size <input type="range" min={36} max={200} value={size} onChange={(e) => setSize(Number(e.target.value))} />
+        </label>
         {!inMap && (
           <button className="btn small" onClick={onAdd}>
             {addLabel}
@@ -231,19 +272,16 @@ export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLa
         <div className="dt1v-detail">
           {sel ? (
             <>
-              <div className="dt1v-big">
-                <Thumb tile={sel} palette={palette} />
+              <BigTile tile={sel} palette={palette} />
+              <div className="dt1v-facts small">
+                <div>
+                  <b>#{picked}</b> · {ORIENTATION_NAMES[sel.orientation] ?? '?'} (orientation {sel.orientation}) · main/sub <code>{sel.mainIndex}/{sel.subIndex}</code>
+                </div>
+                <div className="muted">
+                  {sel.width}×{Math.abs(sel.height)} · rarity/frame {sel.rarity}
+                  {sel.animated ? ' · animated' : ''}
+                </div>
               </div>
-              <table className="kv small">
-                <tbody>
-                  <tr><td className="muted">Tile</td><td>#{picked}</td></tr>
-                  <tr><td className="muted">Kind</td><td>{ORIENTATION_NAMES[sel.orientation] ?? '?'} (orientation {sel.orientation})</td></tr>
-                  <tr><td className="muted">Main / sub</td><td><code>{sel.mainIndex}/{sel.subIndex}</code></td></tr>
-                  <tr><td className="muted">Size</td><td>{sel.width}×{Math.abs(sel.height)}</td></tr>
-                  <tr><td className="muted">Rarity / frame</td><td>{sel.rarity}</td></tr>
-                  <tr><td className="muted">Animated</td><td>{sel.animated ? 'yes' : 'no'}</td></tr>
-                </tbody>
-              </table>
             </>
           ) : (
             <p className="muted small">Click a tile for a closer look.</p>
@@ -355,8 +393,8 @@ export function Dt1LibraryDialog({ map, gd, onApply, onClose }: Omit<Props, 'usa
           )}
         </div>
         <p className="muted small">
-          The libraries are already in the game (or your mod), so nothing is copied: they are added to the map&apos;s tile libraries, and if the map is in
-          LvlPrest.txt its level type (LvlTypes.txt) and Dt1Mask are updated so the game loads them too (originals kept as .bak).
+          Nothing is copied (the libraries are already in the game or your mod): they are added to the map, and its level type and Dt1Mask are updated so the
+          game loads them (originals kept as .bak).
         </p>
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>
