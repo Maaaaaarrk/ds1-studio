@@ -141,10 +141,17 @@ export async function syncLevelTables(fs: LayeredFs, mapPath: string, dt1s: stri
   }
   for (const r of rows) {
     const old = num(getCell(p, r, 'Dt1Mask')) >>> 0;
-    const mask = maskFor(types, typeRow, dt1s, old);
+    // A row the level generator places in many levels (LevelId 0) or that lists several maps has one mask for all of
+    // them: only turn libraries on there, never off, or the other maps (and levels) lose tiles they use.
+    const files = [1, 2, 3, 4, 5, 6].filter((f) => {
+      const v = getCell(p, r, `File${f}`);
+      return v && v !== '0';
+    }).length;
+    const shared = !levelId || files > 1;
+    const mask = (shared ? maskFor(types, typeRow, dt1s, old) | old : maskFor(types, typeRow, dt1s, old)) >>> 0;
     if (old !== mask) {
       p = setCell(p, r, 'Dt1Mask', String(mask));
-      changedPresets.push(`"${getCell(p, r, 'Name')}": Dt1Mask ${old} → ${mask}`);
+      changedPresets.push(`"${getCell(p, r, 'Name')}": Dt1Mask ${old} → ${mask}${shared ? ' (libraries only added: the row is shared with other maps)' : ''}`);
     }
   }
   const writes: TableWrite[] = [];

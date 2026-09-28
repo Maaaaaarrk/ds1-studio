@@ -9,6 +9,7 @@ import type { Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
 import { Dt1Tree } from './Dt1Tree';
+import { customNameProblem, maxCustomNameLength, planCustomDt1, RECOMMENDED_NAME_LENGTH, type CustomDt1Plan, type TilePick } from '../game/customDt1';
 
 interface Props {
   map: OpenMap;
@@ -195,13 +196,36 @@ const KINDS: { id: string; label: string; test: (o: number) => boolean }[] = [
  * Every tile of one DT1, filterable by kind: resting the pointer on a tile shows it enlarged (as in the Tiles panel),
  * clicking it shows its details.
  */
-export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLabel = 'Add to map' }: { path: string; dt1: Dt1 | null; palette: Palette; paletteNote: string | null; inMap: boolean; onAdd: () => void; addLabel?: string }) {
+export function Dt1Viewer({
+  path,
+  dt1,
+  palette,
+  paletteNote,
+  inMap,
+  onAdd,
+  addLabel = 'Add to map',
+  picks,
+  onPick,
+}: {
+  path: string;
+  dt1: Dt1 | null;
+  palette: Palette;
+  paletteNote: string | null;
+  inMap: boolean;
+  onAdd: () => void;
+  addLabel?: string;
+  /** Tiles ticked for a custom DT1 (with onPick: clicking a tile ticks or unticks it, Shift+click a range). */
+  picks?: Set<number>;
+  onPick?: (indices: number[], on: boolean) => void;
+}) {
   const [kind, setKind] = useState('all');
+  const lastClick = useRef<number | null>(null);
   const [hovered, hover, hideHover] = usePreview();
   const [picked, setPicked] = useState<number | null>(null);
   const [size, setSize] = useState(64);
   useEffect(() => {
     setPicked(null);
+    lastClick.current = null;
     hideHover();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
@@ -231,7 +255,19 @@ export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLa
         <label className="dt1v-size small" title="Thumbnail size (or Ctrl + scroll over the tiles)">
           Size <input type="range" min={36} max={200} value={size} onChange={(e) => setSize(Number(e.target.value))} />
         </label>
-        {!inMap && (
+        {onPick && dt1 && (
+          <>
+            <button className="btn small" onClick={() => onPick(tiles.map((x) => x.i), true)} title="Tick every tile shown (the filter applies)">
+              Tick all shown
+            </button>
+            {!!picks?.size && (
+              <button className="btn small" onClick={() => onPick([...picks], false)}>
+                Untick all here
+              </button>
+            )}
+          </>
+        )}
+        {!inMap && !onPick && (
           <button className="btn small" onClick={onAdd}>
             {addLabel}
           </button>
@@ -250,17 +286,29 @@ export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLa
           {tiles.map(({ t, i }) => (
             <div
               key={i}
-              className={`thumb${picked === i ? ' active' : ''}`}
+              className={`thumb${picked === i ? ' active' : ''}${picks?.has(i) ? ' ticked' : ''}`}
               {...hover(() => {
                 const pic = tilePicture(t, palette);
                 return {
                   tile: t,
                   title: `#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · main ${t.mainIndex} · sub ${t.subIndex}`,
-                  lines: [[pic ? `${pic.width}×${pic.height} px` : '', `rarity ${t.rarity}`, t.animated ? 'animated' : ''].filter(Boolean).join(' · '), 'Click: details'],
+                  lines: [
+                    [pic ? `${pic.width}×${pic.height} px` : '', `rarity ${t.rarity}`, t.animated ? 'animated' : ''].filter(Boolean).join(' · '),
+                    onPick ? (picks?.has(i) ? 'Click: untick · Shift+click: a range' : 'Click: tick for the custom DT1 · Shift+click: a range') : 'Click: details',
+                  ],
                 };
               })}
-              onClick={() => setPicked(i)}
+              onClick={(e) => {
+                setPicked(i);
+                if (!onPick) return;
+                const on = !picks?.has(i);
+                const from = e.shiftKey && lastClick.current !== null ? tiles.findIndex((x) => x.i === lastClick.current) : -1;
+                const to = tiles.findIndex((x) => x.i === i);
+                onPick(from >= 0 ? tiles.slice(Math.min(from, to), Math.max(from, to) + 1).map((x) => x.i) : [i], e.shiftKey && from >= 0 ? true : on);
+                lastClick.current = i;
+              }}
             >
+              {onPick && <span className={`thumb-tick${picks?.has(i) ? ' on' : ''}`}>{picks?.has(i) ? '✓' : ''}</span>}
               <Thumb tile={t} palette={palette} />
               <span className="thumb-label">
                 {t.mainIndex}/{t.subIndex}
@@ -299,17 +347,30 @@ function libraryAct(path: string): number | null {
   return m[2] ? 4 : Math.min(4, Math.max(0, Number(m[1]) - 1));
 }
 
+/** The picked tiles' key, per library. */
+const pickKey = (p: TilePick) => `${normalizePath(p.dt1)}#${p.index}`;
+const DEFAULT_CUSTOM_FOLDER = 'PD2assets/custom';
+const FOLDER_OK = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/;
+
+interface LibraryProps extends Omit<Props, 'usage'> {
+  /** Writes a custom DT1 built from picked tiles and adds it to the map (null: no writable mod folder). */
+  onCreateCustom: ((req: { path: string; plan: CustomDt1Plan }) => Promise<void>) | null;
+}
+
 /**
  * Import DT1 → From game library: every tile library the game and mods have, by folder, with each one's tiles to look
- * through (hover to enlarge). Chosen libraries are added to the open map like in the Tile libraries dialog.
+ * through (hover to enlarge). Either whole libraries are chosen and added to the open map (like the Tile libraries
+ * dialog), or single tiles from any of them are ticked and built into a new custom DT1 (see game/customDt1.ts).
  */
-export function Dt1LibraryDialog({ map, gd, onApply, onClose }: Omit<Props, 'usage'>) {
+export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onClose }: LibraryProps) {
   const current = useMemo(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path), [map]);
   const inMap = useMemo(() => new Set(current.map(normalizePath)), [current]);
   const all = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
+  const [mode, setMode] = useState<'libraries' | 'custom'>('libraries');
   const [selected, setSelected] = useState('');
   const [dt1, setDt1] = useState<Dt1 | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
+  const [picks, setPicks] = useState<TilePick[]>([]);
   // Colours: the library's own act (from its folder), the map's act, or Act 0 (magenta = colours that change by act).
   const [palMode, setPalMode] = useState<'own' | 'map' | 'act0'>('own');
   const [pal, setPal] = useState<{ palette: Palette; note: string } | null>(null);
@@ -341,12 +402,31 @@ export function Dt1LibraryDialog({ map, gd, onApply, onClose }: Omit<Props, 'usa
   const isChosen = (p: string) => chosen.some((c) => normalizePath(c) === normalizePath(p));
   const toggle = (p: string) => setChosen((c) => (isChosen(p) ? c.filter((x) => normalizePath(x) !== normalizePath(p)) : [...c, p]));
   const selInMap = selected && inMap.has(normalizePath(selected));
+  const pickedHere = useMemo(() => new Set(picks.filter((p) => normalizePath(p.dt1) === normalizePath(selected)).map((p) => p.index)), [picks, selected]);
+  const pickLibraries = useMemo(() => [...new Set(picks.map((p) => p.dt1))], [picks]);
+  const onPick = (indices: number[], on: boolean) =>
+    setPicks((prev) => {
+      const drop = new Set(indices.map((index) => pickKey({ dt1: selected, index })));
+      const rest = prev.filter((p) => !drop.has(pickKey(p)));
+      return on ? [...rest, ...indices.map((index) => ({ dt1: selected, index }))] : rest;
+    });
+  const custom = mode === 'custom';
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal dt1-manager dt1-library" role="dialog" aria-label="Tile libraries from the game">
-        <div className="modal-title">Import DT1 from the game library · {map.path.split('/').pop()}</div>
+        <div className="modal-title dt1l-title">
+          Import DT1 from the game library · {map.path.split('/').pop()}
+          <div className="chips">
+            <button className={`chip${!custom ? ' active' : ''}`} onClick={() => setMode('libraries')} title="Add whole tile libraries to the map">
+              Add whole libraries
+            </button>
+            <button className={`chip${custom ? ' active' : ''}`} onClick={() => setMode('custom')} title="Tick single tiles from any libraries and build a new DT1 from them">
+              Build a custom DT1{picks.length ? ` · ${picks.length}` : ''}
+            </button>
+          </div>
+        </div>
         <div className="dt1l-cols">
-          <Dt1Tree all={all} inMap={current} chosen={chosen} selected={selected} onSelect={setSelected} />
+          <Dt1Tree all={all} inMap={current} chosen={custom ? pickLibraries : chosen} chosenLabel={custom ? 'picked' : 'chosen'} selected={selected} onSelect={setSelected} />
           <div className="dt1l-view">
             {selected ? (
               <Dt1Viewer
@@ -357,11 +437,15 @@ export function Dt1LibraryDialog({ map, gd, onApply, onClose }: Omit<Props, 'usa
                 inMap={!!selInMap}
                 addLabel={isChosen(selected) ? '✓ Chosen (click to undo)' : 'Choose this library'}
                 onAdd={() => toggle(selected)}
+                picks={custom ? pickedHere : undefined}
+                onPick={custom ? onPick : undefined}
               />
             ) : (
               <p className="muted small">
-                Pick a tile library on the left to see its tiles. Rest the pointer on a tile to see it enlarged; click it for its details. Choose the libraries
-                you want, then add them to the map.
+                Pick a tile library on the left to see its tiles. Rest the pointer on a tile to see it enlarged; click it for its details.{' '}
+                {custom
+                  ? 'Click tiles to tick them (Shift+click for a range), from as many libraries as you like, then name the new DT1 below.'
+                  : 'Choose the libraries you want, then add them to the map.'}
               </p>
             )}
             <label className="small dt1l-colours">
@@ -372,36 +456,214 @@ export function Dt1LibraryDialog({ map, gd, onApply, onClose }: Omit<Props, 'usa
                 <option value="act0">Act 0: show colours that change between acts</option>
               </select>
             </label>
-            {selInMap && <p className="muted small">This map already loads this library.</p>}
+            {selInMap && !custom && <p className="muted small">This map already loads this library.</p>}
           </div>
         </div>
-        <div className="dt1l-chosen">
-          <span className="field-label">Chosen</span>
-          {chosen.length ? (
-            chosen.map((p) => (
-              <span key={p} className="chip active" title={p}>
-                <button className="link" onClick={() => setSelected(p)}>
-                  {short(p)}
-                </button>
-                <button className="icon-btn" title="Remove" onClick={() => toggle(p)}>
-                  ×
-                </button>
-              </span>
-            ))
-          ) : (
-            <span className="muted small">none yet</span>
+        {custom ? (
+          <CustomDt1Panel map={map} gd={gd} picks={picks} setPicks={setPicks} palette={pal?.palette ?? map.palette} onShow={setSelected} onCreate={onCreateCustom} onClose={onClose} />
+        ) : (
+          <>
+            <div className="dt1l-chosen">
+              <span className="field-label">Chosen</span>
+              {chosen.length ? (
+                chosen.map((p) => (
+                  <span key={p} className="chip active" title={p}>
+                    <button className="link" onClick={() => setSelected(p)}>
+                      {short(p)}
+                    </button>
+                    <button className="icon-btn" title="Remove" onClick={() => toggle(p)}>
+                      ×
+                    </button>
+                  </span>
+                ))
+              ) : (
+                <span className="muted small">none yet</span>
+              )}
+            </div>
+            <p className="muted small">
+              Nothing is copied (the libraries are already in the game or your mod): they are added to the map, and its level type and Dt1Mask are updated so
+              the game loads them (originals kept as .bak).
+            </p>
+            <div className="modal-actions">
+              <button className="btn" onClick={onClose}>
+                Cancel
+              </button>
+              <button className="btn primary" disabled={!chosen.length} onClick={() => onApply([...current, ...chosen])}>
+                Add {chosen.length || ''} to the map
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The picked tiles, the new DT1's name and folder, and what building it will do: tiles that come along (corner
+ * halves, animation frames), tiles that get a new number, tiles from other acts.
+ */
+function CustomDt1Panel({
+  map,
+  gd,
+  picks,
+  setPicks,
+  palette,
+  onShow,
+  onCreate,
+  onClose,
+}: {
+  map: OpenMap;
+  gd: GameData;
+  picks: TilePick[];
+  setPicks: (f: (p: TilePick[]) => TilePick[]) => void;
+  palette: Palette;
+  onShow: (dt1: string) => void;
+  onCreate: LibraryProps['onCreateCustom'];
+  onClose: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [folder, setFolder] = useState(DEFAULT_CUSTOM_FOLDER);
+  const [libs, setLibs] = useState<Map<string, Dt1>>(new Map());
+  const [plan, setPlan] = useState<CustomDt1Plan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const bytes = useRef(new Map<string, Uint8Array>());
+  // What the map's level already loads: a new tile with one of these numbers would mix with it in game.
+  const taken = useMemo(() => {
+    const keys = new Set<string>();
+    for (const l of map.lib.loaded) for (const t of map.lib.tilesOf(l.path)) keys.add(`${t.orientation}|${t.mainIndex}|${t.subIndex}`);
+    return keys;
+  }, [map]);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const paths = [...new Set(picks.map((p) => p.dt1))];
+      for (const p of paths) {
+        if (!bytes.current.has(p)) {
+          const b = await gd.fs.read(p);
+          if (b) bytes.current.set(p, b);
+        }
+      }
+      const loaded = new Map<string, Dt1>();
+      for (const p of paths) {
+        const d = await gd.dt1(p);
+        if (d) loaded.set(p, d);
+      }
+      if (!live) return;
+      setLibs(loaded);
+      setPlan(picks.length ? planCustomDt1(picks, bytes.current, taken) : null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [picks, gd, taken]);
+
+  const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, '');
+  const folderProblem = FOLDER_OK.test(cleanFolder) ? null : 'The folder: letters, digits and _ only, with / between folders.';
+  const nameProblem = customNameProblem(name, cleanFolder);
+  const path = `data/global/tiles/${cleanFolder}/${name.trim()}.dt1`;
+  const exists = !nameProblem && !folderProblem && !!gd.fs.locate(path);
+  const partners = plan?.tiles.filter((t) => t.partner).length ?? 0;
+  const otherActs = [...new Set(picks.map((p) => libraryAct(p.dt1)).filter((a): a is number => a !== null && a !== map.ds1.act))].sort();
+  const problem = folderProblem ?? nameProblem ?? (exists ? `${path.replace(/^data\/global\/tiles\//, '')} already exists: choose another name.` : null);
+  const create = async () => {
+    if (!onCreate || !plan) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCreate({ path, plan });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="dt1c">
+      <div className="dt1c-picked">
+        <div className="field-label">
+          Picked tiles{' '}
+          <span className="muted small">{picks.length ? `${picks.length} from ${new Set(picks.map((p) => p.dt1)).size} libraries` : 'none yet: click tiles above to tick them'}</span>
+          {picks.length > 0 && (
+            <button className="link small" onClick={() => setPicks(() => [])}>
+              clear all
+            </button>
           )}
         </div>
+        <div className="dt1c-tray">
+          {picks.map((p) => {
+            const t = libs.get(p.dt1)?.tiles[p.index];
+            return (
+              <div key={pickKey(p)} className="thumb dt1c-item" title={`${short(p.dt1)} #${p.index}${t ? ` · ${t.mainIndex}/${t.subIndex}` : ''} (click to show its library)`} onClick={() => onShow(p.dt1)}>
+                {t && <Thumb tile={t} palette={palette} />}
+                <button
+                  className="icon-btn dt1c-remove"
+                  title="Remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPicks((prev) => prev.filter((x) => pickKey(x) !== pickKey(p)));
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="dt1c-form">
+        <label className="form-row">
+          <span>Name</span>
+          <input className="mono" value={name} maxLength={40} placeholder="e.g. GuildMix" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+        </label>
         <p className="muted small">
-          Nothing is copied (the libraries are already in the game or your mod): they are added to the map, and its level type and Dt1Mask are updated so the
-          game loads them (originals kept as .bak).
+          Keep it short ({RECOMMENDED_NAME_LENGTH} characters or fewer is best; at most {Math.max(0, maxCustomNameLength(cleanFolder))} here). Letters, digits and _
+          only: spaces, dots, dashes and accents can break the game&apos;s tables and archives.
         </p>
+        <label className="form-row">
+          <span>Folder</span>
+          <input className="mono" value={folder} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+        </label>
+        <div className="dt1c-summary small">
+          {plan ? (
+            <>
+              <div>
+                <b>{plan.records.length}</b> tiles into <code>{path.replace(/^data\/global\/tiles\//, '')}</code>
+                {partners ? ` (${partners} added so pieces stay whole: the other half of a corner wall, or animation frames)` : ''}. Pixels, walkability
+                (sub-tile flags), sound and roof height are copied as they are.
+              </div>
+              {plan.renumbered.length > 0 && (
+                <details>
+                  <summary>{plan.renumbered.length} given a new number, so they don&apos;t mix with tiles this level already loads (or with each other)</summary>
+                  <div className="mono">{plan.renumbered.join(' · ')}</div>
+                </details>
+              )}
+              {plan.skipped.length > 0 && <div className="warn-text">Left out: {plan.skipped.join('; ')}</div>}
+              {otherActs.length > 0 && (
+                <div className="warn-text">
+                  Tiles from Act {otherActs.map((a) => a + 1).join('/')} libraries are drawn in this map&apos;s Act {map.ds1.act + 1} colours in game. Check them
+                  with Colours → this map&apos;s act.
+                </div>
+              )}
+              <div className="muted">
+                Then the DT1 is added to this map&apos;s tile libraries, its level type (LvlTypes.txt) and Dt1Mask (LvlPrest.txt), and each tile&apos;s AutoMap.txt
+                pieces are copied from the level it came from (originals kept as .bak).
+              </div>
+            </>
+          ) : (
+            <span className="muted">Tick tiles to see what the new DT1 will hold.</span>
+          )}
+          {problem && name && <div className="error-text">{problem}</div>}
+          {error && <div className="error-text">{error}</div>}
+          {!onCreate && <div className="error-text">No writable mod folder: the DT1 can&apos;t be saved.</div>}
+        </div>
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!chosen.length} onClick={() => onApply([...current, ...chosen])}>
-            Add {chosen.length || ''} to the map
+          <button className="btn primary" disabled={busy || !onCreate || !plan?.records.length || !!problem} onClick={() => void create()}>
+            {busy ? 'Creating…' : 'Create DT1 and add it to the map'}
           </button>
         </div>
       </div>

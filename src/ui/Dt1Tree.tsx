@@ -42,12 +42,14 @@ interface Props {
   inMap: string[];
   /** Libraries picked in a chooser (marked in the tree). */
   chosen?: string[];
+  /** The badge on chosen libraries. */
+  chosenLabel?: string;
   selected: string;
   onSelect: (path: string) => void;
 }
 
 /** Tile libraries as a tree: the map's own first, then every DT1 by folder (collapsible), with a search box. */
-export function Dt1Tree({ all, inMap, chosen = [], selected, onSelect }: Props) {
+export function Dt1Tree({ all, inMap, chosen = [], chosenLabel = 'chosen', selected, onSelect }: Props) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<Set<string>>(() => {
     // Start with the selected library's folders open.
@@ -74,7 +76,7 @@ export function Dt1Tree({ all, inMap, chosen = [], selected, onSelect }: Props) 
     <button key={p} className={`dtt-file${normalizePath(p) === sel ? ' active' : ''}`} onClick={() => onSelect(p)} title={p.replace(TILES, '')}>
       {label}
       {inMapSet.has(normalizePath(p)) && <span className="dtt-badge" title="Loaded by this map">map</span>}
-      {chosenSet.has(normalizePath(p)) && <span className="dtt-badge chosen" title="Chosen to add">chosen</span>}
+      {chosenSet.has(normalizePath(p)) && <span className="dtt-badge chosen">{chosenLabel}</span>}
     </button>
   );
 

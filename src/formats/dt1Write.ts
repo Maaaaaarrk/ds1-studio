@@ -41,10 +41,11 @@ export function recordInfo(r: Dt1Record): { orientation: number; main: number; s
   return { orientation: h.getInt32(H.orientation, true), main: h.getInt32(H.main, true), sub: h.getInt32(H.sub, true), flags: r.header.slice(H.flags, H.flags + 25) };
 }
 
-/** A copy of a record with a new sub index and/or sub-tile flags (25 bytes, file order). */
-export function changedRecord(r: Dt1Record, change: { sub?: number; flags?: Uint8Array }): Dt1Record {
+/** A copy of a record with a new main and/or sub index and/or sub-tile flags (25 bytes, file order). */
+export function changedRecord(r: Dt1Record, change: { main?: number; sub?: number; flags?: Uint8Array }): Dt1Record {
   const header = r.header.slice();
   const h = view(header);
+  if (change.main !== undefined) h.setInt32(H.main, change.main, true);
   if (change.sub !== undefined) h.setInt32(H.sub, change.sub, true);
   if (change.flags) header.set(change.flags.subarray(0, 25), H.flags);
   return { header, blocks: r.blocks.slice() };

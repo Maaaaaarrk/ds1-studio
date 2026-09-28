@@ -57,6 +57,8 @@ import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../format
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
+import { customAutomapEdits, type CustomDt1Plan } from '../game/customDt1';
+import { buildDt1 } from '../formats/dt1Write';
 import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
@@ -1194,6 +1196,50 @@ export function App() {
       notify(`Tile libraries: ${paths.length}${tableNote}`, !!tableNote);
     },
     [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
+  );
+
+  /**
+   * Import DT1 → From game library → Build a custom DT1: writes the new library, adds it to the map (LvlTypes / Dt1Mask
+   * like any added library), then copies each tile's automap pieces into AutoMap.txt for the map's level (whose type
+   * is only final once the tables are synced: a shared type is split off first).
+   */
+  const createCustomDt1 = useCallback(
+    async ({ path, plan }: { path: string; plan: CustomDt1Plan }) => {
+      if (!gd || !map) return;
+      if (gd.fs.locate(path)) throw new Error(`${path} already exists.`);
+      if (!plan.records.length) throw new Error('No tiles to put in it.');
+      await writeFiles([{ path, bytes: buildDt1(plan.records) }]);
+      const libs = map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path);
+      await applyDt1s([...libs, path]);
+      let automapNote = '';
+      try {
+        const fresh = await GameData.load(gd.fs);
+        const type = fresh.resolveDt1s(map.path, map.ds1).lvlType;
+        const bytes = await gd.fs.read(AUTOMAP_TXT);
+        if (type && bytes) {
+          const doc = parseTxtTable(bytes);
+          const table = parseAutomap(doc);
+          const level = automapLevelFor(table, type.name, map.ds1.act + 1, type.id);
+          const rel = (p: string) => normalizePath(p).replace(/^data\/global\/tiles\//, '');
+          const sourceLevels = (dt1: string) =>
+            fresh.lvlTypes
+              .filter((t) => t.files.some((f) => f && normalizePath(f) === rel(dt1)))
+              .map((t) => automapLevelFor(table, t.name, t.act || undefined, t.id))
+              .filter((l): l is string => !!l);
+          const edits = level ? customAutomapEdits(plan, table, sourceLevels) : [];
+          if (edits.length) {
+            const { doc: next, rows } = applyAutomapEdits(doc, level!, edits);
+            await writeFiles([{ path: AUTOMAP_TXT, bytes: serializeTxtTable(next) }]);
+            automapNote = `; AutoMap.txt: ${rows} rows for "${level}"`;
+          } else automapNote = level ? '; no automap pieces to copy (the automap editor can add them)' : '; the level has no automap entry yet (see the Compatibility check)';
+        }
+      } catch (e) {
+        automapNote = `; AutoMap.txt not updated (${(e as Error).message})`;
+      }
+      const renumbered = plan.renumbered.length ? `, ${plan.renumbered.length} renumbered` : '';
+      notify(`Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}) and added it to the map${automapNote}. Find it in the Tiles panel.`);
+    },
+    [gd, map, writeFiles, applyDt1s, notify],
   );
 
   /**
@@ -2951,7 +2997,7 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === 'dt1lib' && map && <Dt1LibraryDialog map={map} gd={data.gd} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
+      {dialog === 'dt1lib' && map && <Dt1LibraryDialog map={map} gd={data.gd} onApply={(p) => void applyDt1s(p)} onCreateCustom={canWrite ? createCustomDt1 : null} onClose={() => setDialog(null)} />}
       {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
       {dialog === 'tables' && (
         <DataTables

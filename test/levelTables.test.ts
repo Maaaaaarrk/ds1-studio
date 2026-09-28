@@ -11,13 +11,17 @@ const EX = 'data/global/excel/';
 const MAP = 'data/global/tiles/Act1/Test/mymap.ds1';
 const fileCols = Array.from({ length: 32 }, (_, i) => `File ${i + 1}`);
 
-function tables(opts: { prestMask?: number; typeFiles?: string[]; withPreset?: boolean; extraLevel?: string } = {}) {
+function tables(opts: { prestMask?: number; typeFiles?: string[]; withPreset?: boolean; extraLevel?: string; sharedPreset?: boolean } = {}) {
   const typeFiles = opts.typeFiles ?? ['Act1/Test/a.dt1', 'Act1/Test/b.dt1'];
   const types = `Name\tId\t${fileCols.join('\t')}\tAct\r\nAct 1 - Test\t1\t${fileCols.map((_, i) => typeFiles[i] ?? '0').join('\t')}\t1\r\n`;
   const levels = `Name\tId\tLevelType\r\nTest Level\t5\t1\r\n${opts.extraLevel ?? ''}`;
   const prest =
     'Name\tDef\tLevelId\tFile1\tFile2\tFile3\tFile4\tFile5\tFile6\tDt1Mask\r\n' +
-    (opts.withPreset === false ? '' : `My Map\t10\t5\tAct1/Test/mymap.ds1\t0\t0\t0\t0\t0\t${opts.prestMask ?? 3}\r\n`);
+    (opts.withPreset === false
+      ? ''
+      : opts.sharedPreset
+        ? `Shared\t10\t0\tAct1/Test/mymap.ds1\tAct1/Test/other.ds1\t0\t0\t0\t0\t${opts.prestMask ?? 3}\r\n`
+        : `My Map\t10\t5\tAct1/Test/mymap.ds1\t0\t0\t0\t0\t0\t${opts.prestMask ?? 3}\r\n`);
   const files = new Map<string, () => Promise<Uint8Array>>([
     [`${EX}LvlTypes.txt`, async () => enc(types)],
     [`${EX}Levels.txt`, async () => enc(levels)],
@@ -45,6 +49,14 @@ describe('syncLevelTables', () => {
     expect(removed.map((w) => w.table)).toEqual(['LvlPrest.txt']);
     expect(getCell(parseTxtTable(removed[0].bytes), 0, 'Dt1Mask')).toBe('2');
     expect(await syncLevelTables(fs, MAP, [tile('Act1/Test/a.dt1'), tile('Act1/Test/b.dt1')])).toEqual([]);
+  });
+
+  it('only turns libraries on in a preset row other maps share (LevelId 0, several files): theirs stay loaded', async () => {
+    const fs = tables({ sharedPreset: true });
+    // One map's list without a.dt1 must not switch a.dt1 off for the row's other map.
+    expect(await syncLevelTables(fs, MAP, [tile('Act1/Test/b.dt1')], 1)).toEqual([]);
+    const writes = await syncLevelTables(fs, MAP, [tile('Act1/Test/b.dt1'), tile('Act1/Test/c.dt1')], 1);
+    expect(getCell(parseTxtTable(writes.find((w) => w.table === 'LvlPrest.txt')!.bytes), 0, 'Dt1Mask')).toBe('7');
   });
 
   it('refuses maps that are not in LvlPrest.txt', async () => {

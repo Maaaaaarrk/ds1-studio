@@ -509,6 +509,21 @@
   </ol>
   <h3 id="s-import-library">From the game library</h3>
   <p><b>Import DT1 ▾ → From game library…</b> lists every tile library the game and your mods already have, by folder, with a search box (the map's own libraries first). Click one to see all its tiles, filtered by kind; rest the pointer on a tile to see it enlarged, click it for its details. The tiles are shown in the library's own act colours; <b>Colours</b> switches to the map's act, or to Act 0, which shows in magenta the colours that change between acts. <b>Choose this library</b> for each one you want, then <b>Add to the map</b>: nothing is copied (the files are already in the game), and the map's level type and <code>Dt1Mask</code> are updated as in <a href="#s-libraries">Tile libraries</a>.</p>
+  <h3 id="s-custom-dt1">Building a custom DT1 from single tiles</h3>
+  <p>Switch the window to <b>Build a custom DT1</b> to put together a new tile library from single tiles of any others.</p>
+  <ol class="steps">
+    <li>Open a library and click tiles to tick them (<b>Shift+click</b> ticks a range, <b>Tick all shown</b> takes everything the filter shows). Go on in other libraries: the tree marks the ones you picked from, and <b>Picked tiles</b> collects them all (click one to go back to its library, × to drop it).</li>
+    <li>Name it. Keep the name short, 12 characters or fewer is best, using only letters, digits and <code>_</code>: spaces, dots, dashes and accents can break the game's tables and archives. The whole path has to fit the game's 41-character limit for tile paths, so the window says how long it may be. It goes into <code>PD2assets/custom/</code> unless you change the folder.</li>
+    <li>Check the summary, then <b>Create DT1 and add it to the map</b>.</li>
+  </ol>
+  <p>What the new library gets:</p>
+  <ul>
+    <li><b>Each tile exactly as it was</b>: pixels, walkability (sub-tile flags), sound, roof height and rarity are copied byte for byte.</li>
+    <li><b>Whole pieces</b>: a north corner wall brings its other half, and an animated tile all its frames. Special tiles (markers) can't be picked.</li>
+    <li><b>Numbers that don't clash</b>: the game finds a cell's tile by its orientation, main and sub index among every library the level loads. A tile whose number the level already uses, or another picked tile has, would be mixed with it at random, so it gets the first free number instead; the summary lists these. Tiles you pick that share a number in their own library stay together as variants.</li>
+    <li><b>The tables</b>: the library goes into a free <code>File</code> slot of the map's level type and its <code>Dt1Mask</code> (a level type of its own if other levels share it, as in <a href="#s-libraries">Tile libraries</a>), and each tile's <code>AutoMap.txt</code> pieces are copied from the level it came from under its new number. Originals are kept as <code>.bak</code>.</li>
+  </ul>
+  <div class="note"><b>Colours</b> A DT1 stores palette numbers, not colours: in game its tiles take the colours of the level's act. Tiles from another act's library can look different there; <b>Colours → this map's act</b> shows them as the game will.</div>
 </section>
 
 <!-- ============================================================ 8 TILES -->
