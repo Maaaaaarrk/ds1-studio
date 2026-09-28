@@ -1,5 +1,6 @@
 import {
   Box,
+  Camera,
   ClipboardPaste,
   Copy,
   Download,
@@ -58,7 +59,6 @@ import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, type CustomDt1Plan } from '../game/customDt1';
-import { buildDt1 } from '../formats/dt1Write';
 import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
@@ -1242,11 +1242,11 @@ export function App() {
    * is only final once the tables are synced: a shared type is split off first).
    */
   const createCustomDt1 = useCallback(
-    async ({ path, plan }: { path: string; plan: CustomDt1Plan }) => {
+    async ({ path, plan, bytes: dt1Bytes, actSafe }: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean }) => {
       if (!gd || !map) return;
       if (gd.fs.locate(path)) throw new Error(`${path} already exists.`);
       if (!plan.records.length) throw new Error('No tiles to put in it.');
-      await writeFiles([{ path, bytes: buildDt1(plan.records) }]);
+      await writeFiles([{ path, bytes: dt1Bytes }]);
       const libs = map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path);
       await applyDt1s([...libs, path]);
       let automapNote = '';
@@ -1275,7 +1275,7 @@ export function App() {
         automapNote = `; AutoMap.txt not updated (${(e as Error).message})`;
       }
       const renumbered = plan.renumbered.length ? `, ${plan.renumbered.length} renumbered` : '';
-      notify(`Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}) and added it to the map${automapNote}. Find it in the Tiles panel.`);
+      notify(`Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}${actSafe ? ', act-safe colours' : ''}) and added it to the map${automapNote}. Find it in the Tiles panel.`);
     },
     [gd, map, writeFiles, applyDt1s, notify],
   );
@@ -2021,6 +2021,25 @@ export function App() {
       return 'object';
     });
   }, []);
+  /** A picture of the map view as it is on screen (see MapView), for Copy view / Print Screen. */
+  const snapshotRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
+  const copyView = useCallback(async () => {
+    const canvas = snapshotRef.current?.();
+    if (!canvas) return notify('Open a map first: Copy view pictures the map pane.', true);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) return notify("Couldn't make the picture.", true);
+    try {
+      window.focus();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      notify(`Map view copied (${canvas.width}×${canvas.height}): paste it anywhere with Ctrl+V`);
+    } catch (e) {
+      // No clipboard (a browser that refuses it): save the picture instead.
+      const name = `${(map?.path.split('/').pop() ?? 'map').replace(/\.ds1$/i, '')}-view.png`;
+      downloadFile(name, new Uint8Array(await blob.arrayBuffer()));
+      notify(`Couldn't use the clipboard (${(e as Error).message}): saved the picture as ${name} instead.`, true);
+    }
+  }, [map, notify]);
+
   const toggleGameView = useCallback(() => {
     setGameView((g) => {
       if (g.on) return { ...g, on: false };
@@ -2048,6 +2067,7 @@ export function App() {
       },
       'edit.replace': () => doc && setDialog('replace'),
       'view.minimap': vis((v) => ({ ...v, minimap: !v.minimap })),
+      'view.snapshot': () => void copyView(),
       'view.pops': vis((v) => ({ ...v, pops: !v.pops })),
       'view.popsInside': vis((v) => ({ ...v, popsInside: !v.popsInside })),
       'tool.erase': () => setTool('erase'),
@@ -2113,7 +2133,7 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null };
   useEffect(() => {
@@ -2123,6 +2143,8 @@ export function App() {
       if (keyState.current.dialogOpen) return;
       const combo = comboOf(e);
       if (!combo) return;
+      // Windows only reports Print Screen when it is released; take it there on every system (never twice).
+      if ((e.key === 'PrintScreen') !== (e.type === 'keyup')) return;
       const id = keyState.current.actionFor(combo);
       const run = id && keyState.current.actions[id];
       if (!run) return;
@@ -2130,7 +2152,11 @@ export function App() {
       run();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+    };
   }, []);
   // saveAs() saves on the next tick through this ref.
   const handlers = useRef({ save });
@@ -2182,6 +2208,7 @@ export function App() {
             { label: 'Save as…', icon: <FilePlus2 />, onClick: () => setDialog('saveAs'), disabled: noMap, size: 'sm' },
             { label: 'Export map…', icon: <FileOutput />, onClick: openExport, disabled: noMap, size: 'sm', title: 'A package (.zip) with the map, its tile libraries and its Levels / LvlPrest / LvlTypes / CubeMain / AutoMap rows (or the .ds1 on its own)' },
             { label: 'Export image', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the map (or the selection) as a PNG picture' },
+            { label: 'Copy view', icon: <Camera />, onClick: () => void copyView(), disabled: noMap, size: 'sm', shortcut: kb['view.snapshot'], title: 'Copy the map view exactly as shown, as a picture: paste it anywhere with Ctrl+V' },
             { label: 'Import DS1…', icon: <FileInput />, onClick: () => void pickImport('ds1'), disabled: !canWrite, size: 'sm', title: canWrite ? 'Bring a map into your mod: a map package (.zip, with its tables) or a .ds1 on its own (then add it to the game)' : 'No writable mod folder' },
             {
               label: 'Import DT1',
@@ -2476,6 +2503,7 @@ export function App() {
             onZoom={setZoom}
             onStroke={onStroke}
             fitSignal={fitSignal}
+            snapshotRef={snapshotRef}
             gameView={{ ...gameView, width: gameSize[0], height: gameSize[1] }}
             focus={focus}
             onCycle={cycleStack}

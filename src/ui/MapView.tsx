@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { Ds1Object } from '../formats/ds1';
 import type { Dt1Tile } from '../formats/dt1';
 import type { Sprite } from '../game/sprites';
@@ -65,6 +65,8 @@ interface Props {
   onStroke: (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => void;
   /** Bumped by the parent to request "fit map to view". */
   fitSignal: number;
+  /** Receives a function that pictures the view exactly as shown (map, overlays, minimap) as a canvas. */
+  snapshotRef?: MutableRefObject<(() => HTMLCanvasElement | null) | null>;
   /**
    * Game view: when `signal` changes, zoom so the game's 800×600 screen fills the viewport (centred on `center`, a
    * world point, when given); while `on`, everything outside that screen is shaded.
@@ -246,6 +248,37 @@ export function MapView(props: Props) {
     latest.current.onZoom(zoom / dpr);
     dirty.current = true;
   };
+
+  // A picture of the view as it is on screen. WebGL keeps its picture only until the frame is shown, so it is drawn
+  // again right before copying; the overlay and the minimap (2D canvases) are copied where they sit.
+  const snapshotRef = props.snapshotRef;
+  useEffect(() => {
+    if (!snapshotRef) return;
+    snapshotRef.current = () => {
+      const gl = glCanvas.current;
+      const ov = overlay.current;
+      if (!gl || !ov || !renderer.current || !gl.width || !gl.height) return null;
+      renderer.current.draw(camera.current, BACKGROUND);
+      const out = document.createElement('canvas');
+      out.width = gl.width;
+      out.height = gl.height;
+      const ctx = out.getContext('2d')!;
+      ctx.drawImage(gl, 0, 0);
+      ctx.drawImage(ov, 0, 0);
+      const base = gl.getBoundingClientRect();
+      const sx = gl.width / base.width;
+      const sy = gl.height / base.height;
+      for (const c of gl.parentElement?.querySelectorAll('canvas') ?? []) {
+        if (c === gl || c === ov) continue;
+        const r = c.getBoundingClientRect();
+        if (r.width && r.height) ctx.drawImage(c, (r.left - base.left) * sx, (r.top - base.top) * sy, r.width * sx, r.height * sy);
+      }
+      return out;
+    };
+    return () => {
+      snapshotRef.current = null;
+    };
+  }, [snapshotRef]);
 
   // New map: fresh atlas, fit to view. (Re-resolving tiles or switching palettes keeps the same DS1 and camera.)
   useEffect(() => {

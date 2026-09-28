@@ -1,5 +1,6 @@
 import { Orientation } from '../formats/dt1';
-import { changedRecord, dt1Records, recordInfo, type Dt1Record } from '../formats/dt1Write';
+import { buildDt1, changedRecord, dt1Records, recordInfo, type Dt1Record } from '../formats/dt1Write';
+import { recolorDt1 } from '../formats/dt1Edit';
 import { MAX_TILE_PATH } from './addToGame';
 import type { AutomapEdit, AutomapTable } from './automap';
 import { findRule } from './automap';
@@ -179,4 +180,23 @@ export function customAutomapEdits(plan: CustomDt1Plan, table: AutomapTable, sou
     }
   }
   return [...edits.values()];
+}
+
+/**
+ * The custom DT1's file. With `remapFor`, each tile's colours are converted too: a DT1 stores palette numbers, and
+ * most mean a different colour in each act, so a tile drawn for one act looks wrong in another. `remapFor` gives, for
+ * the library a tile came from, the remap that snaps every colour to the nearest one that is the same in every act
+ * ("Act 0"), judged by how it looks in the act that library was drawn for (see game/act0Palette.ts); null leaves
+ * the tile as it is.
+ */
+export function buildCustomDt1(plan: CustomDt1Plan, remapFor?: (dt1: string) => Uint8Array | null): Uint8Array {
+  let bytes = buildDt1(plan.records);
+  if (!remapFor) return bytes;
+  const groups = new Map<Uint8Array, number[]>();
+  plan.tiles.forEach((t, i) => {
+    const r = remapFor(t.from.dt1);
+    if (r) (groups.get(r) ?? groups.set(r, []).get(r)!).push(i);
+  });
+  for (const [remap, tiles] of groups) bytes = recolorDt1(bytes, remap, tiles);
+  return bytes;
 }

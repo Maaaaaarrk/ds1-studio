@@ -9,7 +9,10 @@ import type { Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
 import { Dt1Tree } from './Dt1Tree';
-import { customNameProblem, maxCustomNameLength, planCustomDt1, RECOMMENDED_NAME_LENGTH, type CustomDt1Plan, type TilePick } from '../game/customDt1';
+import { HelpTip } from './HelpTip';
+import { buildCustomDt1, customNameProblem, maxCustomNameLength, planCustomDt1, RECOMMENDED_NAME_LENGTH, type CustomDt1Plan, type TilePick } from '../game/customDt1';
+import { hueRemap } from '../formats/dt1Edit';
+import { decodeTile } from '../formats/dt1';
 
 interface Props {
   map: OpenMap;
@@ -347,6 +350,13 @@ function libraryAct(path: string): number | null {
   return m[2] ? 4 : Math.min(4, Math.max(0, Number(m[1]) - 1));
 }
 
+/** A palette whose entry i shows the colour of remap[i]: draws tiles as a remap would leave them. */
+function remapPalette(palette: Palette, remap: Uint8Array): Palette {
+  const out = new Uint8Array(palette.length);
+  for (let i = 0; i < 256; i++) out.set(palette.subarray(remap[i] * 4, remap[i] * 4 + 4), i * 4);
+  return out;
+}
+
 /** The picked tiles' key, per library. */
 const pickKey = (p: TilePick) => `${normalizePath(p.dt1)}#${p.index}`;
 const DEFAULT_CUSTOM_FOLDER = 'PD2assets/custom';
@@ -354,7 +364,7 @@ const FOLDER_OK = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/;
 
 interface LibraryProps extends Omit<Props, 'usage'> {
   /** Writes a custom DT1 built from picked tiles and adds it to the map (null: no writable mod folder). */
-  onCreateCustom: ((req: { path: string; plan: CustomDt1Plan }) => Promise<void>) | null;
+  onCreateCustom: ((req: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean }) => Promise<void>) | null;
 }
 
 /**
@@ -528,6 +538,10 @@ function CustomDt1Panel({
   const [plan, setPlan] = useState<CustomDt1Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hovered, hover] = usePreview();
+  const [actSafe, setActSafe] = useState(false);
+  /** Act 0 conversion: per act a library can be drawn for, the remap to act-safe colours. */
+  const [safe, setSafe] = useState<{ usable: boolean[]; remaps: Uint8Array[] } | null>(null);
   const bytes = useRef(new Map<string, Uint8Array>());
   // What the map's level already loads: a new tile with one of these numbers would mix with it in game.
   const taken = useMemo(() => {
@@ -559,6 +573,33 @@ function CustomDt1Panel({
     };
   }, [picks, gd, taken]);
 
+  useEffect(() => {
+    if (!actSafe || safe) return;
+    let live = true;
+    void Promise.all([loadAct0Palette(gd.fs), ...[0, 1, 2, 3, 4].map((a) => gd.palette(a))])
+      .then(([a0, ...acts]) => live && setSafe({ usable: a0.usable, remaps: acts.map((p) => hueRemap(p, { allowed: a0.usable })) }))
+      .catch((e) => live && setError(`Couldn't load the Act 0 palette: ${(e as Error).message}`));
+    return () => {
+      live = false;
+    };
+  }, [actSafe, safe, gd]);
+  // The act a library was drawn for: its folder's, else this map's (a mod's own folder is usually made for it).
+  const actOf = (dt1: string) => libraryAct(dt1) ?? map.ds1.act;
+  const remapFor = actSafe && safe ? (dt1: string) => safe.remaps[actOf(dt1)] : undefined;
+  // After conversion the colours are the same in every act: show them in this map's palette.
+  const safePalettes = useMemo(() => safe?.remaps.map((r) => remapPalette(map.palette, r)) ?? null, [safe, map.palette]);
+  const trayPalette = (dt1: string) => (actSafe && safePalettes ? safePalettes[actOf(dt1)] : palette);
+  /** Picked tiles using colours that change between acts (they look different in other acts). */
+  const actSpecific = useMemo(() => {
+    if (!safe) return null;
+    let n = 0;
+    for (const p of picks) {
+      const img = libs.get(p.dt1)?.tiles[p.index] && decodeTile(libs.get(p.dt1)!.tiles[p.index]);
+      if (img && img.pixels.some((v) => v !== 0 && !safe.usable[v])) n++;
+    }
+    return n;
+  }, [safe, picks, libs]);
+
   const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, '');
   const folderProblem = FOLDER_OK.test(cleanFolder) ? null : 'The folder: letters, digits and _ only, with / between folders.';
   const nameProblem = customNameProblem(name, cleanFolder);
@@ -572,7 +613,7 @@ function CustomDt1Panel({
     setBusy(true);
     setError(null);
     try {
-      await onCreate({ path, plan });
+      await onCreate({ path, plan, bytes: buildCustomDt1(plan, remapFor), actSafe: !!remapFor });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -591,12 +632,33 @@ function CustomDt1Panel({
             </button>
           )}
         </div>
+        {hovered && <TilePreview p={hovered} palette={palette} />}
         <div className="dt1c-tray">
           {picks.map((p) => {
             const t = libs.get(p.dt1)?.tiles[p.index];
             return (
-              <div key={pickKey(p)} className="thumb dt1c-item" title={`${short(p.dt1)} #${p.index}${t ? ` · ${t.mainIndex}/${t.subIndex}` : ''} (click to show its library)`} onClick={() => onShow(p.dt1)}>
-                {t && <Thumb tile={t} palette={palette} />}
+              <div
+                key={pickKey(p)}
+                className="thumb dt1c-item"
+                {...(t
+                  ? hover(() => {
+                      const pic = tilePicture(t, palette);
+                      const planned = plan?.tiles.find((x) => !x.partner && pickKey(x.from) === pickKey(p));
+                      return {
+                        tile: t,
+                        title: `${short(p.dt1)} #${p.index} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`}`,
+                        lines: [
+                          [pic ? `${pic.width}×${pic.height} px` : '', `main/sub ${t.mainIndex}/${t.subIndex}`, planned && (planned.newMain !== t.mainIndex || planned.newSub !== t.subIndex) ? `becomes ${planned.newMain}/${planned.newSub}` : '']
+                            .filter(Boolean)
+                            .join(' · '),
+                          'Click: show its library · ×: remove',
+                        ],
+                      };
+                    })
+                  : {})}
+                onClick={() => onShow(p.dt1)}
+              >
+                {t && <Thumb tile={t} palette={trayPalette(p.dt1)} />}
                 <button
                   className="icon-btn dt1c-remove"
                   title="Remove"
@@ -625,6 +687,19 @@ function CustomDt1Panel({
           <span>Folder</span>
           <input className="mono" value={folder} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
         </label>
+        <label className="small dt1c-safe">
+          <input type="checkbox" checked={actSafe} onChange={(e) => setActSafe(e.target.checked)} /> Make it act-safe (Act 0 colours)
+          <HelpTip text="A DT1 stores palette numbers, not colours, and most numbers mean a different colour in each act: a tile drawn for Act 3 can look wrong in an Act 1 map. This snaps every colour of the picked tiles to the nearest one that looks the same in every act (Gimli's Act 0 palette), judged by how it looks in the act its library was drawn for. The picked tiles then show as they will look in game." />
+        </label>
+        {actSafe && (
+          <p className="muted small">
+            {actSpecific === null
+              ? 'Loading the Act 0 palette…'
+              : actSpecific
+                ? `${actSpecific} of the picked tiles use colours that change between acts: they'll be converted (the picked tiles show the result).`
+                : 'None of the picked tiles use colours that change between acts: they already look the same in every act.'}
+          </p>
+        )}
         <div className="dt1c-summary small">
           {plan ? (
             <>
@@ -640,10 +715,10 @@ function CustomDt1Panel({
                 </details>
               )}
               {plan.skipped.length > 0 && <div className="warn-text">Left out: {plan.skipped.join('; ')}</div>}
-              {otherActs.length > 0 && (
+              {otherActs.length > 0 && !actSafe && (
                 <div className="warn-text">
                   Tiles from Act {otherActs.map((a) => a + 1).join('/')} libraries are drawn in this map&apos;s Act {map.ds1.act + 1} colours in game. Check them
-                  with Colours → this map&apos;s act.
+                  with Colours → this map&apos;s act, or tick Make it act-safe.
                 </div>
               )}
               <div className="muted">

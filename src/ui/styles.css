@@ -781,6 +781,7 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .dt1c-form .form-row input { flex: 1; }
 .dt1c-summary { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
 .dt1c-form .modal-actions { margin-top: auto; }
+.dt1c-safe { display: flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) {
   .dt1c { grid-template-columns: 1fr; }
   .dt1l-cols, .dt1-library .dt1v-body { grid-template-columns: 1fr; }

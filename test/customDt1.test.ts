@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { Orientation, parseDt1 } from '../src/formats/dt1';
+import { decodeTile, Orientation, parseDt1 } from '../src/formats/dt1';
 import { blockerRecord, buildDt1, dt1Records, recordInfo, type Dt1Record } from '../src/formats/dt1Write';
 import { parseAutomap } from '../src/game/automap';
-import { customAutomapEdits, customNameProblem, maxCustomNameLength, planCustomDt1 } from '../src/game/customDt1';
+import { buildCustomDt1, customAutomapEdits, customNameProblem, maxCustomNameLength, planCustomDt1 } from '../src/game/customDt1';
 import { parseTxtTable } from '../src/formats/txtTable';
 import { LayeredFs, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
@@ -116,6 +116,21 @@ describe.runIf(hasD2)("custom DT1 from the game's own tiles", async () => {
       expect({ ...t, mainIndex: 0, subIndex: 0, blocks: t.blocks.length }).toEqual({ ...orig, mainIndex: 0, subIndex: 0, blocks: orig.blocks.length });
       t.blocks.forEach((blk, j) => expect(Buffer.from(blk.data).equals(Buffer.from(orig.blocks[j].data))).toBe(true));
     });
+    // Act-safe: only the tiles of the library given a remap change, pixel for pixel through it.
+    const remap = Uint8Array.from({ length: 256 }, (_, i) => (i === 0 ? 0 : 7));
+    const safe = parseDt1(buildCustomDt1(plan, (dt1) => (dt1 === huts ? remap : null)));
+    safe.tiles.forEach((t, i) => {
+      const fromHuts = plan.tiles[i].from.dt1 === huts;
+      t.blocks.forEach((blk, j) => {
+        const before = built.tiles[i].blocks[j];
+        expect(blk.data.length).toBe(before.data.length);
+        if (!fromHuts) expect(Buffer.from(blk.data).equals(Buffer.from(before.data))).toBe(true);
+      });
+      expect({ ...t, blocks: 0 }).toEqual({ ...built.tiles[i], blocks: 0 });
+    });
+    const img = (t: (typeof safe.tiles)[number]) => decodeTile(t)!.pixels;
+    const huts0 = plan.tiles.findIndex((t) => t.from.dt1 === huts);
+    expect(img(safe.tiles[huts0]).every((v, k) => v === (img(built.tiles[huts0])[k] === 0 ? 0 : 7))).toBe(true);
     // No two tiles of different origin share a number.
     const owner = new Map<string, string>();
     plan.tiles.forEach((t) => {

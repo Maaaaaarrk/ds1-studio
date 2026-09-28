@@ -34,6 +34,7 @@ export const ACTIONS = [
   { id: 'view.minimap', label: 'Minimap', group: 'View', key: 'K' },
   { id: 'view.pops', label: 'Roof hide areas', group: 'View', key: 'H' },
   { id: 'view.popsInside', label: 'Show roofs as hidden (as if inside)', group: 'View', key: 'Shift+H' },
+  { id: 'view.snapshot', label: 'Copy the map view as a picture (paste it anywhere)', group: 'View', key: 'PrintScreen' },
   { id: 'layer.floor1', label: 'Floor 1', group: 'Layers', key: '1' },
   { id: 'layer.floor2', label: 'Floor 2', group: 'Layers', key: '2' },
   { id: 'layer.wall1', label: 'Wall 1', group: 'Layers', key: '3' },
