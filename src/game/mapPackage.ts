@@ -6,6 +6,7 @@ import { CLASSIC_MPQS, normalizePath, type LayeredFs } from '../vfs/vfs';
 import { cofPath, layerPath, type SpriteSpec } from './sprites';
 import { automapLevelFor, type AutomapTable } from './automap';
 import { mergeMapRows } from './levelTables';
+import { parseTbl, setTblStrings, tblLookup, writeTbl } from '../formats/tbl';
 
 /**
  * Map packages: one zip holding a DS1 plus everything it needs (DT1s, modded object sprites, txt rows), so a map can
@@ -88,6 +89,11 @@ export interface PackageManifest {
   map: string;
   files: PackageFile[];
   txtRows: TxtRowEntry[];
+  /**
+   * The text of the strings the map's rows name (level names, the map item's name), by key, from the maker's string
+   * tables. The import adds those the importer doesn't have to their patchstring.tbl.
+   */
+  strings?: Record<string, string>;
   notes?: string;
 }
 
@@ -101,6 +107,8 @@ export interface BuildOptions {
   ds1Bytes: Uint8Array;
   objectSpecs?: SpriteSpecLike[];
   txtRows?: TxtRowEntry[];
+  /** Strings the rows name (see collectMapStrings). */
+  strings?: Record<string, string>;
   notes?: string;
   /** Put DT1s from the base-game MPQs into the zip too (default true: they may be modded on the maker's side). */
   includeBaseGameDt1s?: boolean;
@@ -239,7 +247,9 @@ export async function buildMapPackage(
     txtRows: (opts.txtRows ?? []).map((r) => ({ table: r.table, key: r.key, columns: [...r.columns], row: [...r.row] })),
   };
   if (opts.notes) manifest.notes = opts.notes;
+  if (opts.strings && Object.keys(opts.strings).length) manifest.strings = { ...opts.strings };
   validateTxtRows(manifest.txtRows);
+  validateStrings(manifest.strings);
   zipInput[MANIFEST_NAME] = strToU8(JSON.stringify(manifest, null, 2));
   return { zip: zipSync(zipInput, { level: 6 }), manifest, missing };
 }
@@ -255,6 +265,46 @@ function validateTxtRows(rows: unknown): asserts rows is TxtRowEntry[] {
     if (!r.columns.includes(r.key)) throw new Error(`manifest: ${r.table} row has no "${r.key}" column`);
     if ([...r.columns, ...r.row].some((s) => /[\t\r\n]/.test(s))) throw new Error(`manifest: ${r.table} row contains tabs or line breaks`);
   }
+}
+
+function validateStrings(strings: unknown): void {
+  if (strings === undefined) return;
+  if (!strings || typeof strings !== 'object' || Array.isArray(strings)) throw new Error('manifest: strings must be an object');
+  for (const [k, v] of Object.entries(strings)) if (!k || typeof v !== 'string' || /[\0]/.test(k + v)) throw new Error('manifest: malformed string');
+}
+
+/** The string tables a game looks names up in, first match wins (patch, then expansion, then the original game's). */
+export const STRING_TABLES = ['data/local/lng/eng/patchstring.tbl', 'data/local/lng/eng/expansionstring.tbl', 'data/local/lng/eng/string.tbl'];
+
+/** String keys the map's rows use for names: its levels' LevelName/LevelWarp and its map item's namestr. */
+export function stringKeys(rows: TxtRowEntry[]): string[] {
+  const name = (t: string) => t.replace(/\.txt$/i, '').split('/').pop()!.toLowerCase();
+  const keys = new Set<string>();
+  for (const r of rows) {
+    const cols = name(r.table) === 'levels' ? ['LevelName', 'LevelWarp'] : name(r.table) === 'misc' ? ['namestr'] : [];
+    for (const c of cols) {
+      const v = (r.row[r.columns.indexOf(c)] ?? '').trim();
+      if (r.columns.includes(c) && v) keys.add(v);
+    }
+  }
+  return [...keys];
+}
+
+/** The text of those keys in the current string tables (keys no table has are left out). */
+export async function collectMapStrings(fs: LayeredFs, rows: TxtRowEntry[]): Promise<Record<string, string>> {
+  const keys = stringKeys(rows);
+  const out: Record<string, string> = {};
+  if (!keys.length) return out;
+  const tables = (await Promise.all(STRING_TABLES.map((p) => fs.read(p)))).filter((b): b is Uint8Array => !!b);
+  for (const k of keys)
+    for (const b of tables) {
+      const v = tblLookup(b, k);
+      if (v !== null) {
+        out[k] = v;
+        break;
+      }
+    }
+  return out;
 }
 
 /** Game path of a txt table: `LvlPrest` -> `data/global/excel/LvlPrest.txt`. */
@@ -307,6 +357,7 @@ export function readMapPackage(zip: Uint8Array): MapPackage {
   }
   if (!byPath.has(normalizePath(m.map))) throw new Error(`package: map ${m.map} is not in the zip`);
   validateTxtRows(m.txtRows ?? []);
+  validateStrings(m.strings);
   if (m.notes !== undefined && typeof m.notes !== 'string') throw new Error('package: notes must be a string');
   const manifest: PackageManifest = { ...(m as PackageManifest), txtRows: m.txtRows ?? [] };
   return { manifest, files };
@@ -425,6 +476,17 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
     t.bytes = merged.bytes;
   }
   const txtWrites = [...tables.values()].filter((t) => !sameBytes(t.original, t.bytes)).map((t) => ({ path: t.path, bytes: t.bytes }));
+  // Names the map's rows use that this install has no text for: added to its patchstring.tbl (never replacing any).
+  const strings = pkg.manifest.strings ?? {};
+  if (Object.keys(strings).length) {
+    const have = (await Promise.all(STRING_TABLES.map((p) => fs.read(p)))).filter((b): b is Uint8Array => !!b);
+    const missing = Object.fromEntries(Object.entries(strings).filter(([k]) => !have.some((b) => tblLookup(b, k) !== null)));
+    const patch = await fs.read(STRING_TABLES[0]);
+    if (Object.keys(missing).length && patch) {
+      txtWrites.push({ path: STRING_TABLES[0], bytes: writeTbl(setTblStrings(parseTbl(patch), missing)) });
+      txtMerges.push({ table: 'patchstring.tbl', path: STRING_TABLES[0], key: '', keyValue: '', exists: true, action: 'merged', note: `${Object.keys(missing).length} name${Object.keys(missing).length === 1 ? '' : 's'} added: ${Object.values(missing).slice(0, 4).map((v) => `"${v}"`).join(', ')}` });
+    } else if (Object.keys(missing).length) txtMerges.push({ table: 'patchstring.tbl', path: STRING_TABLES[0], key: '', keyValue: '', exists: false, action: 'missing-table', note: 'not found: the map’s names show as their keys until added' });
+  }
   return { writes, txtMerges, txtWrites, coverage: tableCoverage(pkg.manifest.txtRows), recipe: recipeSuggestion(pkg.manifest.txtRows) };
 }
 

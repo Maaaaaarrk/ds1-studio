@@ -219,6 +219,30 @@ describe.runIf(hasD2)('map packages over the real game data', async () => {
     expect(rows.find((r) => r.table === 'LvlMaze')!.row[rows.find((r) => r.table === 'LvlMaze')!.columns.indexOf('Level')]).toBe(String(Number(row!['LevelId'])));
   });
 
+  it("carries the names the map's rows use, and adds only the ones the importer lacks to patchstring.tbl", async () => {
+    const { collectMapStrings, STRING_TABLES } = await import('../src/game/mapPackage');
+    const { tblLookup, parseTbl } = await import('../src/formats/tbl');
+    const gd = await GameData.load(vanilla);
+    const map = await openMap(gd, MAP);
+    const txtRows = await collectMapTxtRows(vanilla, MAP);
+    const strings = await collectMapStrings(vanilla, txtRows);
+    // The town's level names ("Rogue Encampment", "To The Rogue Encampment") come with it.
+    expect(Object.values(strings)).toEqual(expect.arrayContaining(['Rogue Encampment']));
+    const built = await buildMapPackage(vanilla, { path: MAP, ds1: map.ds1, dt1Paths: map.resolution.paths }, { ds1Bytes: (await vanilla.read(MAP))!, txtRows, strings: { ...strings, ds1s_lvl_999: 'Guild Hall' } });
+    const pkg = readMapPackage(built.zip);
+    expect(pkg.manifest.strings!.ds1s_lvl_999).toBe('Guild Hall');
+    const plan = await planImport(pkg, vanilla);
+    const write = plan.txtWrites.find((w) => w.path === STRING_TABLES[0])!;
+    expect(tblLookup(write.bytes, 'ds1s_lvl_999')).toBe('Guild Hall');
+    // Only the missing name: the patch table grows by one, and the game's own names aren't copied into it.
+    const before = parseTbl((await vanilla.read(STRING_TABLES[0]))!).entries.length;
+    expect(parseTbl(write.bytes).entries.length).toBe(before + 1);
+    expect(plan.txtMerges.find((m) => m.table === 'patchstring.tbl')?.note).toMatch(/1 name added: "Guild Hall"/);
+    // Without new names, nothing is written.
+    const same = await planImport(readMapPackage((await buildMapPackage(vanilla, { path: MAP, ds1: map.ds1, dt1Paths: map.resolution.paths }, { ds1Bytes: (await vanilla.read(MAP))!, txtRows, strings })).zip), vanilla);
+    expect(same.txtWrites.some((w) => w.path === STRING_TABLES[0])).toBe(false);
+  });
+
   it('can leave base-game DT1s out of the zip but lists them', async () => {
     const gd = await GameData.load(vanilla);
     const map = await openMap(gd, MAP);

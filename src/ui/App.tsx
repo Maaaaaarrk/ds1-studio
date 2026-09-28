@@ -58,7 +58,7 @@ import { PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
-import { buildMapPackage, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
+import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetFromSelection, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
@@ -1798,7 +1798,10 @@ export function App() {
         const built = await buildMapPackage(
           gd.fs,
           { path: doc.path, ds1: doc.ds1, dt1Paths: map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path) },
-          { ds1Bytes: writeDs1(doc.ds1), objectSpecs, txtRows: await collectMapTxtRows(gd.fs, doc.path), notes, includeBaseGameDt1s: includeBaseGame },
+          await (async () => {
+            const txtRows = await collectMapTxtRows(gd.fs, doc.path);
+            return { ds1Bytes: writeDs1(doc.ds1), objectSpecs, txtRows, strings: await collectMapStrings(gd.fs, txtRows), notes, includeBaseGameDt1s: includeBaseGame };
+          })(),
         );
         setExportState({ building: false, result: { files: built.manifest.files, missing: built.missing } });
         const where = await exportBytes(`${doc.path.split('/').pop()!.replace(/\.ds1$/i, '')}.zip`, built.zip);
