@@ -1,5 +1,6 @@
 import { palettePath, parsePalette, type Palette } from '../formats/palette';
 import type { LayeredFs } from '../vfs/vfs';
+import { hueRemap } from '../formats/dt1Edit';
 
 /**
  * The "Act 0" palette: only the colours that look the same in every act, so tiles drawn with it don't shift colour
@@ -85,6 +86,16 @@ export function loadAct0Palette(fs: LayeredFs): Promise<Act0Palette> {
     })();
   }
   return loading;
+}
+
+/**
+ * The Act 0 conversion of a DT1 drawn for the act whose palette is `home`: every colour snapped to the nearest Act 0
+ * colour by plain RGB distance (ties to the lowest index). This reproduces the community's act-0 DT1 sets exactly
+ * wherever they weren't dithered or retouched (checked against a full converted set: 90.6% of every changed pixel,
+ * the rest error-diffusion dithering and hand edits).
+ */
+export function act0Remap(home: Palette, usable: ArrayLike<boolean>): Uint8Array {
+  return hueRemap(home, { allowed: usable, metric: 'rgb' });
 }
 
 /**

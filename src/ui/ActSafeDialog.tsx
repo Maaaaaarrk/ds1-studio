@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { decodeTile, type Dt1, type TileImage } from '../formats/dt1';
-import { hueRemap, recolorDt1 } from '../formats/dt1Edit';
+import { recolorDt1 } from '../formats/dt1Edit';
 import { ACT0_PALETTE, OLD_ACT5_PALETTE, PALETTE_NAMES, type Palette } from '../formats/palette';
-import { loadAct0Palette, type Act0Palette } from '../game/act0Palette';
+import { act0Remap, loadAct0Palette, type Act0Palette } from '../game/act0Palette';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { isBuiltinPath } from '../game/specialTiles';
@@ -113,7 +113,7 @@ export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onClose }: 
   }, [map, gd, mapAct]);
 
   /** Per drawn-for act: every colour snapped to the nearest Act 0 colour, as it looks in that act. */
-  const remaps = useMemo(() => (act0 && acts ? acts.map((p) => hueRemap(p, { allowed: act0.usable })) : null), [act0, acts]);
+  const remaps = useMemo(() => (act0 && acts ? acts.map((p) => act0Remap(p, act0.usable)) : null), [act0, acts]);
   /** Per drawn-for act: the map's palette showing each index as it looks once converted (Act 0 colours are the same in every act). */
   const afterPalettes = useMemo(
     () =>

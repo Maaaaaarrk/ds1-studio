@@ -119,9 +119,9 @@ export function recolorDt1(bytes: Uint8Array, remap: Uint8Array, tiles?: number[
 // ---------------------------------------------------------------------------------------------
 // Colour remaps
 
-function nearestIndex(palette: Palette, r: number, g: number, b: number, allowed?: ArrayLike<boolean>): number {
-  // Perceptual "redmean" weighting; an exact colour match always has distance 0, and ties go to
-  // the lowest index, so duplicate palette colours resolve to the first equal index.
+function nearestIndex(palette: Palette, r: number, g: number, b: number, allowed?: ArrayLike<boolean>, metric: 'perceptual' | 'rgb' = 'perceptual'): number {
+  // Perceptual "redmean" weighting, or plain RGB distance; an exact colour match always has distance 0, and ties go
+  // to the lowest index, so duplicate palette colours resolve to the first equal index.
   let best = allowed ? Array.from({ length: 255 }, (_, k) => k + 1).find((k) => allowed[k]) ?? 1 : 1;
   let bestD = Infinity;
   for (let i = 1; i < 256; i++) {
@@ -131,7 +131,7 @@ function nearestIndex(palette: Palette, r: number, g: number, b: number, allowed
     const dg = palette[i * 4 + 1] - g;
     const db = palette[i * 4 + 2] - b;
     const rm = (pr + r) / 2;
-    const d = (2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db;
+    const d = metric === 'rgb' ? dr * dr + dg * dg + db * db : (2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db;
     if (d < bestD) {
       bestD = d;
       best = i;
@@ -188,6 +188,11 @@ export interface HueRemapOptions {
   tint?: [number, number, number];
   /** Tint mix amount 0..1 (0 = none). */
   tintAmount?: number;
+  /**
+   * How "nearest colour" is judged: perceptual (redmean, the default) or plain RGB distance, which is what the Act 0
+   * conversions the community uses do (Paint Shop Pro's nearest-colour matching with d2-act0.pal).
+   */
+  metric?: 'perceptual' | 'rgb';
 }
 
 /**
@@ -219,7 +224,7 @@ export function hueRemap(palette: Palette, opts: HueRemapOptions): Uint8Array {
       g = g + (tint[1] - g) * amt;
       b = b + (tint[2] - b) * amt;
     }
-    remap[i] = nearestIndex(palette, clamp255(r), clamp255(g), clamp255(b), opts.allowed);
+    remap[i] = nearestIndex(palette, clamp255(r), clamp255(g), clamp255(b), opts.allowed, opts.metric);
   }
   return remap;
 }

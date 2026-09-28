@@ -5,14 +5,13 @@ import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
 import { Thumb, TilePreview, tilePicture, usePreview } from './TilePalette';
-import { loadAct0Palette } from '../game/act0Palette';
+import { act0Remap, loadAct0Palette } from '../game/act0Palette';
 import { ACT0_PALETTE, type Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
 import { Dt1Tree } from './Dt1Tree';
 import { HelpTip } from './HelpTip';
 import { buildCustomDt1, customNameProblem, maxCustomNameLength, planCustomDt1, RECOMMENDED_NAME_LENGTH, type CustomDt1Plan, type TilePick } from '../game/customDt1';
-import { hueRemap } from '../formats/dt1Edit';
 import { decodeTile } from '../formats/dt1';
 
 interface Props {
@@ -498,7 +497,7 @@ function CustomDt1Panel({
     if (!actSafe || safe) return;
     let live = true;
     void Promise.all([loadAct0Palette(gd.fs), ...[0, 1, 2, 3, 4].map((a) => gd.palette(a))])
-      .then(([a0, ...acts]) => live && setSafe({ usable: a0.usable, remaps: acts.map((p) => hueRemap(p, { allowed: a0.usable })) }))
+      .then(([a0, ...acts]) => live && setSafe({ usable: a0.usable, remaps: acts.map((p) => act0Remap(p, a0.usable)) }))
       .catch((e) => live && setError(`Couldn't load the Act 0 palette: ${(e as Error).message}`));
     return () => {
       live = false;

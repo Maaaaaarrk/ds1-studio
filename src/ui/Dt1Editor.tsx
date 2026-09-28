@@ -170,6 +170,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       tint: rgb(adjust.tint),
       tintAmount: adjust.tintAmount,
       allowed,
+      // Act 0: the nearest colour by plain RGB distance, as the community's act-0 conversions do.
+      metric: allowed ? 'rgb' : 'perceptual',
     });
     if (adjust.swapOn) {
       const s = swapRemap(source, rgb(adjust.swapFrom), rgb(adjust.swapTo), adjust.swapTolerance, allowed);
