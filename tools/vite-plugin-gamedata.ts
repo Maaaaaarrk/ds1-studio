@@ -1,5 +1,5 @@
 import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { Plugin } from 'vite';
 
 /**
@@ -39,6 +39,8 @@ export interface ManifestSource {
 }
 
 const BASE_MPQS = ['patch_d2.mpq', 'd2exp.mpq', 'd2data.mpq', 'd2char.mpq'];
+/** The game's daily log, which gets the crash reports. */
+const CRASH_LOG = /^D2\d{6}\.txt$/i;
 const RELEVANT = /\.(ds1|dt1|dat|txt|json|bin|cof|dcc|dc6|tbl)$/i;
 
 /** Same write rules as the desktop app: maps/tiles/sprites under data/global, tables under excel, presets under data/ds1studio. */
@@ -72,6 +74,7 @@ export function gameDataPlugin(): Plugin {
   let sources: (ManifestSource & { path: string })[] = [];
   const looseLists = new Map<string, string[]>();
   let saveRoot: string | null = null;
+  let logDirs: string[] = [];
 
   return {
     name: 'ds1studio-gamedata',
@@ -79,6 +82,7 @@ export function gameDataPlugin(): Plugin {
     configResolved(cfg) {
       const conf = loadConfig(cfg.root);
       saveRoot = conf.saveDir ?? conf.modDirs?.[0] ?? null;
+      logDirs = [...(conf.modDirs ?? []), ...(conf.gameDir ? [conf.gameDir] : [])];
       sources = [];
       for (const [i, mod] of (conf.modDirs ?? []).entries()) {
         if (existsSync(join(mod, 'data'))) sources.push({ id: `mod${i}`, kind: 'loose', label: `${mod}${sep}data`, path: mod });
@@ -115,6 +119,24 @@ export function gameDataPlugin(): Plugin {
           res.setHeader('content-type', 'application/json');
           res.end(JSON.stringify(body));
         };
+
+        // The game's crash logs (D2YYMMDD.txt) in the mod and game folders, newest first; read one by its path.
+        if (parts[0] === 'crash-logs') {
+          const logs = logDirs.flatMap((dir) => {
+            if (!existsSync(dir)) return [];
+            return readdirSync(dir)
+              .filter((f) => CRASH_LOG.test(f))
+              .map((f) => ({ path: join(dir, f), modified: statSync(join(dir, f)).mtimeMs }));
+          });
+          return json(200, logs.sort((a, b) => b.modified - a.modified));
+        }
+        if (parts[0] === 'crash-log') {
+          const file = resolve(url.searchParams.get('path') ?? '');
+          if (!CRASH_LOG.test(basename(file)) || !logDirs.some((d) => resolve(dirname(file)) === resolve(d)) || !existsSync(file)) return json(404, { error: 'not found' });
+          res.setHeader('content-type', 'text/plain; charset=utf-8');
+          res.end(readFileSync(file));
+          return;
+        }
 
         if (parts[0] === 'save-target') {
           return saveRoot ? json(200, { root: saveRoot }) : json(404, { error: 'No saveDir or modDirs configured in ds1studio.local.json' });

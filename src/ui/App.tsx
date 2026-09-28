@@ -30,6 +30,7 @@ import {
   Save,
   Scissors,
   ShieldCheck,
+  FileWarning,
   Sparkles,
   Stamp,
   Table2,
@@ -81,7 +82,7 @@ import { CubeRecipeDialog } from './CubeRecipe';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
-import { getCell, parseTxtTable, serializeTxtTable } from '../formats/txtTable';
+import { getCell, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
 import { AutomapEditor } from './AutomapEditor';
@@ -99,7 +100,7 @@ import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
-import { CompatDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
+import { CompatDialog, CrashLogDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
 import type { Sprite } from '../game/sprites';
 import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
 import { DesktopSetup } from './DesktopSetup';
@@ -249,7 +250,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -257,6 +258,8 @@ export function App() {
   const [suggested, setSuggested] = useState<Preset[] | null>(null);
   const [suggesting, setSuggesting] = useState<SuggestProgress | null>(null);
   const [checkResults, setCheckResults] = useState<CheckResult[] | null>(null);
+  /** Levels.txt, read when the crash log opens (to name the levels behind a missing loading screen). */
+  const [crashLevels, setCrashLevels] = useState<TxtTableDoc | null>(null);
   const [marks, setMarks] = useState<{ x: number; y: number }[] | undefined>(undefined);
   const [exportState, setExportState] = useState<{ building: boolean; result: { files: { path: string; size: number; from: string }[]; missing: string[] } | null }>({ building: false, result: null });
   /** The open map's rows in the tables a package carries (null while reading). */
@@ -1667,6 +1670,21 @@ export function App() {
     setCheckResults(await checkMap(gd, map, scene, automap, (key) => kept.has(`${normalizePath(map.path)}|${key}`)));
   }, [gd, map, scene, automapData, automapLevel]);
   const runCheckRef = useRef(runCheck);
+
+  const openCrashLog = () => {
+    setDialog('crashes');
+    void gd?.fs.read('data/global/excel/Levels.txt').then((b) => setCrashLevels(b ? parseTxtTable(b) : null));
+  };
+  const levelsWithEntry = (entry: string): string[] => {
+    const t = crashLevels;
+    if (!t) return [];
+    const out: string[] = [];
+    for (let r = 0; r < t.rows.length; r++) {
+      if (getCell(t, r, 'EntryFile').trim().toLowerCase() === entry.toLowerCase())
+        out.push(`${getCell(t, r, 'Id') || r} ${getCell(t, r, 'LevelName') || getCell(t, r, 'Name')}`.trim());
+    }
+    return out;
+  };
   runCheckRef.current = runCheck;
   /** Carries out a compatibility-check fix, then checks again (fixes that edit the map can be undone). */
   const applyFix = useCallback(
@@ -2155,7 +2173,13 @@ export function App() {
             { label: 'As if inside', icon: <EyeOff />, onClick: () => setVisibility((v) => ({ ...v, popsInside: !v.popsInside })), active: visibility.popsInside, size: 'sm', shortcut: kb['view.popsInside'], title: 'Hide the tiles of every hide area, as the game does while a player is inside' },
           ],
         },
-        { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' }] },
+        {
+          label: 'Check',
+          items: [
+            { label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' },
+            { label: 'Crash log', icon: <FileWarning />, onClick: openCrashLog, title: "Read the game's crash log and see what the latest crash means for your map" },
+          ],
+        },
         { label: 'Settings', items: [{ label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' }] },
       ],
     },
@@ -2240,7 +2264,13 @@ export function App() {
             { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
           ],
         },
-        { label: 'Check', items: [{ label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap }] },
+        {
+          label: 'Check',
+          items: [
+            { label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap },
+            { label: 'Crash log', icon: <FileWarning />, onClick: openCrashLog },
+          ],
+        },
         { label: 'Share', items: [{ label: 'Export map', icon: <Download />, onClick: openExport, disabled: noMap }] },
       ],
     },
@@ -2931,6 +2961,7 @@ export function App() {
           }}
         />
       )}
+      {dialog === 'crashes' && <CrashLogDialog levelsWithEntry={levelsWithEntry} onCheck={map ? () => void runCheck() : null} onClose={() => setDialog(null)} />}
       {dialog === 'check' && (
         <CompatDialog
           results={checkResults}

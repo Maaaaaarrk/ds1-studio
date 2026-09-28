@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { listCrashLogs, readCrashLog, type CrashLogFile } from '../app/crashLogs';
 import type { CheckResult, Fix } from '../game/compat';
+import { explainCrash, parseCrashLog, type Crash, type CrashExplanation } from '../game/crashLog';
 import { missingTablesWarning, type ImportPlan, type MapPackage, type TableCoverage } from '../game/mapPackage';
 import { Modal } from './Dialogs';
 import { ColHelp } from './HelpTip';
@@ -241,6 +243,121 @@ export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: 
           {busy ? 'Importing…' : 'Import'}
         </button>
       </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Crash logs
+
+interface CrashLogProps {
+  /** The levels (as "205 Guild 3") whose Levels.txt EntryFile is a given loading-screen image. */
+  levelsWithEntry: (entry: string) => string[];
+  /** Runs the compatibility check on the open map (null when no map is open). */
+  onCheck: (() => void) | null;
+  onClose: () => void;
+}
+
+const logDay = (path: string) => {
+  const m = /D2(\d\d)(\d\d)(\d\d)\.txt$/i.exec(path);
+  return m ? `20${m[1]}-${m[2]}-${m[3]}` : path;
+};
+
+/** Crashes (newest first) with each run of the same crash in a row shown once, as the newest with a count. */
+function groupCrashes(crashes: Crash[], levelsWithEntry: (entry: string) => string[]) {
+  const out: { crash: Crash; e: CrashExplanation; count: number; first: string }[] = [];
+  for (const crash of crashes) {
+    const e = explainCrash(crash, levelsWithEntry);
+    const last = out[out.length - 1];
+    if (last && last.e.title === e.title) {
+      last.count++;
+      last.first = crash.time;
+    } else out.push({ crash, e, count: 1, first: crash.time });
+  }
+  return out;
+}
+
+/** The game's recent crashes, read from its logs, with what they mean for a map and how to fix them. */
+export function CrashLogDialog({ levelsWithEntry, onCheck, onClose }: CrashLogProps) {
+  const [logs, setLogs] = useState<CrashLogFile[] | null>(null);
+  const [path, setPath] = useState<string | null>(null);
+  const [crashes, setCrashes] = useState<Crash[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    void listCrashLogs().then((l) => {
+      setLogs(l);
+      setPath((p) => (p && l.some((x) => x.path === p) ? p : (l[0]?.path ?? null)));
+    });
+  }, [reload]);
+  useEffect(() => {
+    if (!path) return;
+    setCrashes(null);
+    setError(null);
+    readCrashLog(path)
+      .then((text) => setCrashes(parseCrashLog(text).reverse()))
+      .catch((e) => setError(String(e)));
+  }, [path, reload]);
+  return (
+    <Modal title="Crash log" onClose={onClose} wide>
+      <p className="muted small">
+        When Diablo II crashes it writes what happened to a log in its folder (D2&lt;date&gt;.txt). This reads the newest crashes and says what they mean for
+        your maps — most crashes a map causes come from its table rows.
+      </p>
+      {logs === null ? (
+        <p className="muted">Looking for logs…</p>
+      ) : logs.length === 0 ? (
+        <p className="muted">No game logs found in the game or mod folders. The game writes one the first time it crashes on a day.</p>
+      ) : (
+        <>
+          <div className="check-summary">
+            <label className="inline">
+              Log{' '}
+              <select value={path ?? ''} onChange={(e) => setPath(e.target.value)}>
+                {logs.map((l) => (
+                  <option key={l.path} value={l.path}>
+                    {logDay(l.path)} · {l.path}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="btn" onClick={() => setReload((n) => n + 1)}>
+              Refresh
+            </button>
+          </div>
+          {error && <p className="error-text">{error}</p>}
+          {!error && crashes === null && <p className="muted">Reading…</p>}
+          {crashes?.length === 0 && <p className="ok-text">No crashes in this log.</p>}
+          <ul className="check-list">
+            {groupCrashes(crashes ?? [], levelsWithEntry).slice(0, 20).map(({ crash: c, e, count, first }, i) => {
+              return (
+                <li key={i} className={`check ${i === 0 ? 'error' : 'warning'}`}>
+                  <span className="check-icon">{i === 0 ? '✕' : '!'}</span>
+                  <div className="check-text">
+                    <div>
+                      <span className="muted small">{c.time || 'unknown time'}{i === 0 ? ' · latest' : ''}{count > 1 ? ` · ${count} times since ${first}` : ''} · </span>
+                      {e.title}
+                    </div>
+                    <div className="muted small">{e.detail}</div>
+                    <div className="muted small">
+                      {c.kind === 'halt' ? `Halt: ${c.what || 'no message'}` : c.what}
+                      {c.module ? ` · ${c.module}${c.offset !== undefined ? ` +0x${c.offset.toString(16)}` : ''}` : ''}
+                      {c.line ? ` · line ${c.line}` : ''}
+                    </div>
+                    {e.check && onCheck && i === 0 && (
+                      <div className="check-fixes">
+                        <button className="btn small primary" onClick={onCheck}>
+                          Run compatibility check
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
     </Modal>
   );
 }

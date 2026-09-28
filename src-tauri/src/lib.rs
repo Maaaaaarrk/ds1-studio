@@ -123,6 +123,42 @@ fn list_mpqs(state: State<AppState>, dir: String) -> Result<Vec<String>, String>
         .collect())
 }
 
+#[derive(Serialize)]
+struct CrashLogFile {
+    path: String,
+    /// Milliseconds since 1970.
+    modified: f64,
+}
+
+/// The game's daily logs (D2YYMMDD.txt, which get its crash reports) in the mod and game folders, newest first.
+#[tauri::command]
+fn list_crash_logs(state: State<AppState>) -> Vec<CrashLogFile> {
+    let config = state.config.lock().unwrap().clone();
+    let mut out = Vec::new();
+    for dir in config.mod_dirs.iter().chain(config.game_dir.iter()) {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let is_log = name.len() == 12
+                && name[..2].eq_ignore_ascii_case("d2")
+                && name[2..8].bytes().all(|b| b.is_ascii_digit())
+                && name[8..].eq_ignore_ascii_case(".txt");
+            if !is_log {
+                continue;
+            }
+            let modified = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0.0, |d| d.as_millis() as f64);
+            out.push(CrashLogFile { path: e.path().to_string_lossy().into_owned(), modified });
+        }
+    }
+    out.sort_by(|a, b| b.modified.total_cmp(&a.modified));
+    out
+}
+
 #[tauri::command]
 fn file_size(state: State<AppState>, path: String) -> Result<u64, String> {
     let path = allowed(&state, &path)?;
@@ -442,6 +478,7 @@ pub fn run() {
             set_config,
             list_data_files,
             list_mpqs,
+            list_crash_logs,
             file_size,
             read_range,
             read_file,
