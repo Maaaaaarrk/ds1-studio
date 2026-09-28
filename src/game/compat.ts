@@ -45,6 +45,8 @@ export type Fix = { label: string } & (
   | { kind: 'delete-objects'; indices: number[] }
   | { kind: 'place-object'; type: number; id: number }
   | { kind: 'set-act'; act: number }
+  /** Crop the map: negative deltas remove cells from each edge. */
+  | { kind: 'resize'; delta: { left: number; top: number; right: number; bottom: number } }
   | { kind: 'automap-editor' }
   /** Sets up warp link `vis` (Levels.txt VisN, in the link editor) and/or arms the brush with its warp tile. */
   | { kind: 'warp-link'; vis: number; edit: boolean; place: boolean; toTown?: number }
@@ -181,37 +183,52 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   }
   else out.push({ severity: 'ok', area: 'Tiles', title: 'Every placed tile has a graphic' });
 
-  // The Map entry (special tile 30/11) is where a map portal (PD2's map items) puts players. The game only finds it
-  // when one of the level's DT1s contains that tile, as PD2's own Guild level type does with act1/barracks/warp.dt1;
-  // DS1 Studio's built-in marker isn't enough. Without it, using the map item stops the game (D2Common, line 568).
-  {
-    const entryKey = `${Orientation.SpecialTile1}|30|11`;
-    const hasEntry = ds1.walls.some((l) => l.some((c) => c.orientation === Orientation.SpecialTile1 && c.mainIndex === 30 && c.subIndex === 11));
-    let inDt1 = false;
-    for (const l of lib.loaded) {
-      if (inDt1 || !l.found || isBuiltinPath(l.path)) continue;
-      const dt1 = await gd.dt1(l.path).catch(() => null);
-      inDt1 = !!dt1?.tiles.some((t) => t.orientation === Orientation.SpecialTile1 && t.mainIndex === 30 && t.subIndex === 11);
-    }
-    if (hasEntry && !inDt1) {
-      const found = await dt1sContaining(gd, new Set([entryKey]), new Set(lib.loaded.map((l) => normalizePath(l.path))), lib.loaded.map((l) => l.path));
-      const warp = 'data/global/tiles/act1/barracks/warp.dt1';
-      const paths = gd.fs.locate(warp) ? [warp] : found.paths.slice(0, 1);
-      out.push({
-        severity: 'error',
-        area: 'Tiles',
-        title: "The Map entry is invisible to the game: none of the level's tile libraries has it",
-        detail: `A map portal (a map item) puts players on the Map entry tile (special tile 30/11), but the game only finds it when one of the level's DT1s contains that tile. None of this map's does, so using the map item stops the game (D2Common, line 568). ${paths.length ? `${short(paths[0])} has it (PD2's own Guild levels load it for this).` : 'No DT1 in the game or your mod has it.'}`,
-        fixes: paths.length ? [{ kind: 'add-dt1s', label: `Add ${short(paths[0])} to the map's libraries`, paths }] : [],
-      });
-    }
-  }
 
   // DT1s the placed tiles actually come from.
   const used = new Map<string, number>();
   for (const it of scene.items) {
     const src = lib.sourceOf(it.tile);
     if (src && !isBuiltinPath(src.path)) used.set(normalizePath(src.path), (used.get(normalizePath(src.path)) ?? 0) + 1);
+  }
+
+  // --- Arrival: where the game puts players who come in without a warp (a map item's portal) ----------------------
+  // D2Common's spawn search for a level (ordinal 10816) takes, in order: a waypoint object, a room with a warp tile,
+  // the room at the level's centre, any room; then the nearest free ground around that room's middle, and stops the
+  // game (line 568) when there is none. A map whose tiles are all off-centre (a big new map) has nothing there.
+  {
+    const hasWaypoint = ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, o.type, o.id)));
+    const hasWarp = ds1.walls.some((l) => l.some((c) => (c.orientation === Orientation.SpecialTile1 || c.orientation === Orientation.SpecialTile2) && c.mainIndex <= 7));
+    if (!hasWaypoint && !hasWarp) {
+      const lw = ds1.width - 1;
+      const lh = ds1.height - 1;
+      const rx = Math.floor((Math.floor(lw / 2) - 2) / 8) * 8;
+      const ry = Math.floor((Math.floor(lh / 2) - 2) / 8) * 8;
+      const floorAt = (x: number, y: number) => ds1.floors.some((l) => !!l[y * ds1.width + x]?.prop1);
+      let ground = 0;
+      for (let y = ry; y < Math.min(ry + 8, ds1.height); y++) for (let x = rx; x < Math.min(rx + 8, ds1.width); x++) if (floorAt(x, y)) ground++;
+      if (!ground) {
+        let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+        for (let y = 0; y < ds1.height; y++)
+          for (let x = 0; x < ds1.width; x++)
+            if (floorAt(x, y) || ds1.walls.some((l) => !!l[y * ds1.width + x]?.prop1)) {
+              minX = Math.min(minX, x);
+              maxX = Math.max(maxX, x);
+              minY = Math.min(minY, y);
+              maxY = Math.max(maxY, y);
+            }
+        const m = 2;
+        const delta = maxX < 0 ? null : { left: -Math.max(0, minX - m), top: -Math.max(0, minY - m), right: -Math.max(0, ds1.width - 1 - maxX - m), bottom: -Math.max(0, ds1.height - 1 - maxY - m) };
+        const trimmed = delta ? { w: ds1.width + delta.left + delta.right, h: ds1.height + delta.top + delta.bottom } : null;
+        out.push({
+          severity: 'error',
+          area: 'Level',
+          title: 'Players arriving by portal (a map item) land in the empty middle of the map, and the game stops',
+          detail: `With no waypoint and no warp tile, the game puts players arriving without a warp (a map item's portal) in the room at the level's centre, cells ${rx}-${rx + 7} × ${ry}-${ry + 7} here, and looks for free ground around its middle. There is no floor there, so it finds none and stops (D2Common, line 568). Put the map's floor there, add a waypoint, or crop the map to what's painted${trimmed ? ` (${trimmed.w}×${trimmed.h})` : ''} so its centre is on the map's floor; then save (the level's size in Levels.txt follows).`,
+          cells: [{ x: rx + 4, y: ry + 4 }],
+          fixes: delta && (delta.left || delta.top || delta.right || delta.bottom) ? [{ kind: 'resize', label: `Crop the map to what's painted (${trimmed!.w}×${trimmed!.h}, 2 cells around)`, delta }] : [],
+        });
+      }
+    }
   }
 
   // --- Tables: is the map part of a level? --------------------------------------------------------------------------

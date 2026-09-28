@@ -123,7 +123,7 @@ import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
-import { isBuiltinPath, PLACEABLE_SPECIALS, specialTileInfo } from '../game/specialTiles';
+import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
 import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
@@ -1278,11 +1278,13 @@ export function App() {
   const createMap = useCallback(
     async (c: NewMapChoice) => {
       if (!gd || !confirmDiscard()) return;
-      // No tile libraries yet (they're picked next, from the DT1 library) and the Act 0 colours.
-      const ds1 = newDs1({ ...c, files: [] });
+      // Only the special-tile library to start with (the rest are picked next, from the DT1 library), in the Act 0
+      // colours. The game finds special tiles such as the Map entry only in a loaded DT1 that has them.
+      const paths = gd.fs.locate(SPECIAL_TILES_DT1) ? [gd.fs.exactPath(SPECIAL_TILES_DT1) ?? SPECIAL_TILES_DT1] : [];
+      const ds1 = newDs1({ ...c, files: paths.map(embeddedFileName) });
       try {
         rememberPalette(c.path, ACT0_PALETTE);
-        const m = await openMap(gd, c.path, { source: 'manual', lvlType: null, paths: [] }, ds1);
+        const m = await openMap(gd, c.path, { source: 'manual', lvlType: null, paths }, ds1);
         const d = new MapDocument(c.path, m.ds1);
         d.markUnsaved();
         setMap(m);
@@ -2220,6 +2222,10 @@ export function App() {
             notify(`Deleted ${drop.size} objects (Ctrl+Z to undo)`);
             return recheck();
           }
+          case 'resize':
+            resize(fix.delta);
+            notify(`Map cropped to ${doc.ds1.width}×${doc.ds1.height} (Ctrl+Z to undo). Save to update the level's size in Levels.txt.`);
+            return recheck();
           case 'set-act':
             mutate((d) => {
               d.act = fix.act;
@@ -2232,7 +2238,7 @@ export function App() {
         notify((e as Error).message, true);
       }
     },
-    [gd, map, doc, applyDt1s, writeFiles, reloadTables, setObjects, mutate, notify],
+    [gd, map, doc, applyDt1s, writeFiles, reloadTables, setObjects, mutate, notify, resize],
   );
 
   const exportPackage = useCallback(
@@ -2854,15 +2860,6 @@ export function App() {
     }, `Place ${label}`);
     bump();
     notify(`${label} placed at cell ${x}, ${y} (Wall ${index + 1}) · Ctrl+Z to undo`);
-    // The Map entry is only found by the game (for map portals) when a loaded DT1 has that tile, not DS1 Studio's
-    // built-in marker: add the game's act1/barracks/warp.dt1, as PD2's own Guild levels do.
-    const warp = 'data/global/tiles/act1/barracks/warp.dt1';
-    const t = map?.lib.pick(Orientation.SpecialTile1, main, sub, 0);
-    const src = t ? map?.lib.sourceOf(t) : null;
-    if (map && main === 30 && sub === 11 && (!src || isBuiltinPath(src.path)) && gd?.fs.locate(warp)) {
-      const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
-      void applyDt1s([...libs, warp]).then(() => notify(`${label} placed at cell ${x}, ${y}; added act1/barracks/warp.dt1 to the map's libraries so the game finds it (map portals arrive there).`));
-    }
   };
   /** The map's right-click menu for a cell. */
   const mapMenuEntries = (m: { cell: [number, number]; world: [number, number] }): (MenuEntry | null)[] => {
@@ -3676,7 +3673,13 @@ export function App() {
           mapPath={data.gd.fs.exactPath(doc.path) ?? doc.path}
           width={doc.ds1.width}
           height={doc.ds1.height}
-          usedDt1s={[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p)}
+          usedDt1s={[
+            ...[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p),
+            // The special-tile library stays with the map even before a special tile is placed (a map loading it keeps it).
+            ...((map?.lib.loaded ?? []).some((l) => l.found && normalizePath(l.path) === normalizePath(SPECIAL_TILES_DT1)) && ![...dt1Usage.keys()].some((p) => normalizePath(p) === normalizePath(SPECIAL_TILES_DT1))
+              ? [data.gd.fs.exactPath(SPECIAL_TILES_DT1) ?? SPECIAL_TILES_DT1]
+              : []),
+          ]}
           popCount={popAreas.length}
           onApply={applyTableWrites}
           onFix={async (writes) => {

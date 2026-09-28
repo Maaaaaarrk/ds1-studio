@@ -41,6 +41,13 @@ export const PLACEABLE_SPECIALS: { main: number; sub: number; label: string; hel
   ...Array.from({ length: 8 }, (_, vis) => ({ main: vis, sub: 0, ...specialTileInfo(vis, 0) })),
 ];
 
+/**
+ * The game's special-tile library: act1/barracks/warp.dt1 holds the special tiles (Map entry, town entries, warps,
+ * hide-area corners…). The game only finds a special tile such as the Map entry in a DT1 the level loads, so every
+ * new map starts with this one (PD2's own Guild level type loads it first, for the same reason).
+ */
+export const SPECIAL_TILES_DT1 = 'data/global/tiles/act1/barracks/warp.dt1';
+
 /** Virtual path of the built-in special tiles (not a real DT1: nothing to load, save or add to a level). */
 export const BUILTIN_SPECIALS_PATH = 'builtin/special tiles';
 

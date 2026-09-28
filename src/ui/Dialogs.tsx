@@ -102,7 +102,7 @@ export function NewMapDialog({ onCreate, onClose }: { onCreate: (c: NewMapChoice
         </div>
       </div>
       <p className="muted small">
-        The map starts with no tile libraries: the DT1 library opens next, to choose them from any act. It&apos;s shown in the <b>Act 0</b> colours (the ones
+        The map starts with just the special-tile library (act1/barracks/warp.dt1: Map entry, warps and the other special tiles the game needs a DT1 for); the DT1 library opens next, to choose the rest from any act. It&apos;s shown in the <b>Act 0</b> colours (the ones
         that look the same in every act; magenta marks colours that change between acts). <b>Game → Add to game</b> later makes the game load it, with a
         level type of its own when it needs one.
       </p>
