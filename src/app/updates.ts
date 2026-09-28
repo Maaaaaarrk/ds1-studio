@@ -15,6 +15,8 @@ export interface UpdateInfo {
   url: string;
   /** Present when the app can download, install and restart by itself (installed via the Windows installer or AppImage). */
   install?: (onProgress: (done: number, total: number | null) => void) => Promise<void>;
+  /** Why it can't install itself, when `install` is missing. */
+  why?: string;
 }
 
 /** Compares dotted versions ("0.10.2" > "0.9.9"); a leading "v" is ignored. */
@@ -41,12 +43,13 @@ async function latestRelease(): Promise<UpdateInfo | null> {
  * restart); installs it can't update (e.g. a .deb/.rpm package) still get the release link.
  */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
+  let why: string | undefined;
   if (isTauri) {
     try {
       const { check } = await import('@tauri-apps/plugin-updater');
       const update = await check();
-      if (!update) return null;
-      return {
+      if (update)
+        return {
         version: update.version,
         notes: update.body ?? '',
         date: update.date,
@@ -63,11 +66,15 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
           await relaunch();
         },
       };
-    } catch {
-      // Not updatable in place (package-manager install, no signed feed yet…): fall back to the release list.
+      // A release is published a minute or two before its installers and update feed are uploaded.
+      why = 'Its installer is still being uploaded (this takes a few minutes after a release appears). Check again shortly and it will install itself.';
+    } catch (e) {
+      // Not updatable in place (package-manager install, feed unreachable…): fall back to the release list.
+      why = `This install can't update itself (${e instanceof Error ? e.message : String(e)}): download the new version from the release page.`;
     }
   }
-  return latestRelease();
+  const release = await latestRelease();
+  return release && why ? { ...release, why } : release;
 }
 
 /** Opens a web page in the user's browser. */

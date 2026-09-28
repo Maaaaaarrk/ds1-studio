@@ -96,13 +96,17 @@ type State =
 
 /** Help → Check for updates: finds a newer GitHub release and installs it (or links to it). */
 export function UpdateDialog({ onClose, initial }: { onClose: () => void; initial?: UpdateInfo | null }) {
-  const [state, setState] = useState<State>(initial ? { kind: 'available', info: initial } : { kind: 'checking' });
+  // The startup check's result is reused only when it can install; otherwise look again (the installer may be up now).
+  const reuse = initial?.install ? initial : null;
+  const [state, setState] = useState<State>(reuse ? { kind: 'available', info: reuse } : { kind: 'checking' });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (initial) return;
+    if (reuse && attempt === 0) return;
+    setState({ kind: 'checking' });
     checkForUpdate()
       .then((info) => setState(info ? { kind: 'available', info } : { kind: 'none' }))
       .catch((e) => setState({ kind: 'error', message: (e as Error).message }));
-  }, [initial]);
+  }, [reuse, attempt]);
 
   const install = async (info: UpdateInfo) => {
     setState({ kind: 'installing', info, done: 0, total: null });
@@ -134,7 +138,7 @@ export function UpdateDialog({ onClose, initial }: { onClose: () => void; initia
           {!state.info.install && (
             <p className="muted small">
               {isTauri
-                ? 'This install can’t update itself (e.g. installed from a .deb/.rpm package): download the new version from the release page.'
+                ? (state.info.why ?? 'This install can’t update itself (e.g. installed from a .deb/.rpm package): download the new version from the release page.')
                 : 'Download the desktop app from the release page.'}
             </p>
           )}
@@ -150,6 +154,11 @@ export function UpdateDialog({ onClose, initial }: { onClose: () => void; initia
         <button className="btn" onClick={() => void openExternal(state.kind === 'available' ? state.info.url : `${REPO_URL}/releases`)}>
           Releases page
         </button>
+        {isTauri && ((state.kind === 'available' && !state.info.install) || state.kind === 'error') && (
+          <button className="btn" onClick={() => setAttempt((n) => n + 1)}>
+            Check again
+          </button>
+        )}
         {state.kind === 'available' && state.info.install && (
           <button className="btn primary" onClick={() => void install(state.info)}>
             Download and install
