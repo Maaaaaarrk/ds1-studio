@@ -43,7 +43,7 @@ export class GameData {
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
   /** "act:type:id" -> name and sprite recipe, from the game's own tables (acts 1-based; see objectCatalog). */
-  private objRows = new Map<string, { name: string; spec: SpriteSpec | null }>();
+  private objRows = new Map<string, { name: string; spec: SpriteSpec | null; nameKey?: string; selectable?: boolean }>();
   private sprites = new Map<string, Promise<Sprite | null>>();
   /** MonPreset.txt "Place" per act (1-based), indexed by NPC id. */
   private monPresets = new Map<number, string[]>();
@@ -83,7 +83,7 @@ export class GameData {
     gd.objectTable = !!presets;
     if (!presets) gd.warnings.push('The object table wasn’t found in D2Common.dll or Game.exe; objects are shown by number.');
     for (const e of buildCatalog(presets, { objects, monPreset, monStats, monStats2, superUniques })) {
-      gd.objRows.set(`${e.act}:${e.type}:${e.id}`, { name: e.name, spec: e.spec });
+      gd.objRows.set(`${e.act}:${e.type}:${e.id}`, { name: e.name, spec: e.spec, nameKey: e.nameKey, selectable: e.selectable });
     }
 
     for (const row of types?.rows ?? []) {
@@ -177,6 +177,12 @@ export class GameData {
       n -= per;
     }
     return this.objRows.get(`${act}:${type}:${n}`) ?? null;
+  }
+
+  /** The string-table key of the name an object shows in game on hover (objects.txt Name), if it shows one. */
+  objectNameKey(act0: number, type: number, id: number): string | null {
+    const r = this.objRow(act0, type, id);
+    return r?.selectable && r.nameKey ? r.nameKey : null;
   }
 
   /** Sprite recipe of an object, if any. */

@@ -11,6 +11,7 @@ import { findPops, popProblems } from './pops';
 import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
 import { ACT_TOWNS, exitProblems } from './exits';
 import { loadTable } from './levelTables';
+import { blankObjectNames, nameStringsWrite, readStringTables } from './objectStrings';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
@@ -470,6 +471,23 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   }
   const stacked = stackedSpots.length;
   if (!offMap.length && !blocked.length && !stacked) out.push({ severity: 'ok', area: 'Objects', title: `${ds1.objects.length} objects placed on valid ground` });
+
+  // Names shown on hover: an objects.txt Name whose string is missing or only spaces shows as an empty box in game.
+  const nameKeys = ds1.objects.filter((o) => o.type === 2).map((o) => gd.objectNameKey(ds1.act, o.type, o.id)).filter((k): k is string => !!k);
+  if (nameKeys.length) {
+    const blanks = blankObjectNames(await readStringTables(gd.fs), nameKeys);
+    if (blanks.length) {
+      const write = await nameStringsWrite(gd.fs, Object.fromEntries(blanks.map((b) => [b.key, b.suggested])));
+      out.push({
+        severity: 'warning',
+        area: 'Objects',
+        title: `${blanks.length === 1 ? 'An object shows' : `${blanks.length} kinds of object show`} an empty name box in game: ${blanks.map((b) => `"${b.key}"`).join(', ')}`,
+        detail: `Pointing at ${blanks.length === 1 ? 'it' : 'them'} shows a box with no text: the name's string ${blanks.every((b) => b.blank) ? 'is only spaces' : 'is missing or blank'} in the game's string tables (objects.txt Name is looked up in patchstring.tbl, expansionstring.tbl, then string.tbl). The guild objects Blizzard cut (Guild Vault, Steeg Stone) are like this. Adding the names to your mod's patchstring.tbl fixes it; edit the text there afterwards if you want other names.`,
+        columns: [{ table: 'objects', col: 'Name' }],
+        fixes: write ? [{ kind: 'table-write', label: `Add ${blanks.map((b) => `"${b.suggested}"`).join(', ')} to patchstring.tbl`, writes: [write] }] : undefined,
+      });
+    }
+  }
 
   // --- Automap ------------------------------------------------------------------------------------------------------
   const automapDoc = await loadTable(gd.fs, 'AutoMap.txt');
