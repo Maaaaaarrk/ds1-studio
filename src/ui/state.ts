@@ -64,6 +64,15 @@ export const DEFAULT_VISIBILITY: Visibility = {
  */
 export type ViewMode = 'tiles' | 'walk' | 'automap' | 'light' | 'roofs';
 
+/** The views in the order Tab steps through them. */
+export const VIEW_CYCLE: ViewMode[] = ['tiles', 'walk', 'automap', 'light', 'roofs'];
+export const VIEW_NAMES: Record<ViewMode, string> = { tiles: 'Tiles', walk: 'Walkability', automap: 'Automap', light: 'Level light', roofs: 'Roof hiding' };
+
+/** The view after (dir 1) or before (dir -1) `mode`. */
+export function nextView(mode: ViewMode, dir: 1 | -1): ViewMode {
+  return VIEW_CYCLE[(VIEW_CYCLE.indexOf(mode) + dir + VIEW_CYCLE.length) % VIEW_CYCLE.length];
+}
+
 /** Each mode's visibility flag. */
 const MODE_FLAGS = { walk: 'walkable', automap: 'automap', light: 'light', roofs: 'pops' } as const;
 

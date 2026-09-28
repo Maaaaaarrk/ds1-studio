@@ -97,6 +97,11 @@ interface Props {
    * report every new sub-tile the cursor reaches (not just new cells).
    */
   walkBrush?: { size: 1 | 3 | 5 | 'cell'; mode: 'block' | 'clear' } | null;
+  /**
+   * Objects on the cursor after Ctrl+C / Ctrl+X in object mode (positions relative to the cursor's sub-tile): drawn
+   * tinted, green for a copy, red for a cut, until they're placed.
+   */
+  objectGhost?: { objects: Ds1Object[]; cut: boolean } | null;
   /** Draw the map in this light (multiplies every colour), or as stored when null. */
   light?: [number, number, number] | null;
   /** With `light`: a player's light radius (sub-tiles) around the cursor, as a player standing there would see. */
@@ -184,8 +189,8 @@ export function MapView(props: Props) {
   const walkCursor = useRef<[number, number] | null>(null);
   /** The cursor in world space (for the player's light preview). */
   const cursorWorld = useRef<[number, number] | null>(null);
-  const latest = useRef({ ...props, walk, resizeDrag, automapImage, walkCursor });
-  latest.current = { ...props, walk, resizeDrag, automapImage, walkCursor };
+  const latest = useRef({ ...props, walk, resizeDrag, automapImage, walkCursor, cursorWorld });
+  latest.current = { ...props, walk, resizeDrag, automapImage, walkCursor, cursorWorld };
 
   // Animation clock in game ticks (25 per second, like the game). Animated floors advance every 2.5 ticks (10 fps);
   // objects at their own rate. Without animated objects the clock only needs the floors' 10 fps.
@@ -384,7 +389,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost]);
 
   // Input.
   useEffect(() => {
@@ -452,7 +457,7 @@ export function MapView(props: Props) {
       }
       const [cx, cy] = toCell(ev);
       cursorWorld.current = toWorld(ev);
-      if (latest.current.light && latest.current.playerLight) dirty.current = true;
+      if ((latest.current.light && latest.current.playerLight) || latest.current.objectGhost) dirty.current = true;
       if (latest.current.walkBrush) {
         // Walkability: follow the cursor sub-tile by sub-tile (the brush footprint, and strokes within a cell).
         const [fx, fy] = worldToSubTile(...toWorld(ev));
@@ -810,7 +815,36 @@ type OverlayState = Props & {
   walk: WalkPaths | null;
   resizeDrag: { current: { side: Side; delta: ResizeDelta } | null };
   walkCursor: { current: [number, number] | null };
+  cursorWorld: { current: [number, number] | null };
 };
+
+/** A sprite in one colour (its shading kept), for objects on the cursor: green for a copy, red for a cut. */
+const tintCache = new WeakMap<SpriteFrame, Map<string, HTMLCanvasElement>>();
+function tintedSprite(f: SpriteFrame, palette: Uint8Array, cut: boolean): HTMLCanvasElement {
+  const key = `${cut ? 'cut' : 'copy'}:${palette.length}`;
+  const cached = tintCache.get(f)?.get(key);
+  if (cached) return cached;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, f.width);
+  c.height = Math.max(1, f.height);
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(c.width, c.height);
+  const [tr, tg, tb] = cut ? [255, 70, 70] : [80, 255, 120];
+  const stride = palette.length >= 1024 ? 4 : 3;
+  for (let i = 0; i < f.width * f.height; i++) {
+    const p = f.pixels[i];
+    if (!p) continue;
+    const lum = (0.3 * palette[p * stride] + 0.59 * palette[p * stride + 1] + 0.11 * palette[p * stride + 2]) / 255;
+    const k = 0.35 + 0.65 * lum;
+    img.data[i * 4] = tr * k;
+    img.data[i * 4 + 1] = tg * k;
+    img.data[i * 4 + 2] = tb * k;
+    img.data[i * 4 + 3] = 210;
+  }
+  ctx.putImageData(img, 0, 0);
+  (tintCache.get(f) ?? tintCache.set(f, new Map()).get(f)!).set(key, c);
+  return c;
+}
 
 function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   const ctx = canvas.getContext('2d')!;
@@ -1215,5 +1249,45 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
         ctx.fillText(label, tx, ty);
       }
     });
+  }
+
+  // Objects on the cursor (copied: green, cut: red), snapped to the sub-tile they'd be placed on.
+  const g = s.objectGhost;
+  const cursor = s.cursorWorld.current;
+  if (g && cursor && tool === 'object') {
+    const [fx, fy] = worldToSubTile(cursor[0], cursor[1]);
+    const [ax, ay] = [Math.round(fx), Math.round(fy)];
+    const colour = g.cut ? 'rgba(255, 70, 70, 0.95)' : 'rgba(80, 255, 120, 0.95)';
+    for (const o of g.objects) {
+      const [x, y] = subTileToWorld(ax + o.x, ay + o.y);
+      const key = `${o.type}:${o.id}`;
+      const frame = s.animations?.get(key)?.parts[0]?.[0]?.image ?? s.sprites.get(key);
+      if (frame && v.sprites) ctx.drawImage(tintedSprite(frame, map.palette as Uint8Array, g.cut), x + frame.offsetX, y + 4 + frame.offsetY);
+      if (o.path.length) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (const p of o.path) ctx.lineTo(...subTileToWorld(ax + p.x, ay + p.y));
+        ctx.lineWidth = 1.5 * px;
+        ctx.strokeStyle = colour;
+        ctx.setLineDash([4 * px, 3 * px]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      const r = Math.max(4 * px, 5) * 1.3;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = colour;
+      ctx.fill();
+      ctx.lineWidth = 1.5 * px;
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.stroke();
+      ctx.font = `600 ${11 * px}px ui-sans-serif, system-ui, sans-serif`;
+      const label = `${g.cut ? 'Move' : 'Copy'}: ${objectLabel(o)}`;
+      ctx.lineWidth = 3 * px;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.strokeText(label, x + r + 3 * px, y + 4 * px);
+      ctx.fillStyle = colour;
+      ctx.fillText(label, x + r + 3 * px, y + 4 * px);
+    }
   }
 }

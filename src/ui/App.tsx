@@ -77,7 +77,7 @@ import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
-import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
+import { DEFAULT_VISIBILITY, modeOf, nextView, oneMode, TOOLS, VIEW_NAMES, withMode, type Tool, type ViewMode, type Visibility } from './state';
 import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
 import { DEFAULT_AUTOMAP_STYLE, kindClassifier, normalizeAutomapStyle, type AutomapStyle } from '../game/automapStyle';
 import { ClipboardPanel } from './ClipboardPanel';
@@ -309,6 +309,13 @@ export function App() {
   const [recipeSuggestion, setRecipeSuggestion] = useState<RecipeSuggestion | null>(null);
   const [sprites, setSprites] = useState<Map<string, Sprite>>(() => new Map());
   const [placing, setPlacing] = useState<{ type: number; id: number } | null>(null);
+  /** Objects copied or cut in object mode (positions relative to the first), and whether they're on the cursor. */
+  const [objectClip, setObjectClip] = useState<{ objects: Ds1Object[]; cut: boolean } | null>(null);
+  const [objectPasting, setObjectPasting] = useState(false);
+  // Leaving object mode drops the objects from the cursor (the clipboard keeps them for Ctrl+V).
+  useEffect(() => {
+    if (tool !== 'object') setObjectPasting(false);
+  }, [tool]);
   const [desktopCfg, setDesktopCfg] = useState<DesktopConfig>({ modDirs: [], modMpqs: false });
   /** Desktop app: the folder dialog is open over a loaded workspace. */
   const [changingFolders, setChangingFolders] = useState(false);
@@ -330,7 +337,7 @@ export function App() {
   const selectAnchor = useRef<[number, number] | null>(null);
   /** Shift+click / Shift+drag with the Select tool: the selection being added to (null = a new selection). */
   const selectBase = useRef<CellSelection | null>(null);
-  /** The tile tool to return to when Tab leaves object editing. */
+  /** The tile tool to return to when Shift+O leaves object editing. */
   const lastTileTool = useRef<Tool>('select');
   const keys = useKeybindings();
   const [leftW, setLeftW] = usePersistentSize('left', 260, 180, 560);
@@ -463,6 +470,8 @@ export function App() {
   };
 
   const gd = data.status === 'ready' ? data.gd : null;
+  const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
+  const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
 
   const confirmDiscard = useCallback(() => {
     if (flagEdits.current.size) {
@@ -856,6 +865,18 @@ export function App() {
             const [wx, wy] = subTileToWorld(x, y);
             return Math.hypot(wx - world[0], wy - world[1]) < 10;
           };
+          if (objectPasting && objectClip) {
+            // Put the copied / cut objects down here (their NPC paths move with them).
+            const placed = objectClip.objects.map((o) => ({ ...o, x: o.x + sx, y: o.y + sy, path: o.path.map((p) => ({ ...p, x: p.x + sx, y: p.y + sy })) }));
+            doc.setObjects([...objs, ...placed]);
+            setSelectedObject(objs.length + placed.length - 1);
+            setObjectPasting(false);
+            // Once a cut is put down, pasting again makes copies.
+            if (objectClip.cut) setObjectClip({ ...objectClip, cut: false });
+            notify(`${objectClip.cut ? 'Moved' : 'Pasted'} ${placed.length === 1 ? objectLabel(placed[0]) : `${placed.length} objects`} · Ctrl+V for another copy`);
+            bump();
+            return;
+          }
           if (placing) {
             const next: Ds1Object[] = [...objs, { type: placing.type, id: placing.id, x: sx, y: sy, flags: 0, path: [] }];
             doc.setObjects(next);
@@ -1008,12 +1029,26 @@ export function App() {
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, hittable, focusTile, walkBrush],
+    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, hittable, focusTile, walkBrush, objectPasting, objectClip, objectLabel],
   );
 
   // Selection commands.
   const copy = useCallback(
     (cut: boolean) => {
+      if (doc && tool === 'object') {
+        // Object mode: the selected object goes on the cursor, green (copy) or red (cut: taken off the map now).
+        const o = selectedObject !== null ? doc.ds1.objects[selectedObject] : null;
+        if (!o) return notify(`Select an object first (click it), then ${cut ? 'cut' : 'copy'} it.`);
+        const rel: Ds1Object = { ...o, x: 0, y: 0, path: o.path.map((p) => ({ ...p, x: p.x - o.x, y: p.y - o.y })) };
+        setObjectClip({ objects: [rel], cut });
+        if (cut) {
+          setObjects(doc.ds1.objects.filter((_, i) => i !== selectedObject));
+          setSelectedObject(null);
+        }
+        setPlacing(null);
+        setObjectPasting(true);
+        return notify(`${cut ? 'Cut' : 'Copied'} ${objectLabel(o)} · click the map to place it · Esc to drop it from the cursor`);
+      }
       if (!doc || !selection) return;
       const raw = copyRect(doc, selection);
       const clip = map ? { ...raw, ...clipboardSources(raw, map.lib) } : raw;
@@ -1053,7 +1088,7 @@ export function App() {
       setClipPane(true);
       setPasting(true);
     },
-    [doc, selection, notify, onlyLayer, cellShown], // eslint-disable-line react-hooks/exhaustive-deps
+    [doc, selection, notify, onlyLayer, cellShown, tool, selectedObject, objectLabel], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
   const [pasteOffer, setPasteOffer] = useState<{ clip: Clipboard; tiles: number; different: number; dt1s: string[]; label: string } | null>(null);
@@ -1073,9 +1108,15 @@ export function App() {
     [map, notify],
   );
   const startPaste = useCallback(() => {
+    if (tool === 'object') {
+      if (!objectClip) return notify('Nothing to paste: select an object and copy it first (Ctrl+C).');
+      setPlacing(null);
+      setObjectPasting(true);
+      return notify(`${objectClip.cut ? 'Moving' : 'Pasting'} ${objectClip.objects.length === 1 ? objectLabel(objectClip.objects[0]) : `${objectClip.objects.length} objects`} · click the map to place · Esc to cancel`);
+    }
     if (!clipboard) return notify('Nothing to paste: copy a selection first (Ctrl+C).');
     beginPaste(clipboard, 'Pasting');
-  }, [clipboard, notify, beginPaste]);
+  }, [clipboard, notify, beginPaste, tool, objectClip, objectLabel]);
   /**
    * Clears `r`: the active layer, or (everything) every tile layer plus the objects and NPCs standing in it, so a
    * cut takes everything with it. One undo step.
@@ -1160,7 +1201,8 @@ export function App() {
     return true;
   }, [doc, selectedObject, setObjects]);
   // Load sprites for every distinct object on the map (cached per object id in GameData).
-  const objectKeys = map ? [...new Set(map.ds1.objects.map((o) => `${o.type}:${o.id}`))].sort().join(',') : '';
+  // (and those on the cursor after a cut, which are off the map but still drawn)
+  const objectKeys = map ? [...new Set([...map.ds1.objects, ...(objectClip?.objects ?? [])].map((o) => `${o.type}:${o.id}`))].sort().join(',') : '';
   useEffect(() => {
     if (!gd || !map || !objectKeys) return setSprites(new Map());
     let cancelled = false;
@@ -1197,8 +1239,6 @@ export function App() {
     };
   }, [gd, map, objectKeys, visibility.sprites]);
 
-  const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
-  const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
 
   const mutate = useCallback(
     (fn: (ds1: Ds1) => Ds1 | void) => {
@@ -2264,6 +2304,16 @@ export function App() {
     }
   }, [map, notify]);
 
+  /** Tab / Shift+Tab: the next or previous view (each with its own right-hand panel). */
+  const cycleView = useCallback(
+    (dir: 1 | -1) => {
+      const to = nextView(modeOf(visibility), dir);
+      setVisibility((v) => withMode(v, to));
+      notify(`View: ${VIEW_NAMES[to]} · Tab for the next`);
+    },
+    [visibility, setVisibility, notify],
+  );
+
   const toggleGameView = useCallback(() => {
     setGameView((g) => {
       if (g.on) return { ...g, on: false };
@@ -2293,6 +2343,8 @@ export function App() {
       'view.minimap': vis((v) => ({ ...v, minimap: !v.minimap })),
       'view.snapshot': () => void copyView(),
       'view.pops': vis((v) => ({ ...v, pops: !v.pops })),
+      'view.next': () => cycleView(1),
+      'view.prev': () => cycleView(-1),
       'view.light': vis((v) => ({ ...v, light: !v.light })),
       'view.focus': toggleJustTheMap,
       'app.commands': () => setCommandsOpen(true),
@@ -2327,9 +2379,10 @@ export function App() {
           return;
         }
         // First Esc frees the cursor: a paste / preset, an object to place, or the tile being painted with.
-        if (pasting || placing || (brush && tool === 'paint')) {
+        if (pasting || placing || objectPasting || (brush && tool === 'paint')) {
           setPasting(false);
           setPlacing(null);
+          setObjectPasting(false);
           if (tool === 'paint') {
             setBrush(null);
             setMix([]);
@@ -2368,7 +2421,7 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu };
   useEffect(() => {
@@ -2490,9 +2543,9 @@ export function App() {
         {
           label: 'Edit',
           items: [
-            { label: 'Paste', icon: <ClipboardPaste />, onClick: startPaste, disabled: noMap || !clipboard, shortcut: kb['edit.paste'] },
-            { label: 'Cut', icon: <Scissors />, onClick: () => copy(true), disabled: !selection, size: 'sm', shortcut: kb['edit.cut'] },
-            { label: 'Copy', icon: <Copy />, onClick: () => copy(false), disabled: !selection, size: 'sm', shortcut: kb['edit.copy'] },
+            { label: 'Paste', icon: <ClipboardPaste />, onClick: startPaste, disabled: noMap || (tool === 'object' ? !objectClip : !clipboard), shortcut: kb['edit.paste'] },
+            { label: 'Cut', icon: <Scissors />, onClick: () => copy(true), disabled: tool === 'object' ? selectedObject === null : !selection, size: 'sm', shortcut: kb['edit.cut'] },
+            { label: 'Copy', icon: <Copy />, onClick: () => copy(false), disabled: tool === 'object' ? selectedObject === null : !selection, size: 'sm', shortcut: kb['edit.copy'] },
             { label: 'Delete', icon: <Trash2 />, onClick: () => clearSelection(false), disabled: !selection, size: 'sm', shortcut: kb['edit.delete'] },
             { label: 'Undo', icon: <Undo2 />, onClick: undo, disabled: !doc?.canUndo, size: 'sm', shortcut: kb['edit.undo'] },
             { label: 'Redo', icon: <Redo2 />, onClick: redo, disabled: !doc?.canRedo, size: 'sm', shortcut: kb['edit.redo'] },
@@ -2735,9 +2788,9 @@ export function App() {
             null,
           ]
         : []),
-      { label: 'Copy', onClick: () => copy(false), disabled: !selection, shortcut: kb['edit.copy'] },
-      { label: 'Cut', onClick: () => copy(true), disabled: !selection, shortcut: kb['edit.cut'] },
-      { label: 'Paste', onClick: startPaste, disabled: !clipboard, shortcut: kb['edit.paste'] },
+      { label: 'Copy', onClick: () => copy(false), disabled: tool === 'object' ? selectedObject === null : !selection, shortcut: kb['edit.copy'] },
+      { label: 'Cut', onClick: () => copy(true), disabled: tool === 'object' ? selectedObject === null : !selection, shortcut: kb['edit.cut'] },
+      { label: 'Paste', onClick: startPaste, disabled: tool === 'object' ? !objectClip : !clipboard, shortcut: kb['edit.paste'] },
       { label: 'Delete', onClick: () => clearSelection(false), disabled: !selection, shortcut: kb['edit.delete'] },
       ...(selection ? [{ label: 'Deselect', onClick: () => setSelection(null) }] : []),
       null,
@@ -2827,6 +2880,7 @@ export function App() {
             selection={selection}
             pasteRect={pasteRect}
             objectLabel={objectLabel}
+            objectGhost={objectPasting && tool === 'object' ? objectClip : null}
             selectedObject={selectedObject}
             sprites={sprites}
             animations={animations}
