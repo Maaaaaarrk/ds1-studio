@@ -10,6 +10,12 @@ import { AUTOMAP_CODES, automapCellOrigin, averageColor } from './automap';
  * as much as wanted.
  */
 
+/**
+ * Recolouring the automap by category (and part) is switched off for now: pieces are drawn in their own MaxiMap.dc6
+ * colours, as in game. Set to true to bring back "Colour by kind" and the colour pickers; everything else is in place.
+ */
+export const AUTOMAP_RECOLOUR = false;
+
 export type AutomapKind = 'walls' | 'floors' | 'water' | 'roofs' | 'objects' | 'shadows';
 
 export const AUTOMAP_KIND_LIST: { id: AutomapKind; label: string; hint: string }[] = [
@@ -74,7 +80,7 @@ export interface AutomapStyle {
 }
 
 export const DEFAULT_AUTOMAP_STYLE: AutomapStyle = {
-  colours: 'kind',
+  colours: AUTOMAP_RECOLOUR ? 'kind' : 'game',
   kinds: {
     walls: { show: true, colour: '#ffd24a', opacity: 1 },
     floors: { show: true, colour: '#b8c4d0', opacity: 0.8 },
@@ -114,7 +120,7 @@ export function normalizeAutomapStyle(s: unknown): AutomapStyle {
     parts[pt.id] = { show: typeof v.show === 'boolean' ? v.show : base.show, colour: colour(v.colour, base.colour), opacity: num(v.opacity, 0.1, 1, base.opacity) };
   }
   return {
-    colours: o.colours === 'game' ? 'game' : 'kind',
+    colours: AUTOMAP_RECOLOUR && o.colours !== 'game' ? 'kind' : 'game',
     kinds,
     parts,
     thickness: Math.round(num(o.thickness, 0, 3, d.thickness)),

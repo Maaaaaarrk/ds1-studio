@@ -16,7 +16,7 @@ import {
   type AutomapEdit,
   type AutomapTable,
 } from '../game/automap';
-import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, automapCanvas, automapFrame, lookOf, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
+import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, AUTOMAP_RECOLOUR, automapCanvas, automapFrame, lookOf, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { OpenMap } from '../game/openMap';
 import { renderMapCanvas } from '../render/exportImage';
 import type { Scene } from '../render/scene';
@@ -385,7 +385,7 @@ export function AutomapEditor({ map, scene, table, cels, palette, level, onLevel
             {message ??
               (edits.size
                 ? `${edits.size} unsaved change${edits.size === 1 ? '' : 's'}. Saving writes AutoMap.txt in your mod folder (original kept as .bak); rebuild automap.bin for the game to see it.`
-                : 'Colour, opacity and show/hide only change how DS1 Studio draws the automap; pieces are what the game draws, written on Save.')}
+                : `${AUTOMAP_RECOLOUR ? 'Colour, opacity' : 'Opacity'} and show/hide only change how DS1 Studio draws the automap; pieces are what the game draws, written on Save.`)}
           </span>
           <button className="btn" disabled={!edits.size} onClick={() => window.confirm('Discard all unsaved automap changes?') && setEdits(new Map())}>
             Discard

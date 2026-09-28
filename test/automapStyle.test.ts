@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { SpriteFrame } from '../src/formats/dc6';
-import { DEFAULT_AUTOMAP_STYLE, isWaterTile, kindOfCode, looksLikeWater, normalizeAutomapStyle, paintAutomap, partOfCode, type AutomapStyle } from '../src/game/automapStyle';
+import { AUTOMAP_RECOLOUR, DEFAULT_AUTOMAP_STYLE, isWaterTile, kindOfCode, looksLikeWater, normalizeAutomapStyle, paintAutomap, partOfCode, type AutomapStyle } from '../src/game/automapStyle';
 
 const frame = (w: number, h: number, px: number[]): SpriteFrame => ({ width: w, height: h, offsetX: 0, offsetY: -h, pixels: Uint8Array.from(px) }) as SpriteFrame;
 const palette = new Uint8Array(256 * 4).map((_, i) => (i % 4 === 3 ? 255 : i % 256));
+// Colour by kind is switched off in the app for now (AUTOMAP_RECOLOUR) but still works when asked for.
+const BY_KIND: AutomapStyle = { ...DEFAULT_AUTOMAP_STYLE, colours: 'kind' };
 const withKind = (s: AutomapStyle, k: keyof AutomapStyle['kinds'], patch: Partial<AutomapStyle['kinds']['walls']>): AutomapStyle => ({ ...s, kinds: { ...s.kinds, [k]: { ...s.kinds[k], ...patch } } });
 
 describe('automap look', () => {
@@ -25,13 +27,13 @@ describe('automap look', () => {
     };
     const gold: [number, number, number] = [0xff, 0xd2, 0x4a];
     const blue: [number, number, number] = [0x3d, 0x8b, 0xff];
-    const thin = paintAutomap(4, 4, pieces, cels, palette, { ...DEFAULT_AUTOMAP_STYLE, thickness: 0 });
+    const thin = paintAutomap(4, 4, pieces, cels, palette, { ...BY_KIND, thickness: 0 });
     expect([at(thin.data, gold).length, at(thin.data, blue).length]).toEqual([1, 1]);
     // Thickness 1 grows a lone pixel into a plus of 5; each category keeps its own opacity.
-    const thick = paintAutomap(4, 4, pieces, cels, palette, withKind({ ...DEFAULT_AUTOMAP_STYLE, thickness: 1 }, 'water', { opacity: 0.5 }));
+    const thick = paintAutomap(4, 4, pieces, cels, palette, withKind({ ...BY_KIND, thickness: 1 }, 'water', { opacity: 0.5 }));
     expect(at(thick.data, gold)).toEqual([255, 255, 255, 255, 255]);
     expect(new Set(at(thick.data, blue))).toEqual(new Set([128]));
-    const noWater = paintAutomap(4, 4, pieces, cels, palette, withKind({ ...DEFAULT_AUTOMAP_STYLE, thickness: 0 }, 'water', { show: false }));
+    const noWater = paintAutomap(4, 4, pieces, cels, palette, withKind({ ...BY_KIND, thickness: 0 }, 'water', { show: false }));
     expect(at(noWater.data, blue)).toEqual([]);
     // Game colours: the palette entry of the pixel.
     const game = paintAutomap(4, 4, pieces, cels, palette, { ...DEFAULT_AUTOMAP_STYLE, thickness: 0, colours: 'game' });
@@ -49,7 +51,7 @@ describe('automap look', () => {
       for (let i = 0; i < d.length; i += 4) if (d[i + 3]) out.push(`${d[i]},${d[i + 1]},${d[i + 2]},${d[i + 3]}`);
       return out.sort();
     };
-    const style = { ...DEFAULT_AUTOMAP_STYLE, thickness: 0, parts: { left: { show: true, colour: '#102030', opacity: 0.5 } } };
+    const style = { ...BY_KIND, thickness: 0, parts: { left: { show: true, colour: '#102030', opacity: 0.5 } } };
     expect(px(paintAutomap(4, 4, pieces, cels, palette, style).data)).toEqual(['16,32,48,128', '255,210,74,255']);
     expect(px(paintAutomap(4, 4, pieces, cels, palette, { ...style, parts: { left: { ...style.parts.left, show: false } } }).data)).toEqual(['255,210,74,255']);
     expect(partOfCode('wtll')).toBe('corners');
@@ -61,6 +63,8 @@ describe('automap look', () => {
     expect(normalizeAutomapStyle(null)).toEqual(DEFAULT_AUTOMAP_STYLE);
     const s = normalizeAutomapStyle({ colours: 'game', thickness: 2.4, kinds: { walls: { show: false, colour: 'red', opacity: 9 } } });
     expect(s).toMatchObject({ colours: 'game', thickness: 2 });
+    // While recolouring is switched off, a stored "colour by kind" comes back as the game's colours.
+    expect(normalizeAutomapStyle({ colours: 'kind' }).colours).toBe(AUTOMAP_RECOLOUR ? 'kind' : 'game');
     expect(s.kinds.walls).toEqual({ show: false, colour: '#ffd24a', opacity: 1 });
     expect(s.kinds.floors).toEqual(DEFAULT_AUTOMAP_STYLE.kinds.floors);
     // The earlier single opacity and "other" kind.

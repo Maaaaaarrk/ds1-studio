@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, DEFAULT_AUTOMAP_STYLE, lookOf, type AutomapKind, type AutomapLookOf, type AutomapStyle } from '../game/automapStyle';
+import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, AUTOMAP_RECOLOUR, DEFAULT_AUTOMAP_STYLE, lookOf, type AutomapKind, type AutomapLookOf, type AutomapStyle } from '../game/automapStyle';
 
 const hex2 = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
 const toRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -135,11 +135,15 @@ export function AutomapLook({
             )}
           </p>
         )}
-        <div className="am-look-row">
-          <span>Colour</span>
-          <ColourField value={v.colour} disabled={!byKind} onChange={(colour) => setLook({ colour })} />
-        </div>
-        {!byKind && <p className="small muted">Colours follow the game&apos;s pieces now: switch Look → Colour by kind to use your own.</p>}
+        {AUTOMAP_RECOLOUR && (
+          <>
+            <div className="am-look-row">
+              <span>Colour</span>
+              <ColourField value={v.colour} disabled={!byKind} onChange={(colour) => setLook({ colour })} />
+            </div>
+            {!byKind && <p className="small muted">Colours follow the game&apos;s pieces now: switch Look → Colour by kind to use your own.</p>}
+          </>
+        )}
         <label className="am-look-row">
           <span>Opacity</span>
           <input type="range" min={10} max={100} value={Math.round(v.opacity * 100)} onChange={(e) => setLook({ opacity: Number(e.target.value) / 100 })} />
@@ -158,12 +162,19 @@ export function AutomapLook({
             </button>
           </p>
         )}
-        {!part && <p className="muted small">How DS1 Studio draws the automap. The game draws each piece in its own pixels from MaxiMap.dc6; AutoMap.txt has no colours.</p>}
+        {!part && (
+          <p className="muted small">
+            {AUTOMAP_RECOLOUR
+              ? 'How DS1 Studio draws the automap. The game draws each piece in its own pixels from MaxiMap.dc6; AutoMap.txt has no colours.'
+              : 'Pieces show in their own MaxiMap.dc6 colours, as in game. Opacity and Show only change how DS1 Studio draws them.'}
+          </p>
+        )}
       </div>
     );
   }
   return (
     <div className={`am-look${compact ? ' compact' : ''}`}>
+      {AUTOMAP_RECOLOUR && (
       <div className="chips am-look-mode">
         <button className={`chip${byKind ? ' active' : ''}`} onClick={() => set({ colours: 'kind' })} title="Each kind of piece in its own colour: easy to tell apart">
           Colour by kind
@@ -172,6 +183,7 @@ export function AutomapLook({
           Game colours
         </button>
       </div>
+      )}
       <div className="am-look-kinds">
         {(kinds ?? AUTOMAP_KIND_LIST.map((k) => k.id)).map((id) => {
           const k = AUTOMAP_KIND_LIST.find((x) => x.id === id)!;
@@ -184,7 +196,11 @@ export function AutomapLook({
                 {k.label}
                 {counts?.[id] !== undefined && <span className="muted small"> {counts[id]}</span>}
               </span>
-              <input type="color" value={v.colour} disabled={!byKind} title={byKind ? `Colour of ${k.label.toLowerCase()}` : 'Colours follow the game (switch to Colour by kind)'} onChange={(e) => setKind(id, { colour: e.target.value })} />
+              {AUTOMAP_RECOLOUR ? (
+                <input type="color" value={v.colour} disabled={!byKind} title={byKind ? `Colour of ${k.label.toLowerCase()}` : 'Colours follow the game (switch to Colour by kind)'} onChange={(e) => setKind(id, { colour: e.target.value })} />
+              ) : (
+                <span />
+              )}
               <input className="am-look-op" type="range" min={10} max={100} value={Math.round(v.opacity * 100)} title={`Opacity: ${Math.round(v.opacity * 100)}%`} onChange={(e) => setKind(id, { opacity: Number(e.target.value) / 100 })} />
             </div>
           );

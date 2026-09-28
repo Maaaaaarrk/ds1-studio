@@ -4,7 +4,7 @@ import { popProblems, type PopArea } from '../game/pops';
 import { HelpTip } from './HelpTip';
 import { LevelLightEditor, type LevelLight } from './panels';
 import type { ViewMode } from './state';
-import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, type AutomapStyle } from '../game/automapStyle';
+import { AUTOMAP_KIND_LIST, AUTOMAP_PARTS, AUTOMAP_RECOLOUR, type AutomapStyle } from '../game/automapStyle';
 import { KindIcon } from './AutomapLook';
 
 /**
@@ -165,7 +165,7 @@ export function AutomapLegend({ style }: { style: AutomapStyle }) {
         </svg>
         Suggested piece, not written yet
       </div>
-      <div className="walk-legend-note">Colours, thickness and what shows: Look, in the panel.</div>
+      <div className="walk-legend-note">{AUTOMAP_RECOLOUR ? 'Colours, thickness' : 'Thickness'} and what shows: Look, in the panel.</div>
     </div>
   );
 }
