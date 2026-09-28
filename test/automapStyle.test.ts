@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SpriteFrame } from '../src/formats/dc6';
-import { DEFAULT_AUTOMAP_STYLE, kindOfCode, normalizeAutomapStyle, paintAutomap } from '../src/game/automapStyle';
+import { DEFAULT_AUTOMAP_STYLE, isWaterTile, kindOfCode, looksLikeWater, normalizeAutomapStyle, paintAutomap } from '../src/game/automapStyle';
 
 const frame = (w: number, h: number, px: number[]): SpriteFrame => ({ width: w, height: h, offsetX: 0, offsetY: -h, pixels: Uint8Array.from(px) }) as SpriteFrame;
 const palette = new Uint8Array(256 * 4).map((_, i) => (i % 4 === 3 ? 255 : i % 256));
@@ -43,5 +43,27 @@ describe('automap look', () => {
     expect(s).toMatchObject({ colours: 'game', opacity: 1, thickness: 2 });
     expect(s.kinds.walls).toEqual({ show: false, colour: '#ffd24a' });
     expect(s.kinds.floors).toEqual(DEFAULT_AUTOMAP_STYLE.kinds.floors);
+  });
+});
+
+describe('water', () => {
+  it('tells water from ground by colour', () => {
+    // Act 1 river, a lake, Act 3 swamp water: water. Dirt, grass, stone, lava: not.
+    expect([[40, 58, 92], [30, 45, 70], [38, 62, 60]].map((c) => looksLikeWater(c as [number, number, number]))).toEqual([true, true, true]);
+    expect([[92, 74, 52], [58, 72, 40], [80, 80, 82], [150, 60, 30]].map((c) => looksLikeWater(c as [number, number, number]))).toEqual([false, false, false, false]);
+  });
+
+  it('takes unwalkable floors that are dark, grey or bluish for water — not ground, grass or lava', () => {
+    const blocked = new Uint8Array(25).fill(1);
+    const walkable = new Uint8Array(25);
+    // Act 1's river (as the game's palette draws it: almost black, grey), a lake: water.
+    expect(isWaterTile(blocked, [11, 11, 11])).toBe(true);
+    expect(isWaterTile(blocked, [20, 19, 19])).toBe(true);
+    expect(isWaterTile(blocked, [30, 45, 70])).toBe(true);
+    // Blocked grass at a map's edge, lava, and any walkable floor: not.
+    expect(isWaterTile(blocked, [27, 35, 14])).toBe(false);
+    expect(isWaterTile(blocked, [150, 60, 30])).toBe(false);
+    expect(isWaterTile(walkable, [11, 11, 11])).toBe(false);
+    expect(isWaterTile(blocked, null)).toBe(true);
   });
 });

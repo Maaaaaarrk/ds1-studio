@@ -875,3 +875,21 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .ame-piece .cel-thumb.fit { margin: 0 2px; }
 .ame-piece { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
 .cel-cell .cel-thumb.fit { margin: 4px auto; }
+
+/* Automap editor: Draw all the same */
+.amb { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; }
+.amb-head { display: flex; justify-content: space-between; align-items: center; }
+.amb .chips .chip { display: inline-flex; align-items: center; gap: 4px; }
+.amb-rows { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 2px; }
+.amb-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 3px 6px; border: 0; border-radius: 4px; background: none; color: inherit; text-align: left; cursor: pointer; }
+.amb-row:hover { background: var(--panel-2, rgba(255, 255, 255, 0.04)); }
+.amb-row.active { background: var(--accent-dim, rgba(212, 168, 79, 0.18)); }
+.amb-name { font-size: 12.5px; }
+.amb-piece { display: flex; align-items: center; justify-content: center; min-width: 36px; min-height: 28px; background: #07080a; border-radius: 4px; }
+.amb-gallery-head { margin-top: 4px; }
+.amb-water { display: flex; flex-wrap: wrap; gap: 4px; max-height: 170px; overflow-y: auto; }
+.amb-water-tile { display: flex; flex-direction: column; align-items: center; width: 64px; --thumb-h: 34px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; position: relative; }
+.amb-water-tile input { position: absolute; top: 2px; left: 2px; margin: 0; }
+.amb-water-tile .thumb-img { width: 100%; }
+.amb-water-tile.off { opacity: 0.4; }
+.amb .btn.primary { align-self: flex-start; }

@@ -175,3 +175,26 @@ export function automapCanvas(width: number, height: number, pieces: DrawPiece[]
   ctx.putImageData(img, 0, 0);
   return { canvas, ox: p.ox, oy: p.oy, W: p.W, H: p.H };
 }
+
+/**
+ * Whether a floor tile looks like water, from its average colour: clearly bluer than it is red (rivers, lakes), or
+ * blue-green (Act 3's swamps). Used to give every water tile the same automap piece in one go; the result is shown
+ * before anything is written.
+ */
+export function looksLikeWater([r, g, b]: [number, number, number]): boolean {
+  const blue = b >= r + 12 && b >= g - 6;
+  const teal = g >= r + 12 && b >= r + 12 && Math.abs(g - b) <= 25;
+  return blue || teal;
+}
+
+/**
+ * Whether a floor tile is water: nobody can walk on any of it (every sub-tile blocks walking, as rivers and lakes do)
+ * and its colour isn't that of ground or lava — the game's water is dark, grey or bluish (Act 1's river averages
+ * almost black). Without colours, every unwalkable floor counts.
+ */
+export function isWaterTile(flags: ArrayLike<number>, rgb: [number, number, number] | null): boolean {
+  if (flags.length !== 25 || !Array.from(flags).every((v) => v & 1)) return false;
+  if (!rgb) return true;
+  const [r, g, b] = rgb;
+  return looksLikeWater(rgb) || Math.max(r, g, b) < 28 || b >= r - 2;
+}

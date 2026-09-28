@@ -11,13 +11,14 @@ import {
   editKey,
   findRule,
   suggestAutomap,
+  usualCels,
   type AutomapColors,
   type AutomapEdit,
   type AutomapTable,
 } from '../game/automap';
 import type { OpenMap } from '../game/openMap';
 import { CelThumb } from './AutomapPanel';
-import { automapCanvas, automapFrame, kindOfCode, kindOfOrientation, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
+import { automapCanvas, automapFrame, kindOfCode, kindOfOrientation, isWaterTile, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import { AutomapLook, KindIcon } from './AutomapLook';
 import { Thumb } from './TilePalette';
 
@@ -68,6 +69,8 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /** The Draw all the same panel instead of the piece panel. */
+  const [bulk, setBulk] = useState(false);
   const lastClicked = useRef<string | null>(null);
 
   // A new level starts over.
@@ -239,6 +242,9 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
                   </button>
                 ))}
               </div>
+              <button className={`btn small${bulk ? ' active' : ''}`} onClick={() => setBulk(!bulk)} title="Give all walls, all floors, all water or all trees the same pieces in one go">
+                Draw all the same…
+              </button>
               {missingWalls.length > 0 && (
                 <button
                   className="btn small primary"
@@ -341,20 +347,40 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
           />
 
           {/* Piece editor */}
-          <PiecePanel
-            tint={sel.length ? tintOf(sel[0].orientation) : undefined}
-            table={table}
-            level={level}
-            cels={cels}
-            palette={palette}
-            selection={sel}
-            celsOf={celsOf}
-            fileCels={fileCels}
-            edited={(g) => edits.has(g.key)}
-            onSet={(value) => setCels(sel, value)}
-            onRevert={() => revert(sel)}
-            onSuggest={() => void suggestFor(sel)}
-          />
+          {bulk ? (
+            <BulkPanel
+              map={map}
+              groups={groups}
+              table={table}
+              level={level}
+              levelLabel={levelLabel}
+              cels={cels}
+              palette={palette}
+              style={style}
+              celsOf={celsOf}
+              makeColors={makeColors}
+              onApply={(targets, value, what) => {
+                if (targets.length) setCels(targets, value);
+                if (what) setMessage(what);
+              }}
+              onClose={() => setBulk(false)}
+            />
+          ) : (
+            <PiecePanel
+              tint={sel.length ? tintOf(sel[0].orientation) : undefined}
+              table={table}
+              level={level}
+              cels={cels}
+              palette={palette}
+              selection={sel}
+              celsOf={celsOf}
+              fileCels={fileCels}
+              edited={(g) => edits.has(g.key)}
+              onSet={(value) => setCels(sel, value)}
+              onRevert={() => revert(sel)}
+              onSuggest={() => void suggestFor(sel)}
+            />
+          )}
         </div>
         <div className="modal-actions">
           <span className="muted small ame-foot">
@@ -406,26 +432,8 @@ function PiecePanel({
   /** The selection's kind colour, when colouring by kind. */
   tint?: string;
 }) {
-  const [which, setWhich] = useState<'kind' | 'level' | 'act' | 'all'>('kind');
-  const [filter, setFilter] = useState('');
   const [mode, setMode] = useState<'replace' | 'variant'>('replace');
   const codes = [...new Set(selection.map((g) => AUTOMAP_CODES[g.orientation]))];
-  const act = /^(\d)\s/.exec(level)?.[1];
-  const { lists, labels } = useMemo(() => {
-    const kind = new Set<number>();
-    const lvl = new Set<number>();
-    const actSet = new Set<number>();
-    const labels = new Map<number, string>();
-    for (const rules of table.byKey.values())
-      for (const r of rules) {
-        for (const c of r.cels) if (c.label && !labels.has(c.cel)) labels.set(c.cel, c.label);
-        const sameAct = act ? r.level.startsWith(`${act} `) : r.level === level;
-        if (r.level === level) for (const c of r.cels) lvl.add(c.cel);
-        if (sameAct) for (const c of r.cels) actSet.add(c.cel);
-        if ((r.level === level || sameAct) && codes.includes(r.code)) for (const c of r.cels) kind.add(c.cel);
-      }
-    return { lists: { kind, level: lvl, act: actSet }, labels };
-  }, [table, level, act, codes.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!selection.length) {
     return (
@@ -451,10 +459,6 @@ function PiecePanel({
     const first = celsOf(selection[0]);
     return selection.every((g) => (celsOf(g) ?? []).join(',') === (first ?? []).join(',')) ? first : undefined;
   })();
-  const pool = which === 'all' ? cels.map((_, i) => i) : [...(which === 'kind' ? lists.kind : which === 'level' ? lists.level : lists.act)];
-  const shown = pool
-    .sort((a, b) => a - b)
-    .filter((c) => !filter || String(c) === filter.trim() || (labels.get(c) ?? '').toLowerCase().includes(filter.toLowerCase()));
   const one = selection.length === 1 ? selection[0] : null;
   const rule = one ? findRule(table, level, one.orientation, one.style, one.sub) : null;
 
@@ -514,6 +518,67 @@ function PiecePanel({
           <input type="radio" checked={mode === 'variant'} onChange={() => setMode('variant')} /> click adds a random variant (max 4)
         </label>
       </div>
+      <PieceGallery
+        table={table}
+        level={level}
+        cels={cels}
+        palette={palette}
+        codes={codes}
+        tint={tint}
+        active={shared ?? undefined}
+        onPick={(c) => onSet(mode === 'replace' ? [c] : (cur) => [...(cur ?? []).filter((x) => x !== c), c].slice(-4))}
+      />
+    </div>
+  );
+}
+
+/**
+ * The MaxiMap pieces to choose from: those this level (or its act) uses for these tile codes, all of the level's or
+ * act's, or every piece; with a filter by number or name.
+ */
+function PieceGallery({
+  table,
+  level,
+  cels,
+  palette,
+  codes,
+  tint,
+  active,
+  onPick,
+}: {
+  table: AutomapTable;
+  level: string;
+  cels: SpriteFrame[];
+  palette: Palette;
+  codes: string[];
+  tint?: string;
+  active?: number[];
+  onPick: (cel: number) => void;
+}) {
+  const [which, setWhich] = useState<'kind' | 'level' | 'act' | 'all'>('kind');
+  const [filter, setFilter] = useState('');
+  const act = /^(\d)\s/.exec(level)?.[1];
+  const { lists, labels } = useMemo(() => {
+    const kind = new Set<number>();
+    const lvl = new Set<number>();
+    const actSet = new Set<number>();
+    const labels = new Map<number, string>();
+    for (const rules of table.byKey.values())
+      for (const r of rules) {
+        for (const c of r.cels) if (c.label && !labels.has(c.cel)) labels.set(c.cel, c.label);
+        const sameAct = act ? r.level.startsWith(`${act} `) : r.level === level;
+        if (r.level === level) for (const c of r.cels) lvl.add(c.cel);
+        if (sameAct) for (const c of r.cels) actSet.add(c.cel);
+        if ((r.level === level || sameAct) && codes.includes(r.code)) for (const c of r.cels) kind.add(c.cel);
+      }
+    return { lists: { kind, level: lvl, act: actSet }, labels };
+  }, [table, level, act, codes.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pool = which === 'all' ? cels.map((_, i) => i) : [...(which === 'kind' ? lists.kind : which === 'level' ? lists.level : lists.act)];
+  const shown = pool
+    .sort((a, b) => a - b)
+    .filter((c) => !filter || String(c) === filter.trim() || (labels.get(c) ?? '').toLowerCase().includes(filter.toLowerCase()));
+  return (
+    <>
       <div className="ame-gallery-tools">
         <select className="small" value={which} onChange={(e) => setWhich(e.target.value as typeof which)}>
           <option value="kind">Pieces for this kind of tile ({lists.kind.size})</option>
@@ -525,12 +590,7 @@ function PiecePanel({
       </div>
       <div className="ame-gallery">
         {shown.map((c) => (
-          <button
-            key={c}
-            className={`cel-cell${shared?.includes(c) ? ' active' : ''}`}
-            title={`Piece ${c}${labels.get(c) ? ` · ${labels.get(c)}` : ''}`}
-            onClick={() => onSet(mode === 'replace' ? [c] : (cur) => [...(cur ?? []).filter((x) => x !== c), c].slice(-4))}
-          >
+          <button key={c} className={`cel-cell${active?.includes(c) ? ' active' : ''}`} title={`Piece ${c}${labels.get(c) ? ` · ${labels.get(c)}` : ''}`} onClick={() => onPick(c)}>
             <CelThumb frame={cels[c]} palette={palette} fit={56} tint={tint} />
             <span className="mono small">{c}</span>
             <span className="muted tiny">{labels.get(c) ?? ''}</span>
@@ -538,7 +598,7 @@ function PiecePanel({
         ))}
         {!shown.length && <p className="muted small">No pieces here — try “Every piece”.</p>}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -714,6 +774,267 @@ function AutomapPreview({
       >
         <canvas ref={canvas} style={{ width: size.w, height: size.h }} />
       </div>
+    </div>
+  );
+}
+
+type BulkTab = 'walls' | 'floors' | 'water' | 'objects';
+
+/**
+ * Draw all the same: one choice for a whole kind of tile — every wall shape from one wall set (each shape its own
+ * piece, so it faces the right way), every floor, every floor that looks like water, trees and props. The choice goes
+ * into the pending changes, shown on the preview; nothing is written until Save.
+ */
+function BulkPanel({
+  map,
+  groups,
+  table,
+  level,
+  levelLabel,
+  cels,
+  palette,
+  style,
+  celsOf,
+  makeColors,
+  onApply,
+  onClose,
+}: {
+  map: OpenMap;
+  groups: Group[];
+  table: AutomapTable;
+  level: string;
+  levelLabel: (level: string) => string;
+  cels: SpriteFrame[];
+  palette: Palette;
+  style: AutomapStyle;
+  celsOf: (g: Group) => number[] | null;
+  makeColors: () => Promise<AutomapColors | undefined>;
+  onApply: (targets: Group[], cels: number[], what: string) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<BulkTab>('walls');
+  const [keep, setKeep] = useState(false);
+  const [from, setFrom] = useState(level);
+  const usual = useMemo(() => usualCels(table, from, { acrossActs: true }), [table, from]);
+  const codeOf = (g: Group) => AUTOMAP_CODES[g.orientation] ?? '';
+  const byCode = (kind: AutomapKind) => {
+    const m = new Map<string, Group[]>();
+    for (const g of groups) if (kindOfCode(codeOf(g)) === kind) (m.get(codeOf(g)) ?? m.set(codeOf(g), []).get(codeOf(g))!).push(g);
+    return m;
+  };
+  const walls = useMemo(() => byCode('walls'), [groups]); // eslint-disable-line react-hooks/exhaustive-deps
+  const objects = useMemo(() => byCode('objects'), [groups]); // eslint-disable-line react-hooks/exhaustive-deps
+  const floors = useMemo(() => groups.filter((g) => codeOf(g) === 'fl'), [groups]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The piece chosen per code ([] = leave off the automap); starts as the chosen level's usual piece.
+  const [pick, setPick] = useState<Map<string, number[]>>(new Map());
+  const chosen = (code: string): number[] => pick.get(code) ?? (usual.has(code) ? [usual.get(code)!] : []);
+  const [active, setActive] = useState<string | null>(null);
+  const [water, setWater] = useState<{ groups: Group[]; off: Set<string> } | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [waterCel, setWaterCel] = useState<number[] | null>(null);
+  const tintFor = (kind: AutomapKind) => (style.colours === 'kind' ? style.kinds[kind].colour : undefined);
+  const tiles = (list: Group[]) => list.reduce((n, g) => n + g.cells.length, 0);
+  const targets = (list: Group[]) => (keep ? list.filter((g) => celsOf(g) === null) : list);
+  const setCode = (code: string, v: number[]) => setPick((m) => new Map(m).set(code, v));
+
+  const findWater = async () => {
+    setFinding(true);
+    try {
+      const colors = await makeColors();
+      const found = floors.filter((g) => {
+        const tile = map.lib.pick(0, g.style, g.sub, 0);
+        return !!tile && isWaterTile(tile.subTileFlags, colors?.tile(0, g.style, g.sub) ?? null);
+      });
+      setWater({ groups: found, off: new Set() });
+      if (waterCel === null) {
+        // The piece the level already gives its water, if any: the one most of the found tiles use.
+        const counts = new Map<number, number>();
+        for (const g of found) for (const c of celsOf(g) ?? []) counts.set(c, (counts.get(c) ?? 0) + g.cells.length);
+        const best = [...counts].sort((a, b) => b[1] - a[1])[0];
+        setWaterCel(best ? [best[0]] : []);
+      }
+    } finally {
+      setFinding(false);
+    }
+  };
+
+  const row = (code: string, list: Group[], kind: AutomapKind) => {
+    const c = chosen(code);
+    return (
+      <button key={code} className={`amb-row${active === code ? ' active' : ''}`} onClick={() => setActive(code)} title="Click to choose another piece">
+        <KindIcon kind={kind} colour={style.kinds[kind].colour} />
+        <span className="amb-name">
+          <code>{code}</code> {AUTOMAP_CODE_NAMES[code] ?? ''}
+          <span className="muted small">
+            {' '}
+            · {list.length} kind{list.length === 1 ? '' : 's'}, {tiles(list)} tiles
+          </span>
+        </span>
+        <span className="amb-piece">{c.length ? <CelThumb frame={cels[c[0]]} palette={palette} fit={32} tint={tintFor(kind)} /> : <span className="ame-badge hidden">off</span>}</span>
+      </button>
+    );
+  };
+  const gallery = (code: string, kind: AutomapKind, value: number[], set: (v: number[]) => void) => (
+    <>
+      <div className="amb-gallery-head small">
+        Piece for <code>{code}</code> {AUTOMAP_CODE_NAMES[code] ?? ''}:{' '}
+        <button className="link" onClick={() => set([])}>
+          leave off the automap
+        </button>
+      </div>
+      <PieceGallery table={table} level={level} cels={cels} palette={palette} codes={[code]} tint={tintFor(kind)} active={value} onPick={(c) => set([c])} />
+    </>
+  );
+
+  const TABS: { id: BulkTab; label: string; kind: AutomapKind }[] = [
+    { id: 'walls', label: 'Walls', kind: 'walls' },
+    { id: 'floors', label: 'Floors', kind: 'floors' },
+    { id: 'water', label: 'Water', kind: 'floors' },
+    { id: 'objects', label: 'Objects & trees', kind: 'objects' },
+  ];
+  const waterOn = water ? water.groups.filter((g) => !water.off.has(g.key)) : [];
+  const sets = tab === 'walls' ? walls : objects;
+  const setKind: AutomapKind = tab === 'walls' ? 'walls' : 'objects';
+  return (
+    <div className="ame-panel amb">
+      <div className="field-label amb-head">
+        <span>Draw all the same</span>
+        <button className="icon-btn" title="Back to picking pieces for selected kinds" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      <div className="chips">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`chip${tab === t.id ? ' active' : ''}`}
+            onClick={() => {
+              setTab(t.id);
+              setActive(null);
+            }}
+          >
+            <KindIcon kind={t.kind} colour={t.id === 'water' ? '#3d8bff' : style.kinds[t.kind].colour} size={13} /> {t.label}
+          </button>
+        ))}
+      </div>
+      <label className="small">
+        <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> Only kinds without an entry (keep the others as they are)
+      </label>
+
+      {(tab === 'walls' || tab === 'objects') && (
+        <>
+          <p className="muted small">
+            {tab === 'walls'
+              ? 'Each wall shape gets its own piece (a left wall, a corner, a door each face their own way), all from one wall set. Click a shape to pick another piece for it.'
+              : 'Trees and props, one piece per code (or left off the automap, as Act 1 does with its trees). Click one to pick another piece.'}
+          </p>
+          <label className="small amb-from">
+            Pieces as in{' '}
+            <select
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setPick(new Map());
+              }}
+            >
+              {(table.levels.includes(level) ? table.levels : [level, ...table.levels]).map((l) => (
+                <option key={l} value={l}>
+                  {levelLabel(l)}
+                  {l === level ? ' (this level)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="amb-rows">
+            {[...sets].map(([code, list]) => row(code, list, setKind))}
+            {!sets.size && <p className="muted small">This map has none.</p>}
+          </div>
+          {active && sets.has(active) && gallery(active, setKind, chosen(active), (v) => setCode(active, v))}
+          <button
+            className="btn primary"
+            disabled={!sets.size}
+            onClick={() => {
+              for (const [code, gs] of sets) onApply(targets(gs), chosen(code), '');
+              onApply([], [], `${tab === 'walls' ? 'All walls' : 'All objects & trees'}: ${sets.size} shape${sets.size === 1 ? '' : 's'} set as in ${levelLabel(from)}. Check the preview, then save.`);
+            }}
+          >
+            Apply to all {tab === 'walls' ? 'walls' : 'objects & trees'} ({tiles(targets([...sets.values()].flat()))} tiles)
+          </button>
+        </>
+      )}
+
+      {tab === 'floors' && (
+        <>
+          <p className="muted small">
+            One piece for every floor ({floors.length} kinds, {tiles(floors)} tiles) — or leave them all off, as most of the game&apos;s levels do. Give water its
+            own piece afterwards on the Water tab.
+          </p>
+          {gallery('fl', 'floors', chosen('fl'), (v) => setCode('fl', v))}
+          <button
+            className="btn primary"
+            disabled={!floors.length}
+            onClick={() => onApply(targets(floors), chosen('fl'), `All floors: ${chosen('fl').length ? `piece ${chosen('fl')[0]}` : 'left off the automap'}. Check the preview, then save.`)}
+          >
+            Apply to all floors ({tiles(targets(floors))} tiles)
+          </button>
+        </>
+      )}
+
+      {tab === 'water' && (
+        <>
+          <p className="muted small">Water is floor nobody can walk on, dark or bluish (so not lava): those found get one piece. Untick any that aren&apos;t water.</p>
+          {!water ? (
+            <button className="btn" disabled={finding} onClick={() => void findWater()}>
+              {finding ? 'Looking at the tiles… (the first time takes a while)' : 'Find the water tiles'}
+            </button>
+          ) : (
+            <>
+              <div className="amb-water">
+                {water.groups.map((g) => {
+                  const tile = map.lib.pick(0, g.style, g.sub, 0);
+                  const on = !water.off.has(g.key);
+                  return (
+                    <label key={g.key} className={`amb-water-tile${on ? '' : ' off'}`} title={`Floor ${g.style}/${g.sub} · ${g.cells.length} on map`}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          setWater((w) => {
+                            if (!w) return w;
+                            const off = new Set(w.off);
+                            if (off.has(g.key)) off.delete(g.key);
+                            else off.add(g.key);
+                            return { ...w, off };
+                          })
+                        }
+                      />
+                      {tile ? <Thumb tile={tile} palette={palette} /> : null}
+                      <span className="mono tiny">
+                        {g.style}/{g.sub}
+                      </span>
+                    </label>
+                  );
+                })}
+                {!water.groups.length && <p className="muted small">No floor here looks like water.</p>}
+              </div>
+              {water.groups.length > 0 && (
+                <>
+                  {gallery('fl', 'floors', waterCel ?? [], (v) => setWaterCel(v))}
+                  <button
+                    className="btn primary"
+                    disabled={!waterOn.length}
+                    onClick={() =>
+                      onApply(targets(waterOn), waterCel ?? [], `Water: ${waterOn.length} floor kind${waterOn.length === 1 ? '' : 's'} ${waterCel?.length ? `get piece ${waterCel[0]}` : 'left off the automap'}. Check the preview, then save.`)
+                    }
+                  >
+                    Apply to the water ({tiles(targets(waterOn))} tiles)
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
