@@ -2,25 +2,55 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SpriteFrame } from '../formats/dc6';
 import type { Palette } from '../formats/palette';
 import { AUTOMAP_CODE_NAMES, AUTOMAP_CODES, describeRule, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
+import { kindOfOrientation, type AutomapKind, type AutomapStyle } from '../game/automapStyle';
+import { AutomapLook } from './AutomapLook';
 import { Modal } from './Dialogs';
 
-/** One MaxiMap cel drawn at `scale`. */
-export function CelThumb({ frame, palette, scale = 2, title }: { frame: SpriteFrame | undefined; palette: Palette; scale?: number; title?: string }) {
+/** The part of a cel with pixels in it (cels are tall with the piece at the bottom). */
+function celBounds(frame: SpriteFrame): { x0: number; y0: number; w: number; h: number } {
+  let x0 = frame.width;
+  let y0 = frame.height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < frame.height; y++)
+    for (let x = 0; x < frame.width; x++)
+      if (frame.pixels[y * frame.width + x]) {
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+  return x1 < 0 ? { x0: 0, y0: 0, w: frame.width, h: frame.height } : { x0, y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/**
+ * One MaxiMap cel: at `scale`, or with `fit` cropped to its pixels and enlarged to fit a `fit`-pixel box (crisp);
+ * `tint` draws it in one colour (a kind's) instead of the game's.
+ */
+export function CelThumb({ frame, palette, scale = 2, title, fit, tint }: { frame: SpriteFrame | undefined; palette: Palette; scale?: number; title?: string; fit?: number; tint?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const box = frame && fit ? celBounds(frame) : null;
   useEffect(() => {
     const c = ref.current;
     if (!c || !frame) return;
-    c.width = frame.width;
-    c.height = frame.height;
+    const b = box ?? { x0: 0, y0: 0, w: frame.width, h: frame.height };
+    c.width = b.w;
+    c.height = b.h;
     const ctx = c.getContext('2d')!;
-    const img = ctx.createImageData(frame.width, frame.height);
-    for (let i = 0; i < frame.pixels.length; i++) {
-      const p = frame.pixels[i];
-      if (!p) continue;
-      img.data.set([palette[p * 4], palette[p * 4 + 1], palette[p * 4 + 2], 255], i * 4);
-    }
+    const img = ctx.createImageData(b.w, b.h);
+    const t = tint ? [1, 3, 5].map((i) => parseInt(tint.slice(i, i + 2), 16)) : null;
+    for (let y = 0; y < b.h; y++)
+      for (let x = 0; x < b.w; x++) {
+        const p = frame.pixels[(y + b.y0) * frame.width + x + b.x0];
+        if (!p) continue;
+        img.data.set(t ? [t[0], t[1], t[2], 255] : [palette[p * 4], palette[p * 4 + 1], palette[p * 4 + 2], 255], (y * b.w + x) * 4);
+      }
     ctx.putImageData(img, 0, 0);
-  }, [frame, palette]);
+  }, [frame, palette, tint, box?.x0, box?.y0, box?.w, box?.h]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (box) {
+    const k = Math.max(1, Math.min(8, Math.floor(fit! / Math.max(box.w, box.h)) || 1));
+    return <canvas ref={ref} className="cel-thumb fit" title={title} style={{ width: box.w * k, height: box.h * k }} />;
+  }
   return <canvas ref={ref} className="cel-thumb" title={title} style={{ width: (frame?.width ?? 16) * scale, height: (frame?.height ?? 32) * scale }} />;
 }
 
@@ -49,6 +79,9 @@ interface Props {
   onCancelSuggestions: () => void;
   /** Opens the full automap editor. */
   onOpenEditor: () => void;
+  /** How the automap is drawn, and changing it. */
+  style: AutomapStyle;
+  onStyle: (s: AutomapStyle) => void;
 }
 
 /** Shows which automap piece each tile uses (AutoMap.txt row + MaxiMap cel) and lets you pick a different one. */
@@ -70,6 +103,11 @@ export function AutomapPanel(props: Props) {
   const here = cell ? pieces.filter((p) => p.cellX === cell.x && p.cellY === cell.y) : [];
   const wallsMissing = pieces.filter((p) => p.layer === 'wall' && !p.rule).length;
   const shown = pieces.filter((p) => p.cel !== null).length;
+  const kindCounts = useMemo(() => {
+    const n: Partial<Record<AutomapKind, number>> = {};
+    for (const p of pieces) if (p.cel !== null) n[kindOfOrientation(p.orientation)] = (n[kindOfOrientation(p.orientation)] ?? 0) + 1;
+    return n;
+  }, [pieces]);
   return (
     <section className="panel">
       <div className="panel-header static">
@@ -94,9 +132,13 @@ export function AutomapPanel(props: Props) {
           Open automap editor…
         </button>
         <p className="muted small">
-          What the map looks like on the in-game automap (Tab in game). Walls outlined in pink have no AutoMap.txt entry and won&apos;t show.
-          Select a cell to see and change its pieces.
+          What the map looks like on the in-game automap (Tab in game). Outlined walls have no AutoMap.txt entry and won&apos;t show. Select a cell to
+          see and change its pieces.
         </p>
+        <details className="am-look-box" open>
+          <summary>Look</summary>
+          <AutomapLook style={props.style} onChange={props.onStyle} counts={kindCounts} />
+        </details>
         {!suggestions ? (
           <div className="am-suggest">
             <button className="btn" disabled={!level || (!wallsMissing && !(floors && floorsMissing))} onClick={() => props.onSuggest(floors)}>

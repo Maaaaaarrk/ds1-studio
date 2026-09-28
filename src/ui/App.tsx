@@ -79,6 +79,7 @@ import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, ty
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
 import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
+import { DEFAULT_AUTOMAP_STYLE, normalizeAutomapStyle, type AutomapStyle } from '../game/automapStyle';
 import { ClipboardPanel } from './ClipboardPanel';
 import { SavePresetDialog } from './SavePresetDialog';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
@@ -1527,12 +1528,28 @@ export function App() {
   );
   const [automapSuggestions, setAutomapSuggestions] = useState<AutomapSuggestion[] | null>(null);
   useEffect(() => setAutomapSuggestions(null), [map?.path, automapLevel]);
+  /** How the automap is drawn (kind colours, thickness, opacity…), remembered in this browser/app. */
+  const [automapStyle, setAutomapStyleRaw] = useState<AutomapStyle>(() => {
+    try {
+      return normalizeAutomapStyle(JSON.parse(localStorage.getItem('ds1studio.automapStyle') ?? 'null'));
+    } catch {
+      return DEFAULT_AUTOMAP_STYLE;
+    }
+  });
+  const setAutomapStyle = useCallback((s: AutomapStyle) => {
+    setAutomapStyleRaw(s);
+    try {
+      localStorage.setItem('ds1studio.automapStyle', JSON.stringify(s));
+    } catch {
+      // per-viewer convenience only
+    }
+  }, []);
   const automapView = useMemo(
     () =>
       automapPiecesNow && automapData && map
-        ? { pieces: automapSuggestions ? withSuggestions(automapPiecesNow, automapSuggestions) : automapPiecesNow, cels: automapData.cels, palette: map.palette }
+        ? { pieces: automapSuggestions ? withSuggestions(automapPiecesNow, automapSuggestions) : automapPiecesNow, cels: automapData.cels, palette: map.palette, style: automapStyle }
         : null,
-    [automapPiecesNow, automapData, map, automapSuggestions],
+    [automapPiecesNow, automapData, map, automapSuggestions, automapStyle],
   );
   /** Opens the automap editor (loading AutoMap.txt first if the automap view hasn't yet). */
   const openAutomapEditor = useCallback(() => setDialog('automap'), []);
@@ -2770,7 +2787,7 @@ export function App() {
 
       <main className="stage">
         {map && scene && visibility.walkable && <WalkLegend floating />}
-        {map && scene && viewMode === 'automap' && <AutomapLegend />}
+        {map && scene && viewMode === 'automap' && <AutomapLegend style={automapStyle} />}
         {map && !rightCollapsed && (
           <button className="stage-fold" onClick={() => setRightCollapsed(true)} title="Fold the side panels away (more room for the map)">
             <PanelRightClose size={15} />
@@ -2898,6 +2915,8 @@ export function App() {
             {viewMode === 'automap' &&
               (automapData ? (
                 <AutomapPanel
+                  style={automapStyle}
+                  onStyle={setAutomapStyle}
                   onOpenEditor={openAutomapEditor}
                   table={automapData.table}
                   cels={automapData.cels}
@@ -3321,6 +3340,8 @@ export function App() {
            {dialog === 'automap' && map && (automapData && automapLevel ? (
         <AutomapEditor
           map={map}
+          style={automapStyle}
+          onStyle={setAutomapStyle}
           table={automapData.table}
           cels={automapData.cels}
           palette={map.palette}

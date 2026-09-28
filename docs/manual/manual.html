@@ -637,7 +637,15 @@
     <figure><img src="../media/automap.png" alt="Automap preview" /><figcaption>Automap preview (<kbd>A</kbd>).</figcaption></figure>
     <figure><img src="../media/automap-suggest.png" alt="Automap suggestions" /><figcaption>Suggested pieces previewed in cyan.</figcaption></figure>
   </div>
-  <p><b>Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined in <b>pink</b> have no <code>AutoMap.txt</code> entry, so the automap draws nothing there. <b>Game → Automap editor</b> lists every kind of tile the map uses with the automap piece it gets: select kinds (or click spots on the preview) and pick pieces, add random variants, <b>hide</b> a kind on purpose, or <b>Suggest</b> pieces from look-alike tiles. Nothing is written until <b>Save to AutoMap.txt</b>.</p>
+  <p><b>View → Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined (pink unless you change it) have no <code>AutoMap.txt</code> entry: a hole in the automap. Floors without one are normal (the game draws few floors).</p>
+  <p><b>Look</b> (in the Automap panel, and <b>Look</b> on the editor's preview) decides how it is drawn, and is remembered:</p>
+  <ul>
+    <li><b>Colour by kind</b>: walls, floors, objects &amp; trees, and roofs &amp; shadows each in their own colour (click a swatch to change it), with a small icon for each kind; or <b>Game colours</b>, the pieces' own colours as in game.</li>
+    <li>Each kind can be shown or hidden, with how many pieces of it there are.</li>
+    <li><b>Opacity</b>, <b>Thickness</b> (as thin as in game, or thicker to see at any zoom) and <b>Map under it</b> (how much the map underneath shows).</li>
+    <li><b>Outline walls with no entry</b>, in a colour of your choice. <b>reset look</b> goes back to the defaults.</li>
+  </ul>
+  <p>The floating legend on the map follows the look. <b>Game → Automap editor</b> (or <b>Open automap editor…</b> in the panel) lists every kind of tile the map uses, walls first, with the automap piece it gets, drawn large and in its kind's colour. Its counts tell <b>missing</b> walls (holes) from <b>floors not drawn</b> (normal). <b>Suggest pieces for N missing wall kinds</b> selects every wall without an entry and suggests the piece the level (or its act) uses for look-alike tiles, marking those the level leaves off the automap as hidden; review and <b>Save to AutoMap.txt</b>. You can also select kinds (or click spots on the preview), pick pieces from the gallery, add random variants, or <b>hide</b> a kind on purpose. Nothing is written until you save.</p>
   <figure class="medium"><img src="../media/automap-editor.png" alt="Automap editor" /><figcaption>The Automap editor.</figcaption></figure>
 </section>
 

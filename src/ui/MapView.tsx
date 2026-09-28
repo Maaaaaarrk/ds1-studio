@@ -8,7 +8,8 @@ import type { OpenMap } from '../game/openMap';
 import { TileAtlas } from '../render/atlas';
 import { blendFlag, InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
 import type { SpriteAnimation } from '../game/spriteAnim';
-import { AUTOMAP_SCALE, automapCellOrigin, type AutomapPiece } from '../game/automap';
+import { AUTOMAP_SCALE, type AutomapPiece } from '../game/automap';
+import { automapCanvas, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, worldToSubTile, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
@@ -77,7 +78,7 @@ interface Props {
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
   focus: { item: DrawItem; index: number; count: number; label: string } | null;
   /** The in-game automap drawn over the map (dimmed underneath). */
-  automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array } | null;
+  automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array; style: AutomapStyle } | null;
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
   /** When `signal` changes, centre the view on this world point (zooming in if far out). */
@@ -783,50 +784,24 @@ interface AutomapImage {
   missing: [number, number][];
   /** Cells showing a suggested (unsaved) piece. */
   suggested: [number, number][];
+  style: AutomapStyle;
 }
 
 /** The automap at its own resolution (one cel pixel = 10 world pixels), drawn scaled up by the overlay. */
 function renderAutomap(width: number, height: number, a: NonNullable<Props['automap']>): AutomapImage {
-  const ox = height * 8 + 16;
-  const oy = 40;
-  const W = (width + height) * 8 + 32;
-  const H = (width + height) * 4 + 56;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(W, H);
   const missing: [number, number][] = [];
   const suggested: [number, number][] = [];
-  const pal = a.palette;
+  const draw: DrawPiece[] = [];
   for (const p of a.pieces) {
     if (p.suggested) suggested.push([p.cellX, p.cellY]);
     if (p.cel === null) {
       if (p.layer === 'wall' && !p.rule) missing.push([p.cellX, p.cellY]);
       continue;
     }
-    const f = a.cels[p.cel];
-    if (!f) continue;
-    const [ax, ay] = automapCellOrigin(p.cellX, p.cellY);
-    // A cel's origin is the cell's west corner, 8 px below its north corner.
-    const x0 = ox + ax - 8 + f.offsetX;
-    const y0 = oy + ay + 8 + f.offsetY;
-    for (let y = 0; y < f.height; y++)
-      for (let x = 0; x < f.width; x++) {
-        const c = f.pixels[y * f.width + x];
-        if (!c) continue;
-        const X = x0 + x;
-        const Y = y0 + y;
-        if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
-        const o = (Y * W + X) * 4;
-        img.data[o] = pal[c * 4];
-        img.data[o + 1] = pal[c * 4 + 1];
-        img.data[o + 2] = pal[c * 4 + 2];
-        img.data[o + 3] = 255;
-      }
+    draw.push({ cellX: p.cellX, cellY: p.cellY, orientation: p.orientation, cel: p.cel });
   }
-  ctx.putImageData(img, 0, 0);
-  return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing, suggested };
+  const { canvas, ox, oy } = automapCanvas(width, height, draw, a.cels, a.palette, a.style);
+  return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing, suggested, style: a.style };
 }
 
 type OverlayState = Props & {
@@ -848,14 +823,14 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   if (s.automapImage) {
     // The automap as the game draws it, over a dimmed map; walls without an automap entry outlined.
     const am = s.automapImage;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+    ctx.fillStyle = `rgba(0, 0, 0, ${am.style.dim})`;
     ctx.beginPath();
     diamond(ctx, 0, 0, ds1.width, ds1.height);
     ctx.fill();
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(am.canvas, am.x, am.y, am.canvas.width * AUTOMAP_SCALE, am.canvas.height * AUTOMAP_SCALE);
-    if (am.missing.length) {
-      ctx.strokeStyle = 'rgba(255, 90, 200, 0.9)';
+    if (am.missing.length && am.style.missing) {
+      ctx.strokeStyle = am.style.missingColour;
       ctx.lineWidth = 1.5 * px;
       ctx.beginPath();
       for (const [cx, cy] of am.missing) diamond(ctx, cx, cy);

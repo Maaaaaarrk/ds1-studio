@@ -17,6 +17,8 @@ import {
 } from '../game/automap';
 import type { OpenMap } from '../game/openMap';
 import { CelThumb } from './AutomapPanel';
+import { automapCanvas, automapFrame, kindOfCode, kindOfOrientation, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
+import { AutomapLook, KindIcon } from './AutomapLook';
 import { Thumb } from './TilePalette';
 
 interface Props {
@@ -31,6 +33,9 @@ interface Props {
   onSave: (edits: AutomapEdit[]) => Promise<void>;
   /** Colours and look-alike references for suggestions (may take a moment the first time). */
   makeColors: () => Promise<AutomapColors | undefined>;
+  /** How the automap is drawn (shared with the map's Automap view). */
+  style: AutomapStyle;
+  onStyle: (s: AutomapStyle) => void;
   onClose: () => void;
 }
 
@@ -53,7 +58,9 @@ const statusOf = (cels: number[] | null): Status => (cels === null ? 'missing' :
  * The automap editor: every kind of tile the map uses, what the automap draws for it (from AutoMap.txt), a live
  * preview of the whole automap, and a piece gallery to change it. Nothing is written until "Save".
  */
-export function AutomapEditor({ map, table, cels, palette, level, onLevel, levelLabel, canSave, onSave, makeColors, onClose }: Props) {
+export function AutomapEditor({ map, table, cels, palette, level, onLevel, levelLabel, canSave, onSave, makeColors, style, onStyle, onClose }: Props) {
+  /** A piece's colour in the list and gallery: its kind's, when colouring by kind. */
+  const tintOf = (orientation: number) => (style.colours === 'kind' ? style.kinds[kindOfOrientation(orientation)].colour : undefined);
   const [edits, setEdits] = useState<Map<string, AutomapEdit>>(new Map());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<Filter>('all');
@@ -89,9 +96,14 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
   );
   const celsOf = useCallback((g: Group): number[] | null => edits.get(g.key)?.cels ?? fileCels(g), [edits, fileCels]);
 
+  // Walls without an entry are a problem (the automap has a hole); floors without one are normal (the game draws few).
   const counts = useMemo(() => {
-    const c = { shown: 0, hidden: 0, missing: 0 };
-    for (const g of groups) c[statusOf(edits.get(g.key)?.cels ?? fileCels(g))] += g.cells.length;
+    const c = { shown: 0, hidden: 0, missing: 0, notDrawn: 0 };
+    for (const g of groups) {
+      const st = statusOf(edits.get(g.key)?.cels ?? fileCels(g));
+      if (st === 'missing' && g.layer === 'floor') c.notDrawn += g.cells.length;
+      else c[st] += g.cells.length;
+    }
     return c;
   }, [groups, edits, fileCels]);
 
@@ -99,12 +111,16 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
   const visible = groups.filter((g) => {
     const code = AUTOMAP_CODES[g.orientation] ?? '';
     const st = statusOf(celsOf(g));
-    if (filter === 'missing' && st !== 'missing') return false;
+    if (filter === 'missing' && (st !== 'missing' || g.layer === 'floor')) return false;
     if (filter === 'hidden' && st !== 'hidden') return false;
     if (filter === 'changed' && !edits.has(g.key)) return false;
     return !q || `${code} ${AUTOMAP_CODE_NAMES[code] ?? ''} ${g.style}/${g.sub}`.toLowerCase().includes(q);
   });
-  const ordered = AUTOMAP_KINDS.map((k) => ({ ...k, items: visible.filter((g) => k.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')) })).filter((k) => k.items.length);
+  // Walls first: floors are the longest list and the least often wanted on the automap.
+  const ordered = [...AUTOMAP_KINDS.filter((k) => k.label !== 'Floors'), ...AUTOMAP_KINDS.filter((k) => k.label === 'Floors')]
+    .map((k) => ({ ...k, items: visible.filter((g) => k.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')) }))
+    .filter((k) => k.items.length);
+  const missingWalls = groups.filter((g) => g.layer === 'wall' && statusOf(celsOf(g)) === 'missing');
   const flat = ordered.flatMap((k) => (collapsed.has(k.label) ? [] : k.items));
 
   const click = (g: Group, e: React.MouseEvent) => {
@@ -199,11 +215,16 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
             </select>
           </label>
           <span className="ame-stat shown">{counts.shown} shown</span>
-          <span className="ame-stat hidden">{counts.hidden} hidden</span>
-          <span className="ame-stat missing">{counts.missing} missing</span>
+          <span className="ame-stat missing" title="Walls and objects with no AutoMap.txt entry: holes in the automap">
+            {counts.missing} missing
+          </span>
+          <span className="ame-stat hidden" title="Floors with no entry: normal, the game draws few floors">
+            {counts.notDrawn} floors not drawn
+          </span>
+          {counts.hidden > 0 && <span className="ame-stat hidden">{counts.hidden} hidden</span>}
           <span className="muted small ame-help">
-            <b className="ame-pink">Missing</b> = no AutoMap.txt entry, so the automap draws nothing there. Give it a piece, or mark it <b>hidden</b> if it
-            shouldn&apos;t show (like Act 1&apos;s trees).
+            <b style={{ color: style.missingColour }}>Missing</b> = a wall or object with no AutoMap.txt entry: a hole in the automap. Give it a piece, or
+            hide it if it shouldn&apos;t show (like Act 1&apos;s trees). Floors without one are normal.
           </span>
         </div>
         <div className="ame-body">
@@ -214,17 +235,29 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
               <div className="chips">
                 {(['all', 'missing', 'changed', 'hidden'] as Filter[]).map((f) => (
                   <button key={f} className={`chip${filter === f ? ' active' : ''}`} onClick={() => setFilter(f)}>
-                    {f === 'all' ? 'All' : f === 'missing' ? 'Missing' : f === 'changed' ? `Changed (${edits.size})` : 'Hidden'}
+                    {f === 'all' ? 'All' : f === 'missing' ? 'Missing walls' : f === 'changed' ? `Changed (${edits.size})` : 'Hidden'}
                   </button>
                 ))}
               </div>
+              {missingWalls.length > 0 && (
+                <button
+                  className="btn small primary"
+                  title="Select every wall with no AutoMap.txt entry and suggest the piece this level (or its act) normally uses for it: review, then save"
+                  onClick={() => {
+                    setSelected(new Set(missingWalls.map((g) => g.key)));
+                    void suggestFor(missingWalls);
+                  }}
+                >
+                  Suggest pieces for {missingWalls.length} missing wall kind{missingWalls.length === 1 ? '' : 's'}
+                </button>
+              )}
               <div className="ame-sel-tools small">
                 <button className="link" onClick={() => setSelected(new Set(flat.map((g) => g.key)))}>
                   select all shown
                 </button>
                 {' · '}
-                <button className="link" onClick={() => setSelected(new Set(flat.filter((g) => statusOf(celsOf(g)) === 'missing').map((g) => g.key)))}>
-                  select missing
+                <button className="link" onClick={() => setSelected(new Set(flat.filter((g) => g.layer === 'wall' && statusOf(celsOf(g)) === 'missing').map((g) => g.key)))}>
+                  select missing walls
                 </button>
                 {selected.size > 0 && (
                   <>
@@ -250,7 +283,7 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
                       })
                     }
                   >
-                    <span>{collapsed.has(k.label) ? '▸' : '▾'}</span> {k.label}
+                    <span>{collapsed.has(k.label) ? '▸' : '▾'}</span> <KindIcon kind={kindOfCode(k.codes[0])} colour={style.kinds[kindOfCode(k.codes[0])].colour} /> {k.label}
                     <span className="muted small">
                       {k.items.length} kind{k.items.length === 1 ? '' : 's'} · {k.items.reduce((n, g) => n + g.cells.length, 0)} tiles
                     </span>
@@ -274,9 +307,9 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
                           </div>
                           <div className={`ame-piece ${st}`}>
                             {st === 'shown' ? (
-                              c!.map((cel, i) => <CelThumb key={i} frame={cels[cel]} palette={palette} scale={1.5} title={`piece ${cel}`} />)
+                              c!.map((cel, i) => <CelThumb key={i} frame={cels[cel]} palette={palette} fit={40} tint={tintOf(g.orientation)} title={`piece ${cel}`} />)
                             ) : (
-                              <span className={`ame-badge ${st}`}>{st}</span>
+                              <span className={`ame-badge ${st === 'missing' && g.layer === 'floor' ? 'hidden' : st}`}>{st === 'missing' && g.layer === 'floor' ? 'not drawn' : st}</span>
                             )}
                           </div>
                         </div>
@@ -290,6 +323,8 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
 
           {/* Preview */}
           <AutomapPreview
+            style={style}
+            onStyle={onStyle}
             map={map}
             groups={groups}
             celsOf={celsOf}
@@ -307,6 +342,7 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
 
           {/* Piece editor */}
           <PiecePanel
+            tint={sel.length ? tintOf(sel[0].orientation) : undefined}
             table={table}
             level={level}
             cels={cels}
@@ -343,6 +379,7 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
 }
 
 function PiecePanel({
+  tint,
   table,
   level,
   cels,
@@ -366,6 +403,8 @@ function PiecePanel({
   onSet: (value: number[] | ((current: number[] | null) => number[])) => void;
   onRevert: () => void;
   onSuggest: () => void;
+  /** The selection's kind colour, when colouring by kind. */
+  tint?: string;
 }) {
   const [which, setWhich] = useState<'kind' | 'level' | 'act' | 'all'>('kind');
   const [filter, setFilter] = useState('');
@@ -397,7 +436,7 @@ function PiecePanel({
         </p>
         <div className="ame-legend small">
           <div>
-            <span className="ame-badge missing">missing</span> no AutoMap.txt entry: drawn as nothing (pink on the preview)
+            <span className="ame-badge missing">missing</span> a wall with no AutoMap.txt entry: a hole in the automap (outlined on the preview)
           </div>
           <div>
             <span className="ame-badge hidden">hidden</span> deliberately not on the automap
@@ -447,7 +486,7 @@ function PiecePanel({
         ) : (
           shared.map((cel, i) => (
             <div key={i} className="ame-slot">
-              <CelThumb frame={cels[cel]} palette={palette} scale={3} title={`piece ${cel}`} />
+              <CelThumb frame={cels[cel]} palette={palette} fit={72} tint={tint} title={`piece ${cel}`} />
               <span className="mono small">{cel}</span>
               <button className="icon-btn" title="Remove this piece" onClick={() => onSet((cur) => (cur ?? []).filter((_, n) => n !== i))}>
                 ×
@@ -492,7 +531,7 @@ function PiecePanel({
             title={`Piece ${c}${labels.get(c) ? ` · ${labels.get(c)}` : ''}`}
             onClick={() => onSet(mode === 'replace' ? [c] : (cur) => [...(cur ?? []).filter((x) => x !== c), c].slice(-4))}
           >
-            <CelThumb frame={cels[c]} palette={palette} scale={2.5} />
+            <CelThumb frame={cels[c]} palette={palette} fit={56} tint={tint} />
             <span className="mono small">{c}</span>
             <span className="muted tiny">{labels.get(c) ?? ''}</span>
           </button>
@@ -512,7 +551,11 @@ function AutomapPreview({
   palette,
   selected,
   onPick,
+  style,
+  onStyle,
 }: {
+  style: AutomapStyle;
+  onStyle: (s: AutomapStyle) => void;
   map: OpenMap;
   groups: Group[];
   celsOf: (g: Group) => number[] | null;
@@ -526,42 +569,20 @@ function AutomapPreview({
   const [size, setSize] = useState({ w: 400, h: 400 });
   const [view, setView] = useState<{ zoom: number; x: number; y: number } | null>(null);
   const pan = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+  const [lookOpen, setLookOpen] = useState(false);
   const { width, height } = map.ds1;
-  const ox = height * 8 + 16;
-  const oy = 40;
-  const W = (width + height) * 8 + 32;
-  const H = (width + height) * 4 + 56;
+  const { ox, oy, W, H } = automapFrame(width, height);
 
-  // The automap image (automap pixels), rebuilt when pieces change.
+  // The automap image (automap pixels) in the chosen look, rebuilt when pieces or the look change.
   const image = useMemo(() => {
-    const c = document.createElement('canvas');
-    c.width = W;
-    c.height = H;
-    const ctx = c.getContext('2d')!;
-    const img = ctx.createImageData(W, H);
+    const draw: DrawPiece[] = [];
     for (const g of groups) {
       const list = celsOf(g);
       if (!list?.length) continue;
-      for (const [cx, cy] of g.cells) {
-        const f = cels[list[(cx * 7 + cy * 13) % list.length]];
-        if (!f) continue;
-        const [ax, ay] = automapCellOrigin(cx, cy);
-        const x0 = ox + ax - 8 + f.offsetX;
-        const y0 = oy + ay + 8 + f.offsetY;
-        for (let y = 0; y < f.height; y++)
-          for (let x = 0; x < f.width; x++) {
-            const p = f.pixels[y * f.width + x];
-            if (!p) continue;
-            const X = x0 + x;
-            const Y = y0 + y;
-            if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
-            img.data.set([palette[p * 4], palette[p * 4 + 1], palette[p * 4 + 2], 255], (Y * W + X) * 4);
-          }
-      }
+      for (const [cx, cy] of g.cells) draw.push({ cellX: cx, cellY: cy, orientation: g.orientation, cel: list[(cx * 7 + cy * 13) % list.length] });
     }
-    ctx.putImageData(img, 0, 0);
-    return c;
-  }, [groups, celsOf, cels, palette, W, H, ox]);
+    return automapCanvas(width, height, draw, cels, palette, style).canvas;
+  }, [groups, celsOf, cels, palette, width, height, style]);
 
   useEffect(() => {
     const el = wrap.current!;
@@ -609,20 +630,23 @@ function AutomapPreview({
       ctx.closePath();
     };
     const lw = 1.5 / v.zoom;
-    // Missing (pink) and selected (gold) outlines.
+    // Walls without an entry, and the selected kinds.
     ctx.lineWidth = lw;
-    ctx.strokeStyle = 'rgba(255, 90, 200, 0.85)';
-    ctx.beginPath();
-    for (const g of groups) if (g.layer === 'wall' && celsOf(g) === null) for (const [cx, cy] of g.cells) diamond(cx, cy);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(255, 210, 90, 1)';
-    ctx.fillStyle = 'rgba(255, 210, 90, 0.25)';
+    if (style.missing) {
+      ctx.strokeStyle = style.missingColour;
+      ctx.beginPath();
+      for (const g of groups) if (g.layer === 'wall' && celsOf(g) === null) for (const [cx, cy] of g.cells) diamond(cx, cy);
+      ctx.stroke();
+    }
+    // White: the kind colours use gold, blue, green and purple.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
     ctx.beginPath();
     for (const g of groups) if (selected.has(g.key)) for (const [cx, cy] of g.cells) diamond(cx, cy);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-  }, [size, v.zoom, v.x, v.y, image, groups, selected, celsOf, width, height, ox]);
+  }, [size, v.zoom, v.x, v.y, image, groups, selected, celsOf, width, height, ox, oy, style]);
 
   const latest = useRef({ v });
   latest.current = { v };
@@ -653,10 +677,18 @@ function AutomapPreview({
     <div className="ame-preview">
       <div className="ame-preview-bar small">
         <span className="muted">Automap preview (with your changes) · wheel to zoom, drag to pan, click to select</span>
+        <button className={`btn small${lookOpen ? ' active' : ''}`} onClick={() => setLookOpen(!lookOpen)} title="Colours, thickness and which kinds show">
+          Look
+        </button>
         <button className="btn small" onClick={() => setView(null)}>
           Fit
         </button>
       </div>
+      {lookOpen && (
+        <div className="ame-look">
+          <AutomapLook style={style} onChange={onStyle} compact />
+        </div>
+      )}
       <div
         ref={wrap}
         className="ame-canvas"
