@@ -574,6 +574,44 @@ export function App() {
     if (visibility.popsInside) for (const a of popAreas) for (const t of popTargets(map.ds1, a)) hidden.add(`${t.layer}:${t.x}:${t.y}`);
     return { areas: popAreas, popPad: popPreset?.popPad ?? 0, show: visibility.pops, inside: visibility.popsInside, hidden };
   }, [map, popAreas, popPreset, visibility.pops, visibility.popsInside]);
+  // The wall-layer tiles hide areas fade ("layer:x:y"; roofs, usually), and per area which layers they are on.
+  const { popTargetCells, popAreaTargets } = useMemo(() => {
+    const cells = new Set<string>();
+    const perArea: { layer: number; roof: boolean }[][] = [];
+    if (map)
+      for (const a of popAreas) {
+        const list: { layer: number; roof: boolean }[] = [];
+        for (const t of popTargets(map.ds1, a)) {
+          cells.add(`${t.layer}:${t.x}:${t.y}`);
+          list.push({ layer: t.layer, roof: map.ds1.walls[t.layer]?.[t.y * map.ds1.width + t.x]?.orientation === Orientation.Roof });
+        }
+        perArea.push(list);
+      }
+    return { popTargetCells: cells, popAreaTargets: perArea };
+  }, [map, popAreas]);
+  /**
+   * Whether a click can land on a tile of this kind/layer/cell: in a hide area only one side of the building is in
+   * reach. "As if inside" hides the tiles that fade, so clicks go through to the floors and walls inside; otherwise
+   * the roof is on top, so the floors under it can't be picked or selected through it.
+   */
+  const blockedByPops = useCallback(
+    (kind: 'floor' | 'shadow' | 'wall', layer: number, x: number, y: number) => {
+      if (!popAreas.length) return false;
+      if (visibility.popsInside) return kind === 'wall' && popTargetCells.has(`${layer}:${x}:${y}`);
+      if (kind === 'wall') return false;
+      // Covered: inside an area whose fading tiles are drawn (not switched off in Layers).
+      return popAreas.some(
+        (a, i) =>
+          x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && popAreaTargets[i].some((t) => (visibility.walls[t.layer] ?? true) && (!t.roof || visibility.roofs)),
+      );
+    },
+    [popAreas, popTargetCells, popAreaTargets, visibility],
+  );
+  /** What clicks, picks and Shift+wheel can reach: what is drawn, minus the hidden side of a hide area. */
+  const hittable = useCallback(
+    (it: DrawItem) => isVisible(it, visibility) && !blockedByPops(it.kind === 'floor' ? 'floor' : it.kind === 'shadow' ? 'shadow' : 'wall', it.layer, it.cellX, it.cellY),
+    [visibility, blockedByPops],
+  );
 
   // Preview under the cursor: the pending paste, or the paint brush.
   const pasteRect = useMemo(
@@ -615,7 +653,7 @@ export function App() {
       // Keep stepping through the same stack while the cursor stays near where it started (a pixel of mouse drift
       // would otherwise land on a different set of tiles and start over); farther away, stack up the new spot.
       const near = stack?.anchor && Math.hypot(world[0] - stack.anchor[0], world[1] - stack.anchor[1]) * zoom < 24;
-      const items = near ? stack!.items : stackAt(scene, world[0], world[1], (it) => isVisible(it, visibility));
+      const items = near ? stack!.items : stackAt(scene, world[0], world[1], hittable);
       if (!items.length) return;
       const index = near && stack!.index >= 0 ? (stack!.index + dir + items.length) % items.length : dir > 0 ? 0 : items.length - 1;
       const item = items[index];
@@ -624,14 +662,14 @@ export function App() {
       focusTile(item.tile, layerOfItem(item));
       if (tool !== 'select' && tool !== 'paint') setTool('select');
     },
-    [doc, scene, tool, pasting, visibility, stack, focusTile, zoom],
+    [doc, scene, tool, pasting, hittable, stack, focusTile, zoom],
   );
 
   const pickAt = useCallback(
     (x: number, y: number, world: [number, number]) => {
       if (!doc || !scene) return;
       // What you see is what you pick: the frontmost tile pixel under the cursor.
-      const hit = hitTest(scene, world[0], world[1], (it) => isVisible(it, visibility));
+      const hit = hitTest(scene, world[0], world[1], hittable);
       if (hit) {
         const layer: LayerRef = { kind: hit.kind === 'floor' ? 'floor' : 'wall', index: hit.layer };
         const orientation = hit.tile.orientation === Orientation.LeftPartOfNorthCornerWall ? Orientation.RightPartOfNorthCornerWall : hit.tile.orientation;
@@ -647,7 +685,7 @@ export function App() {
       const byKind = (k: LayerRef['kind']) => layers.filter((l) => l.kind === k).reverse();
       for (const layer of [...byKind('wall'), ...byKind('floor'), ...byKind('shadow')]) {
         const c = doc.cell(layer, x, y);
-        if (isEmptyCell(c)) continue;
+        if (isEmptyCell(c) || blockedByPops(layer.kind, layer.index, x, y)) continue;
         const orientation = layer.kind === 'wall' ? (c as WallCell).orientation : layer.kind === 'floor' ? Orientation.Floor : Orientation.Shadow;
         setActiveLayer(layer);
         setBrush({ orientation, main: c.mainIndex, sub: c.subIndex });
@@ -657,7 +695,7 @@ export function App() {
       }
       notify('Nothing to pick in that cell.');
     },
-    [doc, scene, visibility, notify, focusTile],
+    [doc, scene, hittable, blockedByPops, notify, focusTile],
   );
 
   const onStroke = useCallback(
@@ -807,9 +845,9 @@ export function App() {
           selectAnchor.current = cell;
           // Clicking a tile selects the cell it belongs to (tall walls and trees overlap the cells behind them)
           // and reveals the tile in its DT1 in the Tiles panel.
-          const opaque = scene ? hitTestAll(scene, world[0], world[1], (it) => isVisible(it, visibility)) : [];
+          const opaque = scene ? hitTestAll(scene, world[0], world[1], hittable) : [];
           const hit = opaque[0];
-          const hits = scene && hit ? stackAt(scene, world[0], world[1], (it) => isVisible(it, visibility)) : opaque;
+          const hits = scene && hit ? stackAt(scene, world[0], world[1], hittable) : opaque;
           setStack(hits.length > 1 ? { items: hits, index: -1, anchor: world } : null);
           if (hit) {
             selectAnchor.current = [hit.cellX, hit.cellY];
@@ -876,7 +914,7 @@ export function App() {
       if (phase === 'end') doc.endStroke();
       if (changed || phase === 'end') bump();
     },
-    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, focusTile, walkBrush],
+    [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, hittable, focusTile, walkBrush],
   );
 
   // Selection commands.
