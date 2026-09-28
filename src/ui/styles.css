@@ -741,3 +741,16 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .light-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .light-row input[type='range'] { flex: 1; }
 .light-row input[type='color'] { width: 34px; height: 20px; padding: 0; border: 1px solid var(--border); background: none; }
+
+/* Import DT1 from the game library */
+.dt1l-cols { display: grid; grid-template-columns: 300px 1fr; gap: 12px; flex-shrink: 0; }
+.dt1l-colours { display: flex; align-items: center; gap: 6px; }
+.dt1l-colours select { width: auto; }
+.dt1l-view { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dt1-library .dt1v-grid, .dt1-library .dt1v-detail { height: 52vh; max-height: 52vh; }
+.dt1-library .dtt { height: calc(52vh + 90px); max-height: none; }
+.dt1l-chosen { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.dt1l-chosen .chip { display: inline-flex; align-items: center; gap: 4px; }
+.dtt-badge.chosen { background: rgba(90, 170, 110, 0.25); color: #8fd6a2; }
+.dtt-badge + .dtt-badge { margin-left: 4px; }
+@media (max-width: 760px) { .dt1l-cols { grid-template-columns: 1fr; } }

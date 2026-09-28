@@ -90,7 +90,7 @@ const LIFT = (() => {
 /** Tile pictures (brightened), cached per palette. */
 const thumbCache = new WeakMap<Palette, WeakMap<Dt1Tile, { url: string; width: number; height: number } | null>>();
 
-function tilePicture(tile: Dt1Tile, palette: Palette): { url: string; width: number; height: number } | null {
+export function tilePicture(tile: Dt1Tile, palette: Palette): { url: string; width: number; height: number } | null {
   let byTile = thumbCache.get(palette);
   if (!byTile) thumbCache.set(palette, (byTile = new WeakMap()));
   if (byTile.has(tile)) return byTile.get(tile)!;
@@ -119,7 +119,7 @@ function tilePicture(tile: Dt1Tile, palette: Palette): { url: string; width: num
 const thumbnail = (tile: Dt1Tile, palette: Palette) => tilePicture(tile, palette)?.url ?? null;
 
 /** What the hover preview shows: the tile, where it sits on screen, and lines about it. */
-interface PreviewState {
+export interface PreviewState {
   tile: Dt1Tile;
   rect: DOMRect;
   title: string;
@@ -130,12 +130,13 @@ interface PreviewState {
  * An enlarged view of a tile while the pointer rests on it in the palette, beside the side panel: the picture up to 3×
  * (crisp pixels), and what the tile is.
  */
-function TilePreview({ p, palette }: { p: PreviewState; palette: Palette }) {
+export function TilePreview({ p, palette }: { p: PreviewState; palette: Palette }) {
   const pic = tilePicture(p.tile, palette);
   const scale = pic ? Math.max(1, Math.min(3, 300 / pic.width, 280 / pic.height)) : 1;
   const w = Math.max(200, (pic ? pic.width * scale : 0) + 20);
   const h = (pic ? pic.height * scale : 40) + 30 + p.lines.length * 16;
-  const left = Math.max(8, p.rect.left - w - 12);
+  // Beside the tile: on its left (the side panel's case), or on its right when there's no room there.
+  const left = p.rect.left - w - 12 >= 8 ? p.rect.left - w - 12 : Math.max(8, Math.min(p.rect.right + 12, window.innerWidth - w - 8));
   const top = Math.min(Math.max(8, p.rect.top + p.rect.height / 2 - h / 2), window.innerHeight - h - 8);
   return createPortal(
     <div className="tile-preview" style={{ left, top, width: w }}>
@@ -156,7 +157,7 @@ function TilePreview({ p, palette }: { p: PreviewState; palette: Palette }) {
 }
 
 /** Hover handlers that open the preview after a short rest (none while the mouse just passes over). */
-function usePreview(): [PreviewState | null, (make: () => Omit<PreviewState, 'rect'>) => { onMouseEnter: (e: ReactMouseEvent) => void; onMouseLeave: () => void }, () => void] {
+export function usePreview(): [PreviewState | null, (make: () => Omit<PreviewState, 'rect'>) => { onMouseEnter: (e: ReactMouseEvent) => void; onMouseLeave: () => void }, () => void] {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const timer = useRef<number | null>(null);
   const hide = () => {

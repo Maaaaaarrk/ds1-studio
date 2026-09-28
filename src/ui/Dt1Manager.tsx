@@ -3,11 +3,12 @@ import type { Dt1 } from '../formats/dt1';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
-import { Thumb } from './TilePalette';
+import { Thumb, TilePreview, tilePicture, usePreview } from './TilePalette';
 import { loadAct0Palette } from '../game/act0Palette';
 import type { Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
+import { Dt1Tree } from './Dt1Tree';
 
 interface Props {
   map: OpenMap;
@@ -155,12 +156,20 @@ const KINDS: { id: string; label: string; test: (o: number) => boolean }[] = [
   { id: 'special', label: 'Specials', test: (o) => o === 10 || o === 11 },
 ];
 
-/** Every tile of one DT1, filterable by kind, with a large view of the clicked tile. */
-function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: string; dt1: Dt1 | null; palette: Palette; paletteNote: string | null; inMap: boolean; onAdd: () => void }) {
+/**
+ * Every tile of one DT1, filterable by kind: resting the pointer on a tile shows it enlarged (as in the Tiles panel),
+ * clicking it shows its details.
+ */
+export function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd, addLabel = 'Add to map' }: { path: string; dt1: Dt1 | null; palette: Palette; paletteNote: string | null; inMap: boolean; onAdd: () => void; addLabel?: string }) {
   const [kind, setKind] = useState('all');
+  const [hovered, hover, hideHover] = usePreview();
   const [picked, setPicked] = useState<number | null>(null);
   const [size, setSize] = useState(64);
-  useEffect(() => setPicked(null), [path]);
+  useEffect(() => {
+    setPicked(null);
+    hideHover();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path]);
   const tiles = (dt1?.tiles ?? []).map((t, i) => ({ t, i })).filter(({ t }) => KINDS.find((k) => k.id === kind)!.test(t.orientation));
   const sel = picked !== null ? dt1?.tiles[picked] : undefined;
   return (
@@ -183,7 +192,7 @@ function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: st
         </div>
         {!inMap && (
           <button className="btn small" onClick={onAdd}>
-            Add to map
+            {addLabel}
           </button>
         )}
       </div>
@@ -198,7 +207,19 @@ function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: st
           title="Ctrl + scroll to zoom"
         >
           {tiles.map(({ t, i }) => (
-            <div key={i} className={`thumb${picked === i ? ' active' : ''}`} title={`#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · ${t.mainIndex}/${t.subIndex}`} onClick={() => setPicked(i)}>
+            <div
+              key={i}
+              className={`thumb${picked === i ? ' active' : ''}`}
+              {...hover(() => {
+                const pic = tilePicture(t, palette);
+                return {
+                  tile: t,
+                  title: `#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · main ${t.mainIndex} · sub ${t.subIndex}`,
+                  lines: [[pic ? `${pic.width}×${pic.height} px` : '', `rarity ${t.rarity}`, t.animated ? 'animated' : ''].filter(Boolean).join(' · '), 'Click: details'],
+                };
+              })}
+              onClick={() => setPicked(i)}
+            >
               <Thumb tile={t} palette={palette} />
               <span className="thumb-label">
                 {t.mainIndex}/{t.subIndex}
@@ -206,6 +227,7 @@ function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: st
             </div>
           ))}
         </div>
+        {hovered && <TilePreview p={hovered} palette={palette} />}
         <div className="dt1v-detail">
           {sel ? (
             <>
@@ -226,6 +248,123 @@ function Dt1Viewer({ path, dt1, palette, paletteNote, inMap, onAdd }: { path: st
           ) : (
             <p className="muted small">Click a tile for a closer look.</p>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The act a tile library belongs to, from its folder (act1…act5, expansion = Act 5); null when it doesn't say. */
+function libraryAct(path: string): number | null {
+  const m = /^data\/global\/tiles\/(?:act(\d)|(expansion))\//i.exec(path);
+  if (!m) return null;
+  return m[2] ? 4 : Math.min(4, Math.max(0, Number(m[1]) - 1));
+}
+
+/**
+ * Import DT1 → From game library: every tile library the game and mods have, by folder, with each one's tiles to look
+ * through (hover to enlarge). Chosen libraries are added to the open map like in the Tile libraries dialog.
+ */
+export function Dt1LibraryDialog({ map, gd, onApply, onClose }: Omit<Props, 'usage'>) {
+  const current = useMemo(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path), [map]);
+  const inMap = useMemo(() => new Set(current.map(normalizePath)), [current]);
+  const all = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
+  const [selected, setSelected] = useState('');
+  const [dt1, setDt1] = useState<Dt1 | null>(null);
+  const [chosen, setChosen] = useState<string[]>([]);
+  // Colours: the library's own act (from its folder), the map's act, or Act 0 (magenta = colours that change by act).
+  const [palMode, setPalMode] = useState<'own' | 'map' | 'act0'>('own');
+  const [pal, setPal] = useState<{ palette: Palette; note: string } | null>(null);
+  const ownAct = libraryAct(selected);
+  useEffect(() => {
+    let live = true;
+    const act = palMode === 'own' ? (ownAct ?? map.ds1.act) : map.ds1.act;
+    const load =
+      palMode === 'act0'
+        ? loadAct0Palette(gd.fs).then((a) => ({ palette: a.palette, note: 'Act 0 palette (magenta = changes between acts)' }))
+        : gd.palette(act).then((palette) => ({ palette, note: `Act ${act + 1} palette` }));
+    void load.then((p) => live && setPal(p)).catch(() => live && setPal(null));
+    return () => {
+      live = false;
+    };
+  }, [gd, palMode, ownAct, map]);
+  useEffect(() => {
+    setDt1(null);
+    if (selected) void gd.dt1(selected).then(setDt1);
+  }, [selected, gd]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const isChosen = (p: string) => chosen.some((c) => normalizePath(c) === normalizePath(p));
+  const toggle = (p: string) => setChosen((c) => (isChosen(p) ? c.filter((x) => normalizePath(x) !== normalizePath(p)) : [...c, p]));
+  const selInMap = selected && inMap.has(normalizePath(selected));
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal dt1-manager dt1-library" role="dialog" aria-label="Tile libraries from the game">
+        <div className="modal-title">Import DT1 from the game library · {map.path.split('/').pop()}</div>
+        <div className="dt1l-cols">
+          <Dt1Tree all={all} inMap={current} chosen={chosen} selected={selected} onSelect={setSelected} />
+          <div className="dt1l-view">
+            {selected ? (
+              <Dt1Viewer
+                path={selected}
+                dt1={dt1}
+                palette={pal?.palette ?? map.palette}
+                paletteNote={pal?.note ?? null}
+                inMap={!!selInMap}
+                addLabel={isChosen(selected) ? '✓ Chosen (click to undo)' : 'Choose this library'}
+                onAdd={() => toggle(selected)}
+              />
+            ) : (
+              <p className="muted small">
+                Pick a tile library on the left to see its tiles. Rest the pointer on a tile to see it enlarged; click it for its details. Choose the libraries
+                you want, then add them to the map.
+              </p>
+            )}
+            <label className="small dt1l-colours">
+              Colours
+              <select value={palMode} onChange={(e) => setPalMode(e.target.value as typeof palMode)}>
+                <option value="own">its act{ownAct !== null ? ` (Act ${ownAct + 1})` : ''}</option>
+                <option value="map">this map&apos;s act (Act {map.ds1.act + 1})</option>
+                <option value="act0">Act 0: show colours that change between acts</option>
+              </select>
+            </label>
+            {selInMap && <p className="muted small">This map already loads this library.</p>}
+          </div>
+        </div>
+        <div className="dt1l-chosen">
+          <span className="field-label">Chosen</span>
+          {chosen.length ? (
+            chosen.map((p) => (
+              <span key={p} className="chip active" title={p}>
+                <button className="link" onClick={() => setSelected(p)}>
+                  {short(p)}
+                </button>
+                <button className="icon-btn" title="Remove" onClick={() => toggle(p)}>
+                  ×
+                </button>
+              </span>
+            ))
+          ) : (
+            <span className="muted small">none yet</span>
+          )}
+        </div>
+        <p className="muted small">
+          The libraries are already in the game (or your mod), so nothing is copied: they are added to the map&apos;s tile libraries, and if the map is in
+          LvlPrest.txt its level type (LvlTypes.txt) and Dt1Mask are updated so the game loads them too (originals kept as .bak).
+        </p>
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary" disabled={!chosen.length} onClick={() => onApply([...current, ...chosen])}>
+            Add {chosen.length || ''} to the map
+          </button>
         </div>
       </div>
     </div>

@@ -76,7 +76,7 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { Splitter, usePersistentSize } from './Splitter';
 import { Modal, NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
 import { DataTables, type TableTarget } from './DataTables';
-import { Dt1Manager } from './Dt1Manager';
+import { Dt1LibraryDialog, Dt1Manager } from './Dt1Manager';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
@@ -252,7 +252,7 @@ export function App() {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -2109,6 +2109,12 @@ export function App() {
               menu: [
                 { label: 'DT1 files…', hint: 'one or several', onClick: () => void pickImport('dt1', 'files') },
                 { label: 'Folders…', hint: 'with their subfolders', onClick: () => void pickImport('dt1', 'folders') },
+                {
+                  label: 'From game library…',
+                  hint: 'browse the game and mod DT1s',
+                  title: 'Look through every tile library the game and your mods have, by folder, and add the ones you choose to the open map',
+                  onClick: () => (noMap ? notify('Open a map first: the libraries are added to it.', true) : setDialog('dt1lib')),
+                },
               ],
             },
             {
@@ -2945,6 +2951,7 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
+      {dialog === 'dt1lib' && map && <Dt1LibraryDialog map={map} gd={data.gd} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
       {dialog === 'dt1s' && map && <Dt1Manager map={map} gd={data.gd} usage={dt1Usage} onApply={(p) => void applyDt1s(p)} onClose={() => setDialog(null)} />}
       {dialog === 'tables' && (
         <DataTables

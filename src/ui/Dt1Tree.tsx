@@ -40,12 +40,14 @@ interface Props {
   all: string[];
   /** The DT1s the open map loads (listed first). */
   inMap: string[];
+  /** Libraries picked in a chooser (marked in the tree). */
+  chosen?: string[];
   selected: string;
   onSelect: (path: string) => void;
 }
 
 /** Tile libraries as a tree: the map's own first, then every DT1 by folder (collapsible), with a search box. */
-export function Dt1Tree({ all, inMap, selected, onSelect }: Props) {
+export function Dt1Tree({ all, inMap, chosen = [], selected, onSelect }: Props) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<Set<string>>(() => {
     // Start with the selected library's folders open.
@@ -57,6 +59,7 @@ export function Dt1Tree({ all, inMap, selected, onSelect }: Props) {
   const q = query.trim().toLowerCase();
   const tree = useMemo(() => buildTree(all.filter((p) => !q || p.replace(TILES, '').toLowerCase().includes(q))), [all, q]);
   const inMapSet = useMemo(() => new Set(inMap.map(normalizePath)), [inMap]);
+  const chosenSet = useMemo(() => new Set(chosen.map(normalizePath)), [chosen]);
   const sel = normalizePath(selected);
 
   const toggle = (key: string) =>
@@ -71,6 +74,7 @@ export function Dt1Tree({ all, inMap, selected, onSelect }: Props) {
     <button key={p} className={`dtt-file${normalizePath(p) === sel ? ' active' : ''}`} onClick={() => onSelect(p)} title={p.replace(TILES, '')}>
       {label}
       {inMapSet.has(normalizePath(p)) && <span className="dtt-badge" title="Loaded by this map">map</span>}
+      {chosenSet.has(normalizePath(p)) && <span className="dtt-badge chosen" title="Chosen to add">chosen</span>}
     </button>
   );
 
