@@ -37,6 +37,9 @@ describe.runIf(hasD2)('string tables (.tbl), checked against the game\'s own', a
     // Written back unchanged: the same CRC (a stale CRC makes the game halt at start-up).
     const out = writeTbl(parseTbl(b));
     expect(new DataView(out.buffer).getUint16(0, true)).toBe(tblCrc(out));
+    // Max probes is a count (the longest search + 1), as the game stores it: one less hides the string that needs
+    // the longest search (it showed as an empty item name in game). The game's own tables rewrite to the same value.
+    expect(parseTblRaw(out).maxTries).toBe(parseTblRaw(b).maxTries);
   });
 
   it('writes a table the game can read: same strings, same numbers, and new ones found', () => {

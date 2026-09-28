@@ -87,7 +87,8 @@ export function parseTbl(b: Uint8Array): Tbl {
 export function tblLookup(b: Uint8Array, key: string): string | null {
   const raw = parseTblRaw(b);
   const want = tblHash(key, raw.hashSize);
-  for (let t = 0; t <= raw.maxTries; t++) {
+  // The game probes at most `maxTries` slots (the stored value counts probes: the longest search + 1).
+  for (let t = 0; t < raw.maxTries; t++) {
     const node = raw.nodes[(want + t) % raw.hashSize];
     if (!node.used) return null;
     if (cstr(b, node.keyOff) === key) return cstr(b, node.valOff);
@@ -112,7 +113,9 @@ export function writeTbl(t: Tbl): Uint8Array {
     while (slot[(h + tries) % size] !== -1) tries++;
     slot[(h + tries) % size] = i;
     nodeOf[i] = (h + tries) % size;
-    maxTries = Math.max(maxTries, tries);
+    // Stored as a count of probes (the game's own tables hold the longest search + 1): one less and the string
+    // that needs the longest search is never found, and shows as an empty box in game.
+    maxTries = Math.max(maxTries, tries + 1);
   });
   const stringsAt = HEADER + n * 2 + size * NODE;
   const parts: Uint8Array[] = [];

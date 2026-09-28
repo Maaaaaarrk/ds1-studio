@@ -181,6 +181,32 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   }
   else out.push({ severity: 'ok', area: 'Tiles', title: 'Every placed tile has a graphic' });
 
+  // The Map entry (special tile 30/11) is where a map portal (PD2's map items) puts players. The game only finds it
+  // when one of the level's DT1s contains that tile, as PD2's own Guild level type does with act1/barracks/warp.dt1;
+  // DS1 Studio's built-in marker isn't enough. Without it, using the map item stops the game (D2Common, line 568).
+  {
+    const entryKey = `${Orientation.SpecialTile1}|30|11`;
+    const hasEntry = ds1.walls.some((l) => l.some((c) => c.orientation === Orientation.SpecialTile1 && c.mainIndex === 30 && c.subIndex === 11));
+    let inDt1 = false;
+    for (const l of lib.loaded) {
+      if (inDt1 || !l.found || isBuiltinPath(l.path)) continue;
+      const dt1 = await gd.dt1(l.path).catch(() => null);
+      inDt1 = !!dt1?.tiles.some((t) => t.orientation === Orientation.SpecialTile1 && t.mainIndex === 30 && t.subIndex === 11);
+    }
+    if (hasEntry && !inDt1) {
+      const found = await dt1sContaining(gd, new Set([entryKey]), new Set(lib.loaded.map((l) => normalizePath(l.path))), lib.loaded.map((l) => l.path));
+      const warp = 'data/global/tiles/act1/barracks/warp.dt1';
+      const paths = gd.fs.locate(warp) ? [warp] : found.paths.slice(0, 1);
+      out.push({
+        severity: 'error',
+        area: 'Tiles',
+        title: "The Map entry is invisible to the game: none of the level's tile libraries has it",
+        detail: `A map portal (a map item) puts players on the Map entry tile (special tile 30/11), but the game only finds it when one of the level's DT1s contains that tile. None of this map's does, so using the map item stops the game (D2Common, line 568). ${paths.length ? `${short(paths[0])} has it (PD2's own Guild levels load it for this).` : 'No DT1 in the game or your mod has it.'}`,
+        fixes: paths.length ? [{ kind: 'add-dt1s', label: `Add ${short(paths[0])} to the map's libraries`, paths }] : [],
+      });
+    }
+  }
+
   // DT1s the placed tiles actually come from.
   const used = new Map<string, number>();
   for (const it of scene.items) {

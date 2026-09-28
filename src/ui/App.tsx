@@ -2854,6 +2854,15 @@ export function App() {
     }, `Place ${label}`);
     bump();
     notify(`${label} placed at cell ${x}, ${y} (Wall ${index + 1}) · Ctrl+Z to undo`);
+    // The Map entry is only found by the game (for map portals) when a loaded DT1 has that tile, not DS1 Studio's
+    // built-in marker: add the game's act1/barracks/warp.dt1, as PD2's own Guild levels do.
+    const warp = 'data/global/tiles/act1/barracks/warp.dt1';
+    const t = map?.lib.pick(Orientation.SpecialTile1, main, sub, 0);
+    const src = t ? map?.lib.sourceOf(t) : null;
+    if (map && main === 30 && sub === 11 && (!src || isBuiltinPath(src.path)) && gd?.fs.locate(warp)) {
+      const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
+      void applyDt1s([...libs, warp]).then(() => notify(`${label} placed at cell ${x}, ${y}; added act1/barracks/warp.dt1 to the map's libraries so the game finds it (map portals arrive there).`));
+    }
   };
   /** The map's right-click menu for a cell. */
   const mapMenuEntries = (m: { cell: [number, number]; world: [number, number] }): (MenuEntry | null)[] => {
