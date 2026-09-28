@@ -108,7 +108,7 @@ export async function syncLevelTables(fs: LayeredFs, mapPath: string, dt1s: stri
   const [prest, levels, types0] = await Promise.all([loadTable(fs, 'LvlPrest.txt'), loadTable(fs, 'Levels.txt'), loadTable(fs, 'LvlTypes.txt')]);
   if (!prest || !levels || !types0) throw new Error('LvlPrest.txt, Levels.txt or LvlTypes.txt not found');
   const rows = presetRowsFor(prest, mapPath);
-  if (!rows.length) throw new Error('This map is not in LvlPrest.txt yet: use Data → Add to game first.');
+  if (!rows.length) throw new Error('This map is not in LvlPrest.txt yet: use Game → Add to game first.');
   const levelId = num(getCell(prest, rows[0], 'LevelId'));
   let typeId = fallbackTypeId ?? 0;
   if (levelId) {
@@ -168,7 +168,7 @@ export async function setPopSettings(fs: LayeredFs, mapPath: string, pops: numbe
   const prest = await loadTable(fs, 'LvlPrest.txt');
   if (!prest) throw new Error('LvlPrest.txt not found');
   const rows = presetRowsFor(prest, mapPath);
-  if (!rows.length) throw new Error('This map is not in LvlPrest.txt yet: use Data → Add to game first.');
+  if (!rows.length) throw new Error('This map is not in LvlPrest.txt yet: use Game → Add to game first.');
   let p = prest;
   const summary: string[] = [];
   for (const r of rows)
@@ -248,7 +248,7 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
       summary['LvlTypes.txt'].push(`New level type ${id} "${rowValue(typeIn, 'Name')}"`);
     }
   }
-  if (typeRow < 0) throw new Error('The package has no level type row; open the map and use Data → Add to game.');
+  if (typeRow < 0) throw new Error('The package has no level type row; open the map and use Game → Add to game.');
   const typeIds = new Map<string, string>();
   const fromId = typeIn ? String(num(rowValue(typeIn, 'Id'))) : '';
   if (typeIn && fromId !== getCell(types, typeRow, 'Id').trim()) typeIds.set(fromId, getCell(types, typeRow, 'Id').trim());

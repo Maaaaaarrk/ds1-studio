@@ -78,7 +78,7 @@ export function missingTablesWarning(coverage: TableCoverage[]): string {
   const missing = coverage.filter((c) => !c.rows && c.table !== 'CubeMain').map((c) => c.table);
   if (!missing.length) return '';
   const one = missing.length === 1;
-  return `No ${missing.join(', ')} rows came with this map, so your own ${one ? 'table is' : 'tables are'} used as ${one ? 'it is' : 'they are'}. If ${one ? "it doesn't" : "they don't"} match this map and its tile libraries (the level's size and world position, the level type's DT1s and Dt1Mask, the loading-screen image, the automap), the game can crash when the map loads or while walking in it. After importing, use Map → Add to game and run the Compatibility check.`;
+  return `No ${missing.join(', ')} rows came with this map, so your own ${one ? 'table is' : 'tables are'} used as ${one ? 'it is' : 'they are'}. If ${one ? "it doesn't" : "they don't"} match this map and its tile libraries (the level's size and world position, the level type's DT1s and Dt1Mask, the loading-screen image, the automap), the game can crash when the map loads or while walking in it. After importing, use Game → Add to game and run the Compatibility check.`;
 }
 
 export interface PackageManifest {
@@ -683,7 +683,7 @@ export async function collectMapTxtRows(fs: LayeredFs, mapPath: string): Promise
     const maze = await load('LvlMaze');
     for (const r of maze?.rows ?? []) if (levelIds.has(r['Level']?.trim())) push('LvlMaze', 'Level', maze!, r);
   }
-  // A cube recipe made for this map (Map → Cube recipe tags it) and the item it makes.
+  // A cube recipe made for this map (Game → Cube recipe tags it) and the item it makes.
   const mapName = rel.split('/').pop()!.replace(/\.ds1$/i, '').toLowerCase();
   const cube = await load('CubeMain');
   const codes = new Set<string>();

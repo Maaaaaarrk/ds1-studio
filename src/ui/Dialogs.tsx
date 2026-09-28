@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ResizeDelta } from '../formats/ds1ops';
-import type { GameData, LvlTypeInfo } from '../game/GameData';
 
 export function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
@@ -42,7 +41,6 @@ const ACT_DIRS = ['ACT1', 'ACT2', 'ACT3', 'ACT4', 'Expansion'];
 
 export interface NewMapChoice {
   path: string;
-  lvlType: LvlTypeInfo;
   width: number;
   height: number;
   act: number;
@@ -51,43 +49,27 @@ export interface NewMapChoice {
   tagType: number;
 }
 
-export function NewMapDialog({ gd, onCreate, onClose }: { gd: GameData; onCreate: (c: NewMapChoice) => void; onClose: () => void }) {
-  const types = gd.lvlTypes.filter((t) => t.id > 0);
-  const [typeId, setTypeId] = useState(types[0]?.id ?? 1);
-  const type = gd.lvlType(typeId);
-  const [act, setAct] = useState(0);
-  const [path, setPath] = useState('data/global/tiles/ACT1/Custom/newmap.ds1');
-  const [width, setWidth] = useState(24);
-  const [height, setHeight] = useState(24);
+/**
+ * A new map starts empty: no tile libraries (the DT1 library opens next to pick them from any act), shown in the Act 0
+ * colours so tiles from every act look as they will anywhere. The act is the one the game will give the level: Add
+ * to game makes new levels Act 5 levels.
+ */
+export function NewMapDialog({ onCreate, onClose }: { onCreate: (c: NewMapChoice) => void; onClose: () => void }) {
+  const [act, setAct] = useState(4);
+  const [path, setPath] = useState('data/global/tiles/expansion/Custom/newmap.ds1');
+  const [width, setWidth] = useState(150);
+  const [height, setHeight] = useState(150);
   const [floorLayers, setFloorLayers] = useState(1);
   const [wallLayers, setWallLayers] = useState(2);
   const [tag, setTag] = useState(false);
-  const valid = /^data\/global\/tiles\/.+\.ds1$/i.test(path) && !!type;
-
-  // Suggest an act from the level type's first tile folder ("Act3/Kurast/..." -> act 3).
-  const pickType = (id: number) => {
-    setTypeId(id);
-    const first = gd.lvlType(id)?.files.find(Boolean) ?? '';
-    const m = /^act(\d)/i.exec(first) ?? (/^expansion/i.test(first) ? ['', '5'] : null);
-    if (m) {
-      const a = Number(m[1]) - 1;
-      setAct(a);
-      setPath((p) => p.replace(/^data\/global\/tiles\/[^/]+\//i, `data/global/tiles/${ACT_DIRS[a]}/`));
-    }
+  const valid = /^data\/global\/tiles\/.+\.ds1$/i.test(path);
+  const pickAct = (a: number) => {
+    setAct(a);
+    setPath((p) => p.replace(/^data\/global\/tiles\/[^/]+\//i, `data/global/tiles/${ACT_DIRS[a]}/`));
   };
 
   return (
     <Modal title="New map" onClose={onClose}>
-      <label className="form-row">
-        <span>Level type</span>
-        <select value={typeId} onChange={(e) => pickType(Number(e.target.value))}>
-          {types.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.id} · {t.name}
-            </option>
-          ))}
-        </select>
-      </label>
       <label className="form-row">
         <span>Save path</span>
         <input className="text-input mono" value={path} onChange={(e) => setPath(e.target.value.replace(/\\/g, '/'))} spellCheck={false} />
@@ -100,10 +82,11 @@ export function NewMapDialog({ gd, onCreate, onClose }: { gd: GameData; onCreate
       </div>
       <div className="form-row">
         <span>Act</span>
-        <select value={act} onChange={(e) => setAct(Number(e.target.value))}>
+        <select value={act} onChange={(e) => pickAct(Number(e.target.value))}>
           {[0, 1, 2, 3, 4].map((a) => (
             <option key={a} value={a}>
               Act {a + 1}
+              {a === 4 ? ' (new levels added to the game are Act 5)' : ''}
             </option>
           ))}
         </select>
@@ -119,18 +102,15 @@ export function NewMapDialog({ gd, onCreate, onClose }: { gd: GameData; onCreate
         </div>
       </div>
       <p className="muted small">
-        The map uses every tile library of the level type. To use it in game, reference it from LvlPrest.txt (File1–6) with a matching
-        Dt1Mask.
+        The map starts with no tile libraries: the DT1 library opens next, to choose them from any act. It&apos;s shown in the <b>Act 0</b> colours (the ones
+        that look the same in every act; magenta marks colours that change between acts). <b>Game → Add to game</b> later makes the game load it, with a
+        level type of its own when it needs one.
       </p>
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           Cancel
         </button>
-        <button
-          className="btn primary"
-          disabled={!valid}
-          onClick={() => type && onCreate({ path, lvlType: type, width, height, act, floorLayers, wallLayers, tagType: tag ? 1 : 0 })}
-        >
+        <button className="btn primary" disabled={!valid} onClick={() => onCreate({ path, width, height, act, floorLayers, wallLayers, tagType: tag ? 1 : 0 })}>
           Create
         </button>
       </div>

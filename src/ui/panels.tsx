@@ -167,7 +167,7 @@ function WarpInfo({ vis, control }: { vis: number; control: WarpControl }) {
     return (
       <div className="cell-warp">
         <p className="small muted">
-          This map isn&apos;t tied to a level (no LvlPrest row with a LevelId), so its warps don&apos;t lead anywhere yet. Add it to the game first (Data → Add to game).
+          This map isn&apos;t tied to a level (no LvlPrest row with a LevelId), so its warps don&apos;t lead anywhere yet. Add it to the game first (Game → Add to game).
         </p>
       </div>
     );

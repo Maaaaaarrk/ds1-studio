@@ -121,7 +121,7 @@ export function planCubeItem(tables: CubeTables, input: CubeItemInput): TableWri
   const opens = mapItemLevel(misc, t, tables.levels ?? null);
   if (opens !== null) {
     // A map item: it will open the open map's level, which must be in the game.
-    if (!input.map) return 'This map isn’t a level in the game yet, so a map item can’t open it. Use Data → Add to game first, then come back.';
+    if (!input.map) return 'This map isn’t a level in the game yet, so a map item can’t open it. Use Game → Add to game first, then come back.';
     if (!tables.strings) return 'patchstring.tbl (the mod’s strings) could not be read.';
   } else if (risk?.kind === 'mod-type' && !input.acceptModType) return 'Tick the box under the template to confirm your mod supports new items of its type.';
   if (!input.inputs.length) return 'Add at least one ingredient.';

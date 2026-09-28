@@ -135,7 +135,7 @@ export function ExportPackageDialog({ mapPath, building, result, coverage, onBui
       </p>
       {missing.length > 0 && (
         <p className="small warn-text">
-          This map has no {missing.join(', ')} rows in your tables{missing.includes('LvlPrest') ? ' (it has not been added to the game yet: Map → Add to game)' : ''}. Whoever imports it keeps
+          This map has no {missing.join(', ')} rows in your tables{missing.includes('LvlPrest') ? ' (it has not been added to the game yet: Game → Add to game)' : ''}. Whoever imports it keeps
           their own, which may not match it: that can crash the game when the map loads.
         </p>
       )}
@@ -213,7 +213,7 @@ export function ImportPackageDialog({ pkg, plan, canWrite, onImport, onClose }: 
         <input type="checkbox" checked={makeRecipe && isLevel} disabled={!isLevel} onChange={(e) => setMakeRecipe(e.target.checked)} /> make a cube recipe
         and map item for it next {plan.recipe?.inputs.length ? <span className="muted">({plan.recipe.inputs.join(' + ')})</span> : null}
       </label>
-      {!isLevel && <p className="small muted">The package doesn&apos;t make the map a level: use Map → Add to game after importing, then Map → Cube recipe.</p>}
+      {!isLevel && <p className="small muted">The package doesn&apos;t make the map a level: use Game → Add to game after importing, then Game → Cube recipe.</p>}
       <div className="change-list">
         {plan.writes
           .filter((w) => w.action !== 'identical')

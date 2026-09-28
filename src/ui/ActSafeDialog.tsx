@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { decodeTile, type Dt1, type TileImage } from '../formats/dt1';
 import { hueRemap, recolorDt1 } from '../formats/dt1Edit';
-import { PALETTE_NAMES, type Palette } from '../formats/palette';
+import { ACT0_PALETTE, OLD_ACT5_PALETTE, PALETTE_NAMES, type Palette } from '../formats/palette';
 import { loadAct0Palette, type Act0Palette } from '../game/act0Palette';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
@@ -50,7 +50,7 @@ interface Props {
  * of another act, both here and in game.
  */
 export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onClose }: Props) {
-  const mapAct = map.paletteAct === 5 ? 4 : map.paletteAct;
+  const mapAct = map.paletteAct === OLD_ACT5_PALETTE ? 4 : map.paletteAct === ACT0_PALETTE ? Math.min(4, map.ds1.act) : map.paletteAct;
   const [act0, setAct0] = useState<Act0Palette | null>(null);
   const [acts, setActs] = useState<Palette[] | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);

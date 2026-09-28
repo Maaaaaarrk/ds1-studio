@@ -1,6 +1,7 @@
 import { parseDs1, type Ds1 } from '../formats/ds1';
 import { decodeTile, type Dt1Tile } from '../formats/dt1';
-import { OLD_ACT5_PALETTE, type Palette } from '../formats/palette';
+import { ACT0_PALETTE, OLD_ACT5_PALETTE, type Palette } from '../formats/palette';
+import { loadAct0Palette } from './act0Palette';
 import { BUILTIN_SPECIALS_PATH, builtinSpecialTiles } from './specialTiles';
 
 const SPECIALS = builtinSpecialTiles();
@@ -31,9 +32,36 @@ export async function openMap(gd: GameData, path: string, override?: MapOverride
   const dt1s = await Promise.all(resolution.paths.map((p) => gd.dt1(p).catch(() => null)));
   resolution.paths.forEach((p, i) => lib.add(p, dt1s[i]));
   lib.addFallback(BUILTIN_SPECIALS_PATH, SPECIALS);
-  const [paletteAct, paletteSource] = await choosePaletteAct(gd, ds1, resolution, lib);
-  const palette = await gd.palette(paletteAct);
+  const chosen = chosenPalette(path);
+  const [paletteAct, paletteSource] = chosen !== null ? [chosen, 'manual' as const] : await choosePaletteAct(gd, ds1, resolution, lib);
+  const palette = await mapPalette(gd, paletteAct);
   return { path, ds1, resolution, lib, palette, paletteAct, paletteSource };
+}
+
+/** A palette choice's colours: an act's, or Act 0 (act-safe colours, the rest magenta). */
+export async function mapPalette(gd: GameData, act: number): Promise<Palette> {
+  return act === ACT0_PALETTE ? (await loadAct0Palette(gd.fs)).palette : gd.palette(act);
+}
+
+/** Palettes picked by hand, per map, remembered on this computer so the map opens in them again. */
+const PALETTE_KEY = 'ds1studio.mapPalettes';
+function chosenPalettes(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(PALETTE_KEY) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+function chosenPalette(path: string): number | null {
+  const v = chosenPalettes()[path.toLowerCase()];
+  return typeof v === 'number' ? v : null;
+}
+export function rememberPalette(path: string, act: number): void {
+  try {
+    localStorage.setItem(PALETTE_KEY, JSON.stringify({ ...chosenPalettes(), [path.toLowerCase()]: act }));
+  } catch {
+    // per-computer convenience only
+  }
 }
 
 /** Palette slots whose colour differs between the acts (the rest of the palette is shared). */
@@ -130,5 +158,6 @@ async function choosePaletteAct(gd: GameData, ds1: Ds1, r: Dt1Resolution, lib: T
 
 /** Redraws an open map with another act's palette. */
 export async function withPalette(gd: GameData, map: OpenMap, act: number): Promise<OpenMap> {
-  return { ...map, paletteAct: act, paletteSource: 'manual', palette: await gd.palette(act) };
+  rememberPalette(map.path, act);
+  return { ...map, paletteAct: act, paletteSource: 'manual', palette: await mapPalette(gd, act) };
 }

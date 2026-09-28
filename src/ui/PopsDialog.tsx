@@ -108,7 +108,7 @@ export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, o
           LvlPrest.txt: Pops {preset.pops}, PopPad {preset.popPad}
         </p>
       ) : (
-        areas.length > 0 && <p className="small muted">This map isn&apos;t in LvlPrest.txt yet: Data → Add to game sets Pops for its hide areas.</p>
+        areas.length > 0 && <p className="small muted">This map isn&apos;t in LvlPrest.txt yet: Game → Add to game sets Pops for its hide areas.</p>
       )}
       {problems.map((p, i) => (
         <p key={i} className={`small ${p.severity === 'error' ? 'error-text' : 'warn-text'}`}>

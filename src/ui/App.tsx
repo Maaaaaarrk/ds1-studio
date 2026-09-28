@@ -61,7 +61,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
-import { PALETTE_NAMES } from '../formats/palette';
+import { ACT0_PALETTE, PALETTE_NAMES } from '../formats/palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, type CustomDt1Plan } from '../game/customDt1';
 import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
@@ -69,7 +69,7 @@ import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
-import { openMap, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
+import { openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
@@ -1261,10 +1261,11 @@ export function App() {
   const createMap = useCallback(
     async (c: NewMapChoice) => {
       if (!gd || !confirmDiscard()) return;
-      const paths = GameData.dt1sFor(c.lvlType, 0xffffffff);
-      const ds1 = newDs1({ ...c, files: paths.map(embeddedFileName) });
+      // No tile libraries yet (they're picked next, from the DT1 library) and the Act 0 colours.
+      const ds1 = newDs1({ ...c, files: [] });
       try {
-        const m = await openMap(gd, c.path, { source: 'manual', lvlType: c.lvlType, paths }, ds1);
+        rememberPalette(c.path, ACT0_PALETTE);
+        const m = await openMap(gd, c.path, { source: 'manual', lvlType: null, paths: [] }, ds1);
         const d = new MapDocument(c.path, m.ds1);
         d.markUnsaved();
         setMap(m);
@@ -1272,8 +1273,8 @@ export function App() {
         setSelection(null);
         setSelectedObject(null);
         setActiveLayer({ kind: 'floor', index: 0 });
-        setDialog(null);
-        notify(`New ${c.width}×${c.height} map. Pick tiles in the Tiles panel and paint (B); Save writes ${c.path}.`);
+        setDialog('dt1lib');
+        notify(`New ${c.width}×${c.height} map, in the Act 0 colours. Choose its tile libraries in the DT1 library, then paint (B); Save writes ${c.path}.`);
       } catch (e) {
         notify((e as Error).message, true);
       }
@@ -1392,7 +1393,10 @@ export function App() {
       // Keep the game's tables in step, or the game won't load the new tiles: new DT1s go into free File slots of
       // the level type (LvlTypes.txt) and the preset's Dt1Mask (LvlPrest.txt) selects exactly these libraries.
       let tableNote = '';
-      if (data.status === 'ready' && data.saveTarget) {
+      let problem = false;
+      // A map the game doesn't load yet (a new one): its tables are made by Add to game, with these libraries.
+      if (!map.resolution.preset) tableNote = ' (Game → Add to game puts them in the game tables when the map is ready)';
+      else if (data.status === 'ready' && data.saveTarget) {
         try {
           // Tables get each file's own spelling (capitals kept).
           const writes = await syncLevelTables(gd.fs, map.path, paths.map((p) => gd.fs.exactPath(p) ?? p), map.resolution.lvlType?.id);
@@ -1404,10 +1408,14 @@ export function App() {
           }
         } catch (e) {
           tableNote = ` (game tables not updated: ${(e as Error).message})`;
+          problem = true;
         }
-      } else tableNote = ' (no writable mod folder, so LvlTypes/Dt1Mask were not updated)';
+      } else {
+        tableNote = ' (no writable mod folder, so LvlTypes/Dt1Mask were not updated)';
+        problem = true;
+      }
       setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths }, map.ds1));
-      notify(`Tile libraries: ${paths.length}${tableNote}`, !!tableNote);
+      notify(`Tile libraries: ${paths.length}${tableNote}`, problem);
     },
     [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
   );
@@ -1918,7 +1926,7 @@ export function App() {
             note: `Imported. Now add it to the game: a new level${levelId ? ' is pre-filled from one using the same tiles' : ''}; pick another level to copy settings from if you like, then Apply.`,
           });
           setDialog('register');
-        } else notify(`Imported ${c.path}. Use Data → Add to game when you want the game to load it.`);
+        } else notify(`Imported ${c.path}. Use Game → Add to game when you want the game to load it.`);
       } catch (e) {
         notify(`Import failed: ${(e as Error).message}`, true);
       } finally {
@@ -3264,7 +3272,7 @@ export function App() {
         />
       )}
 
-      {dialog === 'new' && <NewMapDialog gd={data.gd} onCreate={createMap} onClose={() => setDialog(null)} />}
+      {dialog === 'new' && <NewMapDialog onCreate={createMap} onClose={() => setDialog(null)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
@@ -3454,7 +3462,7 @@ export function App() {
                 await reloadTables();
                 note = ` · ${writes.flatMap((w) => w.summary).join('; ')}`;
               }
-            } else note = ' · Data → Add to game sets Pops for it';
+            } else note = ' · Game → Add to game sets Pops for it';
             setDialog(null);
             notify(`Hide area added: ${plan.markers.length * 2} corner markers${note}. Save the map, then check it with View → As if inside.`);
           }}

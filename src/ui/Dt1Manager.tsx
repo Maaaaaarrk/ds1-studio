@@ -6,7 +6,7 @@ import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
 import { Thumb, TilePreview, tilePicture, usePreview } from './TilePalette';
 import { loadAct0Palette } from '../game/act0Palette';
-import type { Palette } from '../formats/palette';
+import { ACT0_PALETTE, type Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
 import { Dt1Tree } from './Dt1Tree';
@@ -287,7 +287,8 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
   const [chosen, setChosen] = useState<string[]>([]);
   const [picks, setPicks] = useState<TilePick[]>([]);
   // Colours: the library's own act (from its folder), the map's act, or Act 0 (magenta = colours that change by act).
-  const [palMode, setPalMode] = useState<'own' | 'map' | 'act0'>('own');
+  // A map shown in the Act 0 colours (a new map) opens the library in them too.
+  const [palMode, setPalMode] = useState<'own' | 'map' | 'act0'>(map.paletteAct === ACT0_PALETTE ? 'act0' : 'own');
   const [pal, setPal] = useState<{ palette: Palette; note: string } | null>(null);
   const ownAct = libraryAct(selected);
   useEffect(() => {

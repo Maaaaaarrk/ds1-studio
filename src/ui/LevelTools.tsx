@@ -229,7 +229,7 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
         </>
       )}
       <p className="muted small">
-        {mode === 'new' && 'The new level has no connections yet: link it from another level (select a warp tile → Change where it leads) or open it with a cube recipe (Data → Cube recipe). '}
+        {mode === 'new' && 'The new level has no connections yet: link it from another level (select a warp tile → Change where it leads) or open it with a cube recipe (Game → Cube recipe). '}
         If your mod ships compiled .bin tables, rebuild them after applying (start the game once with -direct -txt).
       </p>
       <div className="modal-actions">

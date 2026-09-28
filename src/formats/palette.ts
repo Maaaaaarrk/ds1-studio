@@ -13,9 +13,13 @@ export function parsePalette(bytes: Uint8Array): Palette {
   return out;
 }
 
-/** Palette choices: 0-4 are the game's act palettes; 5 is d2data.mpq's Act 5 palette, which LoD overrides with d2exp's. */
-export const PALETTE_NAMES = ['Act 1', 'Act 2', 'Act 3', 'Act 4', 'Act 5', 'Act 5 (old d2data.mpq)'];
+/**
+ * Palette choices: 0-4 are the game's act palettes; 5 is d2data.mpq's Act 5 palette, which LoD overrides with d2exp's;
+ * 6 is "Act 0", only the colours that look the same in every act (the others magenta).
+ */
+export const PALETTE_NAMES = ['Act 1', 'Act 2', 'Act 3', 'Act 4', 'Act 5', 'Act 5 (old d2data.mpq)', 'Act 0 (same in every act)'];
 export const OLD_ACT5_PALETTE = 5;
+export const ACT0_PALETTE = 6;
 
 export function palettePath(act: number): string {
   return `data/global/palette/ACT${act + 1}/pal.dat`;

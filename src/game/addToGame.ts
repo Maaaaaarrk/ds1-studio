@@ -494,7 +494,7 @@ export function recordOrderFix(table: TableName, doc: TxtTableDoc, col: string):
       missing.length ? `missing: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}` : '',
     ]
       .filter(Boolean)
-      .join('; ')}), so they can't be fixed by moving rows. Fix them in Data → Data tables.`;
+      .join('; ')}), so they can't be fixed by moving rows. Fix them in Game → Data tables.`;
   // Records sorted by id; every other line (the "Expansion" separator, blank lines) stays just before the record that
   // followed it, or at the end.
   const isRecord = new Set(rows);
