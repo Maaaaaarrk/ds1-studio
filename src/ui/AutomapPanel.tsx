@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SpriteFrame } from '../formats/dc6';
 import type { Palette } from '../formats/palette';
 import { AUTOMAP_CODE_NAMES, AUTOMAP_CODES, describeRule, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
-import { kindOfOrientation, type AutomapKind, type AutomapStyle } from '../game/automapStyle';
+import { kindOfCode, type AutomapKind, type AutomapStyle } from '../game/automapStyle';
 import { AutomapLook } from './AutomapLook';
 import { Modal } from './Dialogs';
 
@@ -82,6 +82,8 @@ interface Props {
   /** How the automap is drawn, and changing it. */
   style: AutomapStyle;
   onStyle: (s: AutomapStyle) => void;
+  /** The category of a tile (floors: walkable or water). */
+  kindOf?: (orientation: number, main: number, sub: number) => AutomapKind;
 }
 
 /** Shows which automap piece each tile uses (AutoMap.txt row + MaxiMap cel) and lets you pick a different one. */
@@ -101,13 +103,18 @@ export function AutomapPanel(props: Props) {
     return [...m.values()];
   }, [suggestions]);
   const here = cell ? pieces.filter((p) => p.cellX === cell.x && p.cellY === cell.y) : [];
-  const wallsMissing = pieces.filter((p) => p.layer === 'wall' && !p.rule).length;
+  // Only walls leave a hole: trees and props (also on wall layers) are often left off on purpose.
+  const wallsMissing = pieces.filter((p) => !p.rule && (props.kindOf ? props.kindOf(p.orientation, p.main, p.sub) === 'walls' : p.layer === 'wall')).length;
   const shown = pieces.filter((p) => p.cel !== null).length;
   const kindCounts = useMemo(() => {
     const n: Partial<Record<AutomapKind, number>> = {};
-    for (const p of pieces) if (p.cel !== null) n[kindOfOrientation(p.orientation)] = (n[kindOfOrientation(p.orientation)] ?? 0) + 1;
+    for (const p of pieces) {
+      if (p.cel === null) continue;
+      const k = props.kindOf ? props.kindOf(p.orientation, p.main, p.sub) : kindOfCode(AUTOMAP_CODES[p.orientation] ?? '');
+      n[k] = (n[k] ?? 0) + 1;
+    }
     return n;
-  }, [pieces]);
+  }, [pieces, props.kindOf]);
   return (
     <section className="panel">
       <div className="panel-header static">

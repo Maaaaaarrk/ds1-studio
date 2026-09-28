@@ -79,7 +79,7 @@ import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, ty
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
 import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
-import { DEFAULT_AUTOMAP_STYLE, normalizeAutomapStyle, type AutomapStyle } from '../game/automapStyle';
+import { DEFAULT_AUTOMAP_STYLE, kindClassifier, normalizeAutomapStyle, type AutomapStyle } from '../game/automapStyle';
 import { ClipboardPanel } from './ClipboardPanel';
 import { SavePresetDialog } from './SavePresetDialog';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
@@ -1544,12 +1544,14 @@ export function App() {
       // per-viewer convenience only
     }
   }, []);
+  /** The automap category of the map's tiles (floors: walkable or water, by the tile). */
+  const automapKindOf = useMemo(() => (map ? kindClassifier(map.lib, map.palette) : null), [map]);
   const automapView = useMemo(
     () =>
-      automapPiecesNow && automapData && map
-        ? { pieces: automapSuggestions ? withSuggestions(automapPiecesNow, automapSuggestions) : automapPiecesNow, cels: automapData.cels, palette: map.palette, style: automapStyle }
+      automapPiecesNow && automapData && map && automapKindOf
+        ? { pieces: automapSuggestions ? withSuggestions(automapPiecesNow, automapSuggestions) : automapPiecesNow, cels: automapData.cels, palette: map.palette, style: automapStyle, kindOf: automapKindOf }
         : null,
-    [automapPiecesNow, automapData, map, automapSuggestions, automapStyle],
+    [automapPiecesNow, automapData, map, automapSuggestions, automapStyle, automapKindOf],
   );
   /** Opens the automap editor (loading AutoMap.txt first if the automap view hasn't yet). */
   const openAutomapEditor = useCallback(() => setDialog('automap'), []);
@@ -2917,6 +2919,7 @@ export function App() {
                 <AutomapPanel
                   style={automapStyle}
                   onStyle={setAutomapStyle}
+                  kindOf={automapKindOf ?? undefined}
                   onOpenEditor={openAutomapEditor}
                   table={automapData.table}
                   cels={automapData.cels}
@@ -3337,9 +3340,11 @@ export function App() {
           </div>
         </Modal>
       )}
-           {dialog === 'automap' && map && (automapData && automapLevel ? (
+           {dialog === 'automap' && map && scene && automapKindOf && (automapData && automapLevel ? (
         <AutomapEditor
           map={map}
+          scene={scene}
+          kindOf={automapKindOf}
           style={automapStyle}
           onStyle={setAutomapStyle}
           table={automapData.table}

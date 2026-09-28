@@ -893,3 +893,32 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .amb-water-tile .thumb-img { width: 100%; }
 .amb-water-tile.off { opacity: 0.4; }
 .amb .btn.primary { align-self: flex-start; }
+
+/* Automap editor by category */
+.amc-cards { display: flex; flex-direction: column; gap: 6px; }
+.amc-card { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.amc-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.amc-main { flex: 1; display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.amc-main:hover { background: var(--panel-2, rgba(255, 255, 255, 0.04)); }
+.amc-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.amc-name { font-weight: 600; font-size: 13.5px; }
+.amc-hole { color: #ff8ad8; }
+.amc-top { display: flex; align-items: stretch; }
+.amc-subs { display: flex; flex-direction: column; border-top: 1px solid var(--border); padding: 4px 0; }
+.amc-sub { display: grid; grid-template-columns: 1fr auto 34px; align-items: center; gap: 8px; padding: 4px 10px 4px 42px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.amc-sub:hover { background: var(--panel-2, rgba(255, 255, 255, 0.04)); }
+.amc-sub.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.amc-sub-piece { display: flex; justify-content: center; }
+.amc-part { color: var(--accent); }
+.amc-eye { display: flex; align-items: center; padding: 0 10px; border-left: 1px solid var(--border); cursor: pointer; }
+.amc-details-toggle { margin: 8px 0 4px; align-self: flex-start; }
+.amc-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.amb-section { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--border); }
+.amb-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent, #d4a84f); }
+.amb-current { display: flex; align-items: center; gap: 8px; }
+.ame-mix { display: inline-flex; align-items: center; gap: 6px; }
+.ame-mix input { width: 160px; }
+.am-look-kind { grid-template-columns: auto auto 1fr auto 70px; }
+.am-look-op { width: 70px; }
+.am-look.single .am-look-row { grid-template-columns: 70px 1fr 44px; }
+.ame-list { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }

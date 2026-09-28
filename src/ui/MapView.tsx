@@ -9,7 +9,7 @@ import { TileAtlas } from '../render/atlas';
 import { blendFlag, InstanceFlag, MapRenderer, type Camera, type Instance } from '../render/MapRenderer';
 import type { SpriteAnimation } from '../game/spriteAnim';
 import { AUTOMAP_SCALE, type AutomapPiece } from '../game/automap';
-import { automapCanvas, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
+import { automapCanvas, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { SpriteFrame } from '../formats/dc6';
 import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, worldToSubTile, sameItem, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
@@ -78,7 +78,7 @@ interface Props {
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
   focus: { item: DrawItem; index: number; count: number; label: string } | null;
   /** The in-game automap drawn over the map (dimmed underneath). */
-  automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array; style: AutomapStyle } | null;
+  automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array; style: AutomapStyle; kindOf: (orientation: number, main: number, sub: number) => AutomapKind } | null;
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
   /** When `signal` changes, centre the view on this world point (zooming in if far out). */
@@ -795,10 +795,11 @@ function renderAutomap(width: number, height: number, a: NonNullable<Props['auto
   for (const p of a.pieces) {
     if (p.suggested) suggested.push([p.cellX, p.cellY]);
     if (p.cel === null) {
-      if (p.layer === 'wall' && !p.rule) missing.push([p.cellX, p.cellY]);
+      // Only walls leave a hole: trees and props (also on wall layers) are often left off on purpose.
+      if (!p.rule && a.kindOf(p.orientation, p.main, p.sub) === 'walls') missing.push([p.cellX, p.cellY]);
       continue;
     }
-    draw.push({ cellX: p.cellX, cellY: p.cellY, orientation: p.orientation, cel: p.cel });
+    draw.push({ cellX: p.cellX, cellY: p.cellY, kind: a.kindOf(p.orientation, p.main, p.sub), cel: p.cel });
   }
   const { canvas, ox, oy } = automapCanvas(width, height, draw, a.cels, a.palette, a.style);
   return { canvas, x: -ox * AUTOMAP_SCALE, y: -oy * AUTOMAP_SCALE, missing, suggested, style: a.style };

@@ -116,3 +116,27 @@ export async function renderMapImage(scene: Scene, objects: Ds1Object[], sprites
   const type = opt.format === 'jpeg' ? 'image/jpeg' : 'image/png';
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the image'))), type, 0.85));
 }
+
+/**
+ * The whole map's tiles (no objects, no special markers) drawn at `scale` of the game's pixels, for showing under the
+ * automap in the automap editor; `bounds` is where the canvas sits in world space.
+ */
+export function renderMapCanvas(scene: Scene, palette: Palette, width: number, height: number, scale: number): { canvas: HTMLCanvasElement; bounds: { x: number; y: number; w: number; h: number } } {
+  const b = areaBounds({ x0: 0, y0: 0, x1: width - 1, y1: height - 1 });
+  // Kept to a size every browser draws quickly.
+  const s = Math.min(scale, 4096 / b.w, 4096 / b.h);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(b.w * s));
+  canvas.height = Math.max(1, Math.ceil(b.h * s));
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.setTransform(s, 0, 0, s, -b.x * s, -b.y * s);
+  for (const it of scene.items) {
+    if (it.kind === 'special') continue;
+    const image = tileImage(it.tile);
+    const img = toCanvas(it.tile, image, palette, it.kind === 'shadow');
+    if (img && image) ctx.drawImage(img, it.x + image.offsetX, it.y + image.offsetY);
+  }
+  return { canvas, bounds: b };
+}

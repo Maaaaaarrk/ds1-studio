@@ -4,7 +4,7 @@ import type { Palette } from '../formats/palette';
 import {
   AUTOMAP_CODE_NAMES,
   AUTOMAP_CODES,
-  AUTOMAP_KINDS,
+  AUTOMAP_SCALE,
   automapCellOrigin,
   automapPieces,
   describeRule,
@@ -16,14 +16,18 @@ import {
   type AutomapEdit,
   type AutomapTable,
 } from '../game/automap';
+import { AUTOMAP_KIND_LIST, automapCanvas, automapFrame, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { OpenMap } from '../game/openMap';
-import { CelThumb } from './AutomapPanel';
-import { automapCanvas, automapFrame, kindOfCode, kindOfOrientation, isWaterTile, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
+import { renderMapCanvas } from '../render/exportImage';
+import type { Scene } from '../render/scene';
 import { AutomapLook, KindIcon } from './AutomapLook';
+import { CelThumb } from './AutomapPanel';
 import { Thumb } from './TilePalette';
 
 interface Props {
   map: OpenMap;
+  /** The map as drawn, for showing it under the automap. */
+  scene: Scene;
   table: AutomapTable;
   cels: SpriteFrame[];
   palette: Palette;
@@ -37,40 +41,59 @@ interface Props {
   /** How the automap is drawn (shared with the map's Automap view). */
   style: AutomapStyle;
   onStyle: (s: AutomapStyle) => void;
+  /** The category of a tile (floors: walkable or water, by the tile). */
+  kindOf: (orientation: number, main: number, sub: number) => AutomapKind;
   onClose: () => void;
 }
 
-/** One kind of tile on the map (same orientation / style / sequence), with where it is. */
+/** One kind of tile on the map (same orientation / style / sequence), its category, and where it is. */
 interface Group {
   key: string;
   orientation: number;
   style: number;
   sub: number;
   layer: 'floor' | 'wall';
+  kind: AutomapKind;
   cells: [number, number][];
 }
 
 type Status = 'shown' | 'hidden' | 'missing';
-type Filter = 'all' | 'missing' | 'changed' | 'hidden';
-
 const statusOf = (cels: number[] | null): Status => (cels === null ? 'missing' : cels.length ? 'shown' : 'hidden');
+/** The parts a category opens into: walls by shape, objects by kind. Categories not listed are one part. */
+const SUBGROUPS: Partial<Record<AutomapKind, { id: string; label: string; codes: string[] }[]>> = {
+  walls: [
+    { id: 'left', label: 'Left walls', codes: ['wl'] },
+    { id: 'right', label: 'Right walls', codes: ['wr'] },
+    { id: 'corners', label: 'Corners', codes: ['wtlr', 'wtll', 'wtr', 'wbl', 'wbr'] },
+    { id: 'doors', label: 'Doors', codes: ['wld', 'wrd'] },
+    { id: 'ends', label: 'Wall ends', codes: ['wle', 'wre'] },
+    { id: 'lower', label: 'Lower walls', codes: ['ld', 'lr', 'lf', 'ls'] },
+  ],
+  objects: [
+    { id: 'trees', label: 'Trees', codes: ['tr'] },
+    { id: 'props', label: 'Columns & props', codes: ['co'] },
+  ],
+};
+
+/** Categories where a tile without an entry is a hole in the automap (walls); for the rest (floors, trees…) it is normal. */
+const HOLE_KINDS: AutomapKind[] = ['walls'];
 
 /**
- * The automap editor: every kind of tile the map uses, what the automap draws for it (from AutoMap.txt), a live
- * preview of the whole automap, and a piece gallery to change it. Nothing is written until "Save".
+ * The automap editor, by category: walls, walkable floors, water, roofs, objects & trees, shadows. Choosing a category
+ * highlights all its tiles on a preview of the automap over the map itself (a slider fades between the two), and the
+ * right-hand side sets its colour, opacity and piece (its "texture") for all of it at once. A category's tile kinds
+ * can be opened to change them one by one. Nothing is written until "Save".
  */
-export function AutomapEditor({ map, table, cels, palette, level, onLevel, levelLabel, canSave, onSave, makeColors, style, onStyle, onClose }: Props) {
-  /** A piece's colour in the list and gallery: its kind's, when colouring by kind. */
-  const tintOf = (orientation: number) => (style.colours === 'kind' ? style.kinds[kindOfOrientation(orientation)].colour : undefined);
+export function AutomapEditor({ map, scene, table, cels, palette, level, onLevel, levelLabel, canSave, onSave, makeColors, style, onStyle, kindOf, onClose }: Props) {
   const [edits, setEdits] = useState<Map<string, AutomapEdit>>(new Map());
+  const [category, setCategory] = useState<AutomapKind>('walls');
+  /** Tile kinds picked one by one (the category's details); empty = the whole category. */
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<Filter>('all');
-  const [query, setQuery] = useState('');
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [details, setDetails] = useState(false);
+  /** A part of the category (Left walls, Corners…), or null for all of it. */
+  const [sub, setSub] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  /** The Draw all the same panel instead of the piece panel. */
-  const [bulk, setBulk] = useState(false);
   const lastClicked = useRef<string | null>(null);
 
   // A new level starts over.
@@ -84,11 +107,11 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
     const m = new Map<string, Group>();
     for (const p of pieces) {
       const k = editKey(p.orientation, p.main, p.sub);
-      const g = m.get(k) ?? m.set(k, { key: k, orientation: p.orientation, style: p.main, sub: p.sub, layer: p.layer, cells: [] }).get(k)!;
+      const g = m.get(k) ?? m.set(k, { key: k, orientation: p.orientation, style: p.main, sub: p.sub, layer: p.layer, kind: kindOf(p.orientation, p.main, p.sub), cells: [] }).get(k)!;
       g.cells.push([p.cellX, p.cellY]);
     }
     return [...m.values()].sort((a, b) => a.orientation - b.orientation || a.style - b.style || a.sub - b.sub);
-  }, [pieces]);
+  }, [pieces, kindOf]);
 
   const fileCels = useCallback(
     (g: Group): number[] | null => {
@@ -99,56 +122,28 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
   );
   const celsOf = useCallback((g: Group): number[] | null => edits.get(g.key)?.cels ?? fileCels(g), [edits, fileCels]);
 
-  // Walls without an entry are a problem (the automap has a hole); floors without one are normal (the game draws few).
-  const counts = useMemo(() => {
-    const c = { shown: 0, hidden: 0, missing: 0, notDrawn: 0 };
+  /** Per category: its kinds, tiles, and how many tiles are shown / left off / without an entry. */
+  const summary = useMemo(() => {
+    const out = new Map<AutomapKind, { groups: Group[]; tiles: number; shown: number; hidden: number; none: number }>();
+    for (const k of AUTOMAP_KIND_LIST) out.set(k.id, { groups: [], tiles: 0, shown: 0, hidden: 0, none: 0 });
     for (const g of groups) {
-      const st = statusOf(edits.get(g.key)?.cels ?? fileCels(g));
-      if (st === 'missing' && g.layer === 'floor') c.notDrawn += g.cells.length;
-      else c[st] += g.cells.length;
+      const s = out.get(g.kind)!;
+      s.groups.push(g);
+      s.tiles += g.cells.length;
+      const st = statusOf(celsOf(g));
+      if (st === 'shown') s.shown += g.cells.length;
+      else if (st === 'hidden') s.hidden += g.cells.length;
+      else s.none += g.cells.length;
     }
-    return c;
-  }, [groups, edits, fileCels]);
+    return out;
+  }, [groups, celsOf]);
+  const present = AUTOMAP_KIND_LIST.filter((k) => summary.get(k.id)!.groups.length);
+  const holes = HOLE_KINDS.reduce((n, k) => n + summary.get(k)!.none, 0);
+  const allCatGroups = summary.get(category)!.groups;
+  const subsOf = (k: AutomapKind) => (SUBGROUPS[k] ?? []).filter((sg) => summary.get(k)!.groups.some((g) => sg.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')));
+  const subInfo = sub ? (SUBGROUPS[category] ?? []).find((sg) => sg.id === sub) ?? null : null;
+  const catGroups = subInfo ? allCatGroups.filter((g) => subInfo.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')) : allCatGroups;
 
-  const q = query.trim().toLowerCase();
-  const visible = groups.filter((g) => {
-    const code = AUTOMAP_CODES[g.orientation] ?? '';
-    const st = statusOf(celsOf(g));
-    if (filter === 'missing' && (st !== 'missing' || g.layer === 'floor')) return false;
-    if (filter === 'hidden' && st !== 'hidden') return false;
-    if (filter === 'changed' && !edits.has(g.key)) return false;
-    return !q || `${code} ${AUTOMAP_CODE_NAMES[code] ?? ''} ${g.style}/${g.sub}`.toLowerCase().includes(q);
-  });
-  // Walls first: floors are the longest list and the least often wanted on the automap.
-  const ordered = [...AUTOMAP_KINDS.filter((k) => k.label !== 'Floors'), ...AUTOMAP_KINDS.filter((k) => k.label === 'Floors')]
-    .map((k) => ({ ...k, items: visible.filter((g) => k.codes.includes(AUTOMAP_CODES[g.orientation] ?? '')) }))
-    .filter((k) => k.items.length);
-  const missingWalls = groups.filter((g) => g.layer === 'wall' && statusOf(celsOf(g)) === 'missing');
-  const flat = ordered.flatMap((k) => (collapsed.has(k.label) ? [] : k.items));
-
-  const click = (g: Group, e: React.MouseEvent) => {
-    setSelected((prev) => {
-      if (e.shiftKey && lastClicked.current) {
-        const a = flat.findIndex((x) => x.key === lastClicked.current);
-        const b = flat.findIndex((x) => x.key === g.key);
-        if (a >= 0 && b >= 0) {
-          const next = new Set(prev);
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(flat[i].key);
-          return next;
-        }
-      }
-      if (e.ctrlKey || e.metaKey) {
-        const next = new Set(prev);
-        if (next.has(g.key)) next.delete(g.key);
-        else next.add(g.key);
-        return next;
-      }
-      return new Set([g.key]);
-    });
-    lastClicked.current = g.key;
-  };
-
-  const sel = groups.filter((g) => selected.has(g.key));
   const setCels = (targets: Group[], value: number[] | ((current: number[] | null) => number[])) =>
     setEdits((prev) => {
       const next = new Map(prev);
@@ -181,9 +176,9 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
     const none = targets.length - pieceFor.length - off.length;
     setMessage(
       `Suggested: ${pieceFor.length} tile kind${pieceFor.length === 1 ? '' : 's'} get a piece` +
-        (off.length ? `, ${off.length} look like tiles the level leaves off the automap (marked hidden)` : '') +
+        (off.length ? `, ${off.length} look like tiles the level leaves off the automap (left off)` : '') +
         (none ? `, ${none} without a confident match (left as they are)` : '') +
-        '. Review, then save.',
+        '. Check the preview, then save.',
     );
   };
 
@@ -200,7 +195,38 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
     }
   };
 
-  const tileOf = (g: Group) => map.lib.pick(g.orientation, g.style, g.sub, 0);
+  const pickCategory = (k: AutomapKind) => {
+    setCategory(k);
+    setSub(null);
+    setSelected(new Set());
+    setDetails(false);
+  };
+  const clickKind = (g: Group, e: React.MouseEvent) => {
+    setSelected((prev) => {
+      if (e.shiftKey && lastClicked.current) {
+        const a = catGroups.findIndex((x) => x.key === lastClicked.current);
+        const b = catGroups.findIndex((x) => x.key === g.key);
+        if (a >= 0 && b >= 0) {
+          const next = new Set(prev);
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(catGroups[i].key);
+          return next;
+        }
+      }
+      if (e.ctrlKey || e.metaKey) {
+        const next = new Set(prev);
+        if (next.has(g.key)) next.delete(g.key);
+        else next.add(g.key);
+        return next;
+      }
+      return new Set([g.key]);
+    });
+    lastClicked.current = g.key;
+  };
+  const sel = groups.filter((g) => selected.has(g.key));
+  const highlight = useMemo(() => new Set((sel.length ? sel : catGroups).map((g) => g.key)), [sel, catGroups]);
+  const tint = (k: AutomapKind) => (style.colours === 'kind' ? style.kinds[k].colour : undefined);
+  const catLabel = AUTOMAP_KIND_LIST.find((k) => k.id === category)!.label;
+
   return (
     <div className="modal-backdrop">
       <div className="modal am-editor" role="dialog" aria-label="Automap editor" onKeyDown={(e) => e.stopPropagation()}>
@@ -217,157 +243,121 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
               ))}
             </select>
           </label>
-          <span className="ame-stat shown">{counts.shown} shown</span>
-          <span className="ame-stat missing" title="Walls and objects with no AutoMap.txt entry: holes in the automap">
-            {counts.missing} missing
-          </span>
-          <span className="ame-stat hidden" title="Floors with no entry: normal, the game draws few floors">
-            {counts.notDrawn} floors not drawn
-          </span>
-          {counts.hidden > 0 && <span className="ame-stat hidden">{counts.hidden} hidden</span>}
-          <span className="muted small ame-help">
-            <b style={{ color: style.missingColour }}>Missing</b> = a wall or object with no AutoMap.txt entry: a hole in the automap. Give it a piece, or
-            hide it if it shouldn&apos;t show (like Act 1&apos;s trees). Floors without one are normal.
-          </span>
+          {holes > 0 ? (
+            <span className="ame-stat missing" title="Walls with no AutoMap.txt entry: holes in the automap">
+              {holes} wall tiles missing
+            </span>
+          ) : (
+            <span className="ame-stat shown">No walls missing</span>
+          )}
+          <span className="muted small ame-help">Pick a category on the left: its tiles light up on the preview, and the right side sets how it looks and which piece it draws.</span>
         </div>
         <div className="ame-body">
-          {/* Tile kinds */}
+          {/* Categories */}
           <div className="ame-list">
-            <div className="ame-list-tools">
-              <input className="search small-input" placeholder="Search code, name, style/seq…" value={query} onChange={(e) => setQuery(e.target.value)} />
-              <div className="chips">
-                {(['all', 'missing', 'changed', 'hidden'] as Filter[]).map((f) => (
-                  <button key={f} className={`chip${filter === f ? ' active' : ''}`} onClick={() => setFilter(f)}>
-                    {f === 'all' ? 'All' : f === 'missing' ? 'Missing walls' : f === 'changed' ? `Changed (${edits.size})` : 'Hidden'}
-                  </button>
-                ))}
-              </div>
-              <button className={`btn small${bulk ? ' active' : ''}`} onClick={() => setBulk(!bulk)} title="Give all walls, all floors, all water or all trees the same pieces in one go">
-                Draw all the same…
-              </button>
-              {missingWalls.length > 0 && (
-                <button
-                  className="btn small primary"
-                  title="Select every wall with no AutoMap.txt entry and suggest the piece this level (or its act) normally uses for it: review, then save"
-                  onClick={() => {
-                    setSelected(new Set(missingWalls.map((g) => g.key)));
-                    void suggestFor(missingWalls);
-                  }}
-                >
-                  Suggest pieces for {missingWalls.length} missing wall kind{missingWalls.length === 1 ? '' : 's'}
-                </button>
-              )}
-              <div className="ame-sel-tools small">
-                <button className="link" onClick={() => setSelected(new Set(flat.map((g) => g.key)))}>
-                  select all shown
-                </button>
-                {' · '}
-                <button className="link" onClick={() => setSelected(new Set(flat.filter((g) => g.layer === 'wall' && statusOf(celsOf(g)) === 'missing').map((g) => g.key)))}>
-                  select missing walls
-                </button>
-                {selected.size > 0 && (
-                  <>
-                    {' · '}
-                    <button className="link" onClick={() => setSelected(new Set())}>
-                      clear ({selected.size})
+            <div className="amc-cards">
+              {present.map((k) => {
+                const s = summary.get(k.id)!;
+                const on = category === k.id;
+                const hole = HOLE_KINDS.includes(k.id);
+                return (
+                  <div key={k.id} className={`amc-card${on ? ' active' : ''}`}>
+                    <div className="amc-top">
+                    <button className="amc-main" onClick={() => pickCategory(k.id)} title={k.hint}>
+                      <KindIcon kind={k.id} colour={style.kinds[k.id].colour} size={22} />
+                      <span className="amc-text">
+                        <span className="amc-name">{k.label}</span>
+                        <span className="muted small">
+                          {s.tiles} tiles · {s.groups.length} kind{s.groups.length === 1 ? '' : 's'}
+                        </span>
+                        <span className="small">
+                          <span className="ok-text">{s.shown} shown</span>
+                          {s.none > 0 && <span className={hole ? 'amc-hole' : 'muted'}> · {s.none} {hole ? 'missing' : 'not drawn'}</span>}
+                          {s.hidden > 0 && <span className="muted"> · {s.hidden} left off</span>}
+                        </span>
+                      </span>
                     </button>
-                  </>
-                )}
-              </div>
+                    <label className="amc-eye" title="Show on the automap (the look only; nothing is written)">
+                      <input type="checkbox" checked={style.kinds[k.id].show} onChange={(e) => onStyle({ ...style, kinds: { ...style.kinds, [k.id]: { ...style.kinds[k.id], show: e.target.checked } } })} />
+                    </label>
+                    </div>
+                    {on && subsOf(k.id).length > 1 && (
+                      <div className="amc-subs">
+                        {subsOf(k.id).map((sg) => {
+                          const list = s.groups.filter((g) => sg.codes.includes(AUTOMAP_CODES[g.orientation] ?? ''));
+                          const n = list.reduce((a, g) => a + g.cells.length, 0);
+                          const none = list.filter((g) => celsOf(g) === null).reduce((a, g) => a + g.cells.length, 0);
+                          // The piece most of the part's tiles draw now.
+                          const use = new Map<number, number>();
+                          for (const g of list) for (const c of celsOf(g)?.slice(0, 1) ?? []) use.set(c, (use.get(c) ?? 0) + g.cells.length);
+                          const top = [...use].sort((a, b) => b[1] - a[1])[0]?.[0];
+                          return (
+                            <button
+                              key={sg.id}
+                              className={`amc-sub${sub === sg.id ? ' active' : ''}`}
+                              onClick={() => {
+                                setSub(sub === sg.id ? null : sg.id);
+                                setSelected(new Set());
+                              }}
+                              title={`${sg.codes.map((c) => AUTOMAP_CODE_NAMES[c] ?? c).join(', ')}: click to see and replace their pieces`}
+                            >
+                              <span className="amc-sub-name">{sg.label}</span>
+                              <span className="muted small">
+                                {n} tiles{none ? <span className={hole ? 'amc-hole' : ''}> · {none} {hole ? 'missing' : 'not drawn'}</span> : null}
+                              </span>
+                              <span className="amc-sub-piece">{top !== undefined ? <CelThumb frame={cels[top]} palette={palette} fit={26} tint={tint(k.id)} /> : <span className="ame-badge hidden">off</span>}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <div className="ame-rows">
-              {ordered.map((k) => (
-                <div key={k.label}>
-                  <button
-                    className="ame-kind"
-                    onClick={() =>
-                      setCollapsed((c) => {
-                        const n = new Set(c);
-                        if (n.has(k.label)) n.delete(k.label);
-                        else n.add(k.label);
-                        return n;
-                      })
-                    }
-                  >
-                    <span>{collapsed.has(k.label) ? '▸' : '▾'}</span> <KindIcon kind={kindOfCode(k.codes[0])} colour={style.kinds[kindOfCode(k.codes[0])].colour} /> {k.label}
-                    <span className="muted small">
-                      {k.items.length} kind{k.items.length === 1 ? '' : 's'} · {k.items.reduce((n, g) => n + g.cells.length, 0)} tiles
-                    </span>
-                  </button>
-                  {!collapsed.has(k.label) &&
-                    k.items.map((g) => {
-                      const c = celsOf(g);
-                      const st = statusOf(c);
-                      const tile = tileOf(g);
-                      const code = AUTOMAP_CODES[g.orientation];
-                      return (
-                        <div key={g.key} className={`ame-row${selected.has(g.key) ? ' selected' : ''}${edits.has(g.key) ? ' changed' : ''}`} onClick={(e) => click(g, e)}>
-                          <div className="ame-tile">{tile ? <Thumb tile={tile} palette={palette} /> : null}</div>
-                          <div className="ame-what">
-                            <div>
-                              <code>{code}</code> <span className="small">{AUTOMAP_CODE_NAMES[code] ?? ''}</span>
-                            </div>
-                            <div className="muted small">
-                              style {g.style} · seq {g.sub} · {g.cells.length} on map
-                            </div>
-                          </div>
-                          <div className={`ame-piece ${st}`}>
-                            {st === 'shown' ? (
-                              c!.map((cel, i) => <CelThumb key={i} frame={cels[cel]} palette={palette} fit={40} tint={tintOf(g.orientation)} title={`piece ${cel}`} />)
-                            ) : (
-                              <span className={`ame-badge ${st === 'missing' && g.layer === 'floor' ? 'hidden' : st}`}>{st === 'missing' && g.layer === 'floor' ? 'not drawn' : st}</span>
-                            )}
-                          </div>
+            <button className="link small amc-details-toggle" onClick={() => setDetails(!details)}>
+              {details ? '▾' : '▸'} {subInfo ? subInfo.label : catLabel}: tile kinds one by one ({catGroups.length})
+            </button>
+            {details && (
+              <div className="ame-rows">
+                {catGroups.map((g) => {
+                  const c = celsOf(g);
+                  const st = statusOf(c);
+                  const tile = map.lib.pick(g.orientation, g.style, g.sub, 0);
+                  const code = AUTOMAP_CODES[g.orientation];
+                  return (
+                    <div key={g.key} className={`ame-row${selected.has(g.key) ? ' selected' : ''}${edits.has(g.key) ? ' changed' : ''}`} onClick={(e) => clickKind(g, e)}>
+                      <div className="ame-tile">{tile ? <Thumb tile={tile} palette={palette} /> : null}</div>
+                      <div className="ame-what">
+                        <div>
+                          <code>{code}</code> <span className="small">{AUTOMAP_CODE_NAMES[code] ?? ''}</span>
+                          {edits.has(g.key) && <span className="small warn-text"> · changed</span>}
                         </div>
-                      );
-                    })}
-                </div>
-              ))}
-              {!ordered.length && <p className="muted small pad">Nothing matches.</p>}
-            </div>
+                        <div className="muted small">
+                          style {g.style} · seq {g.sub} · {g.cells.length} on map
+                        </div>
+                      </div>
+                      <div className={`ame-piece ${st}`}>
+                        {st === 'shown' ? (
+                          c!.map((cel, i) => <CelThumb key={i} frame={cels[cel]} palette={palette} fit={40} tint={tint(g.kind)} title={`piece ${cel}`} />)
+                        ) : (
+                          <span className={`ame-badge ${st === 'missing' && !HOLE_KINDS.includes(g.kind) ? 'hidden' : st}`}>{st === 'missing' ? (HOLE_KINDS.includes(g.kind) ? 'missing' : 'not drawn') : 'off'}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Preview */}
-          <AutomapPreview
-            style={style}
-            onStyle={onStyle}
-            map={map}
-            groups={groups}
-            celsOf={celsOf}
-            cels={cels}
-            palette={palette}
-            selected={selected}
-            onPick={(keys, add) =>
-              setSelected((prev) => {
-                const next = add ? new Set(prev) : new Set<string>();
-                for (const k of keys) next.add(k);
-                return next;
-              })
-            }
-          />
+          {/* Preview: the automap over the map */}
+          <AutomapPreview map={map} scene={scene} groups={groups} celsOf={celsOf} cels={cels} palette={palette} highlight={highlight} style={style} onStyle={onStyle} />
 
-          {/* Piece editor */}
-          {bulk ? (
-            <BulkPanel
-              map={map}
-              groups={groups}
-              table={table}
-              level={level}
-              levelLabel={levelLabel}
-              cels={cels}
-              palette={palette}
-              style={style}
-              celsOf={celsOf}
-              makeColors={makeColors}
-              onApply={(targets, value, what) => {
-                if (targets.length) setCels(targets, value);
-                if (what) setMessage(what);
-              }}
-              onClose={() => setBulk(false)}
-            />
-          ) : (
+          {/* The category (or the kinds picked in it) */}
+          {sel.length ? (
             <PiecePanel
-              tint={sel.length ? tintOf(sel[0].orientation) : undefined}
+              tint={tint(sel[0].kind)}
               table={table}
               level={level}
               cels={cels}
@@ -379,6 +369,28 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
               onSet={(value) => setCels(sel, value)}
               onRevert={() => revert(sel)}
               onSuggest={() => void suggestFor(sel)}
+              onBack={() => setSelected(new Set())}
+            />
+          ) : (
+            <CategoryPanel
+              key={`${category}|${sub ?? ''}`}
+              category={category}
+              part={subInfo?.label ?? null}
+              groups={catGroups}
+              table={table}
+              level={level}
+              levelLabel={levelLabel}
+              cels={cels}
+              palette={palette}
+              style={style}
+              onStyle={onStyle}
+              celsOf={celsOf}
+              lib={map.lib}
+              onApply={(targets, value) => setCels(targets, value)}
+              onRevert={() => revert(catGroups)}
+              changed={catGroups.some((g) => edits.has(g.key))}
+              onSuggest={(targets) => void suggestFor(targets)}
+              onMessage={setMessage}
             />
           )}
         </div>
@@ -387,7 +399,7 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
             {message ??
               (edits.size
                 ? `${edits.size} unsaved change${edits.size === 1 ? '' : 's'}. Saving writes AutoMap.txt in your mod folder (original kept as .bak); rebuild automap.bin for the game to see it.`
-                : 'Click tile kinds on the left (Shift/Ctrl for several) or spots on the preview, then choose pieces on the right.')}
+                : 'Colour, opacity and show/hide only change how DS1 Studio draws the automap; pieces are what the game draws, written on Save.')}
           </span>
           <button className="btn" disabled={!edits.size} onClick={() => window.confirm('Discard all unsaved automap changes?') && setEdits(new Map())}>
             Discard
@@ -397,6 +409,232 @@ export function AutomapEditor({ map, table, cels, palette, level, onLevel, level
           </button>
           <button className="btn primary" disabled={!canSave || !edits.size || busy} onClick={() => void save()} title={canSave ? '' : 'No writable mod folder'}>
             {busy ? 'Saving…' : `Save to AutoMap.txt${edits.size ? ` (${edits.size})` : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One category, all at once: how DS1 Studio draws it (colour, opacity, shown) and the piece the game draws for it —
+ * walls and objects one piece per shape (a left wall, a corner, a door each face their own way) from one level's set;
+ * floors, water, roofs and shadows one piece for all (or left off the automap).
+ */
+function CategoryPanel({
+  category,
+  part,
+  groups,
+  table,
+  level,
+  levelLabel,
+  cels,
+  palette,
+  style,
+  onStyle,
+  celsOf,
+  lib,
+  onApply,
+  onRevert,
+  changed,
+  onSuggest,
+  onMessage,
+}: {
+  category: AutomapKind;
+  /** The part of the category shown (Left walls, Corners…), or null for all of it. */
+  part: string | null;
+  groups: Group[];
+  table: AutomapTable;
+  level: string;
+  levelLabel: (level: string) => string;
+  cels: SpriteFrame[];
+  palette: Palette;
+  style: AutomapStyle;
+  onStyle: (s: AutomapStyle) => void;
+  celsOf: (g: Group) => number[] | null;
+  lib: OpenMap['lib'];
+  onApply: (targets: Group[], cels: number[]) => void;
+  onRevert: () => void;
+  changed: boolean;
+  onSuggest: (targets: Group[]) => void;
+  onMessage: (m: string) => void;
+}) {
+  const info = AUTOMAP_KIND_LIST.find((k) => k.id === category)!;
+  const perShape = category === 'walls' || category === 'objects';
+  const [keep, setKeep] = useState(false);
+  const [from, setFrom] = useState(level);
+  const usual = useMemo(() => usualCels(table, from, { acrossActs: true }), [table, from]);
+  const codeOf = (g: Group) => AUTOMAP_CODES[g.orientation] ?? '';
+  const shapes = useMemo(() => {
+    const m = new Map<string, Group[]>();
+    for (const g of groups) (m.get(codeOf(g)) ?? m.set(codeOf(g), []).get(codeOf(g))!).push(g);
+    return m;
+  }, [groups]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** The piece most of these tiles draw now. */
+  const current = (list: Group[]): number[] => {
+    const n = new Map<number, number>();
+    for (const g of list) for (const c of celsOf(g)?.slice(0, 1) ?? []) n.set(c, (n.get(c) ?? 0) + g.cells.length);
+    const best = [...n].sort((a, b) => b[1] - a[1])[0];
+    return best ? [best[0]] : [];
+  };
+  const [pick, setPick] = useState<Map<string, number[]>>(new Map());
+  const code0 = perShape ? null : category === 'roofs' ? 'rf' : category === 'shadows' ? 'sh' : 'fl';
+  // What a code gets: the piece picked here, else (taking another level's set) that level's, else what it draws now, else the level's usual.
+  const chosen = (code: string, list: Group[]): number[] =>
+    pick.get(code) ?? (from !== level && usual.has(code) ? [usual.get(code)!] : current(list).length ? current(list) : usual.has(code) ? [usual.get(code)!] : []);
+  // A part with one shape (Left walls, Trees) shows its pieces straight away.
+  const [active, setActive] = useState<string | null>(() => (shapes.size === 1 ? [...shapes.keys()][0] : null));
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const tint = style.colours === 'kind' ? style.kinds[category].colour : undefined;
+  const tiles = (list: Group[]) => list.reduce((n, g) => n + g.cells.length, 0);
+  const targets = (list: Group[]) => list.filter((g) => !off.has(g.key) && (!keep || celsOf(g) === null));
+  const missing = groups.filter((g) => celsOf(g) === null);
+  /**
+   * What Apply changes: a shape whose piece was chosen here (or a whole set taken from another level) — all its tiles;
+   * any other shape only where it has no entry yet, so the level's own variety (fences, stone walls…) stays. Floors,
+   * water, roofs and shadows change once a piece (or "leave off") is chosen.
+   */
+  const changes = (): [Group[], number[]][] =>
+    perShape
+      ? [...shapes].map(([code, list]) => [pick.has(code) || from !== level ? targets(list) : targets(list).filter((g) => celsOf(g) === null), chosen(code, list)])
+      : pick.has(code0!)
+        ? [[targets(groups), chosen(code0!, groups)]]
+        : [];
+  const changing = changes().reduce((n, [list]) => n + tiles(list), 0);
+
+  const gallery = (code: string, value: number[], set: (v: number[]) => void) => (
+    <>
+      <div className="amb-gallery-head small">
+        Piece for <code>{code}</code> {AUTOMAP_CODE_NAMES[code] ?? ''} —{' '}
+        <button className="link" onClick={() => set([])}>
+          leave off the automap
+        </button>
+      </div>
+      <PieceGallery table={table} level={level} cels={cels} palette={palette} codes={[code]} tint={tint} active={value} onPick={(c) => set([c])} />
+    </>
+  );
+  const piece = (value: number[]) =>
+    value.length ? <CelThumb frame={cels[value[0]]} palette={palette} fit={34} tint={tint} title={`piece ${value[0]}`} /> : <span className="ame-badge hidden">off</span>;
+
+  const apply = () => {
+    for (const [list, value] of changes()) if (list.length) onApply(list, value);
+    onMessage(`${part ?? info.label}: ${changing} tiles set${perShape && from !== level ? ` as in ${levelLabel(from)}` : ''}. Check the preview, then save.`);
+  };
+
+  return (
+    <div className="ame-panel amb">
+      <div className="field-label amb-head">
+        <span className="amc-title">
+          <KindIcon kind={category} colour={style.kinds[category].colour} size={18} /> {info.label}
+          {part && <span className="amc-part"> › {part}</span>}
+        </span>
+        <span className="muted small">
+          {tiles(groups)} tiles · {groups.length} kinds
+        </span>
+      </div>
+      <div className="amb-section">
+        <div className="amb-section-title">Look{part ? ` (all ${info.label.toLowerCase()})` : ''}</div>
+        <AutomapLook style={style} onChange={onStyle} kinds={[category]} compact single />
+      </div>
+
+      <div className="amb-section">
+        <div className="amb-section-title">Texture: the piece the game draws</div>
+        {category === 'water' && (
+          <>
+            <p className="muted small">Water is floor nobody can walk on, dark or bluish (so not lava). Untick any of these that aren&apos;t water: they keep their own piece.</p>
+            <div className="amb-water">
+              {groups.map((g) => {
+                const tile = lib.pick(0, g.style, g.sub, 0);
+                const on = !off.has(g.key);
+                return (
+                  <label key={g.key} className={`amb-water-tile${on ? '' : ' off'}`} title={`Floor ${g.style}/${g.sub} · ${g.cells.length} on map`}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() =>
+                        setOff((o) => {
+                          const n = new Set(o);
+                          if (n.has(g.key)) n.delete(g.key);
+                          else n.add(g.key);
+                          return n;
+                        })
+                      }
+                    />
+                    {tile ? <Thumb tile={tile} palette={palette} /> : null}
+                    <span className="mono tiny">
+                      {g.style}/{g.sub}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        )}
+        {perShape ? (
+          <>
+            <p className="muted small">
+              {category === 'walls'
+                ? 'Each wall shape has its own piece, so it faces the right way. Click a shape to choose another piece, or take a whole set from a level:'
+                : 'One piece per kind of object (trees, props). Click one to choose another piece:'}
+            </p>
+            <label className="small amb-from">
+              Pieces as in{' '}
+              <select
+                value={from}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setPick(new Map());
+                }}
+              >
+                {(table.levels.includes(level) ? table.levels : [level, ...table.levels]).map((l) => (
+                  <option key={l} value={l}>
+                    {levelLabel(l)}
+                    {l === level ? ' (this level)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="amb-rows">
+              {[...shapes].map(([code, list]) => (
+                <button key={code} className={`amb-row${active === code ? ' active' : ''}`} onClick={() => setActive(active === code ? null : code)}>
+                  <span className="amb-name">
+                    <code>{code}</code> {AUTOMAP_CODE_NAMES[code] ?? ''}
+                    <span className="muted small"> · {tiles(list)} tiles</span>
+                  </span>
+                  <span className="amb-piece">{piece(chosen(code, list))}</span>
+                </button>
+              ))}
+            </div>
+            {active && shapes.has(active) && gallery(active, chosen(active, shapes.get(active)!), (v) => setPick((m) => new Map(m).set(active, v)))}
+          </>
+        ) : (
+          <>
+            <div className="amb-current small">
+              Now: {piece(chosen(code0!, groups))}
+              {category === 'floors' && <span className="muted"> The game leaves most floors off the automap.</span>}
+            </div>
+            {gallery(code0!, chosen(code0!, groups), (v) => setPick((m) => new Map(m).set(code0!, v)))}
+          </>
+        )}
+        <label className="small">
+          <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> Only tiles without an entry (keep the others as they are)
+        </label>
+        <div className="ame-actions">
+          <button
+            className="btn primary"
+            disabled={!changing}
+            onClick={apply}
+            title={perShape ? 'Shapes you chose a piece for change everywhere; the others only where they have no entry' : 'Every tile of the category gets the chosen piece'}
+          >
+            {changing ? `Apply (${changing} tiles)` : perShape ? 'Nothing to change: choose a piece or a set' : 'Choose a piece (or leave off) first'}
+          </button>
+          {category === 'walls' && missing.length > 0 && (
+            <button className="btn small" onClick={() => onSuggest(missing)} title="The piece this level (or its act) uses for look-alike tiles, for every wall without an entry">
+              Suggest for the {missing.length} missing wall kind{missing.length === 1 ? '' : 's'}
+            </button>
+          )}
+          <button className="btn small" disabled={!changed} onClick={onRevert} title="Back to what AutoMap.txt says for this category">
+            Revert
           </button>
         </div>
       </div>
@@ -417,6 +655,7 @@ function PiecePanel({
   onSet,
   onRevert,
   onSuggest,
+  onBack,
 }: {
   table: AutomapTable;
   level: string;
@@ -429,32 +668,12 @@ function PiecePanel({
   onSet: (value: number[] | ((current: number[] | null) => number[])) => void;
   onRevert: () => void;
   onSuggest: () => void;
-  /** The selection's kind colour, when colouring by kind. */
+  onBack: () => void;
+  /** The selection's category colour, when colouring by category. */
   tint?: string;
 }) {
   const [mode, setMode] = useState<'replace' | 'variant'>('replace');
   const codes = [...new Set(selection.map((g) => AUTOMAP_CODES[g.orientation]))];
-
-  if (!selection.length) {
-    return (
-      <div className="ame-panel">
-        <div className="field-label">Piece</div>
-        <p className="muted small">
-          Select one or more tile kinds on the left, or click the map preview. Then pick the automap piece they should draw — or hide them from the automap.
-        </p>
-        <div className="ame-legend small">
-          <div>
-            <span className="ame-badge missing">missing</span> a wall with no AutoMap.txt entry: a hole in the automap (outlined on the preview)
-          </div>
-          <div>
-            <span className="ame-badge hidden">hidden</span> deliberately not on the automap
-          </div>
-          <div>Up to 4 pieces per tile: the game picks one at random for each tile, for variety.</div>
-        </div>
-      </div>
-    );
-  }
-
   const shared = (() => {
     const first = celsOf(selection[0]);
     return selection.every((g) => (celsOf(g) ?? []).join(',') === (first ?? []).join(',')) ? first : undefined;
@@ -464,6 +683,9 @@ function PiecePanel({
 
   return (
     <div className="ame-panel">
+      <button className="link small" onClick={onBack}>
+        ← the whole category
+      </button>
       <div className="field-label">
         {one ? (
           <>
@@ -478,15 +700,15 @@ function PiecePanel({
           ? rule
             ? `In AutoMap.txt: ${describeRule(rule)} (row ${rule.row + 2})${edited(one) ? ' — changed, not saved yet' : ''}`
             : `No AutoMap.txt entry${edited(one) ? ' — changed, not saved yet' : ''}`
-          : `${selection.filter(edited).length} changed · ${selection.filter((g) => fileCels(g) === null).length} missing in the file`}
+          : `${selection.filter(edited).length} changed · ${selection.filter((g) => fileCels(g) === null).length} without an entry in the file`}
       </div>
       <div className="ame-slots">
         {shared === undefined ? (
           <span className="muted small">Selected kinds use different pieces; picking one sets them all.</span>
         ) : shared === null ? (
-          <span className="ame-badge missing">missing</span>
+          <span className="ame-badge missing">no entry</span>
         ) : shared.length === 0 ? (
-          <span className="ame-badge hidden">hidden</span>
+          <span className="ame-badge hidden">off</span>
         ) : (
           shared.map((cel, i) => (
             <div key={i} className="ame-slot">
@@ -501,7 +723,7 @@ function PiecePanel({
       </div>
       <div className="ame-actions">
         <button className="btn small" onClick={() => onSet([])} title="Leave this tile off the automap: no AutoMap.txt row for it, as the game does for tiles it does not draw">
-          Hide on automap
+          Leave off the automap
         </button>
         <button className="btn small" onClick={onSuggest} title="The piece this level/act normally uses for this kind of tile">
           Suggest
@@ -602,44 +824,65 @@ function PieceGallery({
   );
 }
 
-/** The whole automap with pending changes, zoomable; selected kinds outlined; click to select what's there. */
+/**
+ * The automap with pending changes over the map itself, zoomable: a slider fades from all map to all automap; the
+ * highlighted tile kinds are outlined; walls without an entry outlined in the look's colour.
+ */
 function AutomapPreview({
   map,
+  scene,
   groups,
   celsOf,
   cels,
   palette,
-  selected,
-  onPick,
+  highlight,
   style,
   onStyle,
 }: {
-  style: AutomapStyle;
-  onStyle: (s: AutomapStyle) => void;
   map: OpenMap;
+  scene: Scene;
   groups: Group[];
   celsOf: (g: Group) => number[] | null;
   cels: SpriteFrame[];
   palette: Palette;
-  selected: Set<string>;
-  onPick: (keys: string[], add: boolean) => void;
+  highlight: Set<string>;
+  style: AutomapStyle;
+  onStyle: (s: AutomapStyle) => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 400, h: 400 });
   const [view, setView] = useState<{ zoom: number; x: number; y: number } | null>(null);
-  const pan = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+  /** 0 = only the map, 100 = only the automap; in between both, the far one fading. */
+  const [mix, setMix] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ds1studio.automapMix');
+      return saved !== null && Number.isFinite(Number(saved)) ? Number(saved) : 60;
+    } catch {
+      return 60;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('ds1studio.automapMix', String(mix));
+    } catch {
+      // per-viewer convenience only
+    }
+  }, [mix]);
   const [lookOpen, setLookOpen] = useState(false);
+  const pan = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
   const { width, height } = map.ds1;
   const { ox, oy, W, H } = automapFrame(width, height);
 
-  // The automap image (automap pixels) in the chosen look, rebuilt when pieces or the look change.
+  // The map itself, once (under half the game's size is plenty under the automap).
+  const mapImage = useMemo(() => renderMapCanvas(scene, palette, width, height, 0.4), [scene, palette, width, height]);
+  // The automap in the chosen look, rebuilt when pieces or the look change.
   const image = useMemo(() => {
     const draw: DrawPiece[] = [];
     for (const g of groups) {
       const list = celsOf(g);
       if (!list?.length) continue;
-      for (const [cx, cy] of g.cells) draw.push({ cellX: cx, cellY: cy, orientation: g.orientation, cel: list[(cx * 7 + cy * 13) % list.length] });
+      for (const [cx, cy] of g.cells) draw.push({ cellX: cx, cellY: cy, kind: g.kind, cel: list[(cx * 7 + cy * 13) % list.length] });
     }
     return automapCanvas(width, height, draw, cels, palette, style).canvas;
   }, [groups, celsOf, cels, palette, width, height, style]);
@@ -652,6 +895,9 @@ function AutomapPreview({
   }, []);
   const fit = Math.min(size.w / W, size.h / H) * 0.96;
   const v = view ?? { zoom: fit, x: W / 2, y: H / 2 };
+  const t = mix / 100;
+  const mapAlpha = Math.min(1, 2 * (1 - t));
+  const amAlpha = Math.min(1, 2 * t);
 
   useEffect(() => {
     const c = canvas.current!;
@@ -665,22 +911,27 @@ function AutomapPreview({
     ctx.save();
     ctx.translate(size.w / 2 - v.x * v.zoom, size.h / 2 - v.y * v.zoom);
     ctx.scale(v.zoom, v.zoom);
-    // The map's outline, faintly.
+    // The map (world → automap pixels: a tenth of the size, from the frame's origin), darker the more automap shows.
+    if (mapAlpha > 0) {
+      const b = mapImage.bounds;
+      ctx.globalAlpha = mapAlpha;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(mapImage.canvas, b.x / AUTOMAP_SCALE + ox, b.y / AUTOMAP_SCALE + oy, b.w / AUTOMAP_SCALE, b.h / AUTOMAP_SCALE);
+      ctx.globalAlpha = mapAlpha * t * 0.6;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+    if (amAlpha > 0) {
+      ctx.globalAlpha = amAlpha;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(image, 0, 0);
+      ctx.globalAlpha = 1;
+    }
     const corner = (cx: number, cy: number): [number, number] => {
       const [ax, ay] = automapCellOrigin(cx, cy);
       return [ox + ax, oy + ay];
     };
-    ctx.beginPath();
-    for (const [i, [cx, cy]] of ([[0, 0], [width, 0], [width, height], [0, height]] as [number, number][]).entries()) {
-      const [x, y] = corner(cx, cy);
-      if (i) ctx.lineTo(x, y);
-      else ctx.moveTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.fill();
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(image, 0, 0);
     const diamond = (cx: number, cy: number) => {
       const [x, y] = corner(cx, cy);
       ctx.moveTo(x, y);
@@ -689,24 +940,22 @@ function AutomapPreview({
       ctx.lineTo(x - 8, y + 4);
       ctx.closePath();
     };
-    const lw = 1.5 / v.zoom;
-    // Walls without an entry, and the selected kinds.
-    ctx.lineWidth = lw;
+    ctx.lineWidth = 1.5 / v.zoom;
     if (style.missing) {
       ctx.strokeStyle = style.missingColour;
       ctx.beginPath();
-      for (const g of groups) if (g.layer === 'wall' && celsOf(g) === null) for (const [cx, cy] of g.cells) diamond(cx, cy);
+      for (const g of groups) if (g.kind === 'walls' && celsOf(g) === null) for (const [cx, cy] of g.cells) diamond(cx, cy);
       ctx.stroke();
     }
-    // White: the kind colours use gold, blue, green and purple.
+    // The chosen category (or kinds), in white: the category colours are gold, blue, green…
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
     ctx.beginPath();
-    for (const g of groups) if (selected.has(g.key)) for (const [cx, cy] of g.cells) diamond(cx, cy);
+    for (const g of groups) if (highlight.has(g.key)) for (const [cx, cy] of g.cells) diamond(cx, cy);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-  }, [size, v.zoom, v.x, v.y, image, groups, selected, celsOf, width, height, ox, oy, style]);
+  }, [size, v.zoom, v.x, v.y, image, mapImage, mapAlpha, amAlpha, t, groups, highlight, celsOf, width, height, ox, oy, W, H, style]);
 
   const latest = useRef({ v });
   latest.current = { v };
@@ -727,17 +976,16 @@ function AutomapPreview({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const cellAt = (sx: number, sy: number): [number, number] => {
-    const ax = v.x + (sx - size.w / 2) / v.zoom - ox;
-    const ay = v.y + (sy - size.h / 2) / v.zoom - oy - 4; // diamond centre
-    return [Math.floor((ax / 8 + ay / 4) / 2 + 0.5), Math.floor((ay / 4 - ax / 8) / 2 + 0.5)];
-  };
-
   return (
     <div className="ame-preview">
       <div className="ame-preview-bar small">
-        <span className="muted">Automap preview (with your changes) · wheel to zoom, drag to pan, click to select</span>
-        <button className={`btn small${lookOpen ? ' active' : ''}`} onClick={() => setLookOpen(!lookOpen)} title="Colours, thickness and which kinds show">
+        <label className="ame-mix" title="Fade between the map and the automap">
+          <span>Map</span>
+          <input type="range" min={0} max={100} value={mix} onChange={(e) => setMix(Number(e.target.value))} />
+          <span>Automap</span>
+        </label>
+        <span className="muted">wheel to zoom · drag to pan</span>
+        <button className={`btn small${lookOpen ? ' active' : ''}`} onClick={() => setLookOpen(!lookOpen)} title="Colours, opacity, thickness and which categories show">
           Look
         </button>
         <button className="btn small" onClick={() => setView(null)}>
@@ -762,279 +1010,12 @@ function AutomapPreview({
           if (Math.abs(e.clientX - p.px) + Math.abs(e.clientY - p.py) > 3) p.moved = true;
           if (p.moved) setView({ zoom: v.zoom, x: p.x - (e.clientX - p.px) / v.zoom, y: p.y - (e.clientY - p.py) / v.zoom });
         }}
-        onPointerUp={(e) => {
-          const p = pan.current;
+        onPointerUp={() => {
           pan.current = null;
-          if (!p || p.moved) return;
-          const r = wrap.current!.getBoundingClientRect();
-          const [cx, cy] = cellAt(e.clientX - r.left, e.clientY - r.top);
-          const keys = groups.filter((g) => g.cells.some(([x, y]) => x === cx && y === cy)).map((g) => g.key);
-          if (keys.length) onPick(keys, e.shiftKey || e.ctrlKey);
         }}
       >
         <canvas ref={canvas} style={{ width: size.w, height: size.h }} />
       </div>
-    </div>
-  );
-}
-
-type BulkTab = 'walls' | 'floors' | 'water' | 'objects';
-
-/**
- * Draw all the same: one choice for a whole kind of tile — every wall shape from one wall set (each shape its own
- * piece, so it faces the right way), every floor, every floor that looks like water, trees and props. The choice goes
- * into the pending changes, shown on the preview; nothing is written until Save.
- */
-function BulkPanel({
-  map,
-  groups,
-  table,
-  level,
-  levelLabel,
-  cels,
-  palette,
-  style,
-  celsOf,
-  makeColors,
-  onApply,
-  onClose,
-}: {
-  map: OpenMap;
-  groups: Group[];
-  table: AutomapTable;
-  level: string;
-  levelLabel: (level: string) => string;
-  cels: SpriteFrame[];
-  palette: Palette;
-  style: AutomapStyle;
-  celsOf: (g: Group) => number[] | null;
-  makeColors: () => Promise<AutomapColors | undefined>;
-  onApply: (targets: Group[], cels: number[], what: string) => void;
-  onClose: () => void;
-}) {
-  const [tab, setTab] = useState<BulkTab>('walls');
-  const [keep, setKeep] = useState(false);
-  const [from, setFrom] = useState(level);
-  const usual = useMemo(() => usualCels(table, from, { acrossActs: true }), [table, from]);
-  const codeOf = (g: Group) => AUTOMAP_CODES[g.orientation] ?? '';
-  const byCode = (kind: AutomapKind) => {
-    const m = new Map<string, Group[]>();
-    for (const g of groups) if (kindOfCode(codeOf(g)) === kind) (m.get(codeOf(g)) ?? m.set(codeOf(g), []).get(codeOf(g))!).push(g);
-    return m;
-  };
-  const walls = useMemo(() => byCode('walls'), [groups]); // eslint-disable-line react-hooks/exhaustive-deps
-  const objects = useMemo(() => byCode('objects'), [groups]); // eslint-disable-line react-hooks/exhaustive-deps
-  const floors = useMemo(() => groups.filter((g) => codeOf(g) === 'fl'), [groups]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The piece chosen per code ([] = leave off the automap); starts as the chosen level's usual piece.
-  const [pick, setPick] = useState<Map<string, number[]>>(new Map());
-  const chosen = (code: string): number[] => pick.get(code) ?? (usual.has(code) ? [usual.get(code)!] : []);
-  const [active, setActive] = useState<string | null>(null);
-  const [water, setWater] = useState<{ groups: Group[]; off: Set<string> } | null>(null);
-  const [finding, setFinding] = useState(false);
-  const [waterCel, setWaterCel] = useState<number[] | null>(null);
-  const tintFor = (kind: AutomapKind) => (style.colours === 'kind' ? style.kinds[kind].colour : undefined);
-  const tiles = (list: Group[]) => list.reduce((n, g) => n + g.cells.length, 0);
-  const targets = (list: Group[]) => (keep ? list.filter((g) => celsOf(g) === null) : list);
-  const setCode = (code: string, v: number[]) => setPick((m) => new Map(m).set(code, v));
-
-  const findWater = async () => {
-    setFinding(true);
-    try {
-      const colors = await makeColors();
-      const found = floors.filter((g) => {
-        const tile = map.lib.pick(0, g.style, g.sub, 0);
-        return !!tile && isWaterTile(tile.subTileFlags, colors?.tile(0, g.style, g.sub) ?? null);
-      });
-      setWater({ groups: found, off: new Set() });
-      if (waterCel === null) {
-        // The piece the level already gives its water, if any: the one most of the found tiles use.
-        const counts = new Map<number, number>();
-        for (const g of found) for (const c of celsOf(g) ?? []) counts.set(c, (counts.get(c) ?? 0) + g.cells.length);
-        const best = [...counts].sort((a, b) => b[1] - a[1])[0];
-        setWaterCel(best ? [best[0]] : []);
-      }
-    } finally {
-      setFinding(false);
-    }
-  };
-
-  const row = (code: string, list: Group[], kind: AutomapKind) => {
-    const c = chosen(code);
-    return (
-      <button key={code} className={`amb-row${active === code ? ' active' : ''}`} onClick={() => setActive(code)} title="Click to choose another piece">
-        <KindIcon kind={kind} colour={style.kinds[kind].colour} />
-        <span className="amb-name">
-          <code>{code}</code> {AUTOMAP_CODE_NAMES[code] ?? ''}
-          <span className="muted small">
-            {' '}
-            · {list.length} kind{list.length === 1 ? '' : 's'}, {tiles(list)} tiles
-          </span>
-        </span>
-        <span className="amb-piece">{c.length ? <CelThumb frame={cels[c[0]]} palette={palette} fit={32} tint={tintFor(kind)} /> : <span className="ame-badge hidden">off</span>}</span>
-      </button>
-    );
-  };
-  const gallery = (code: string, kind: AutomapKind, value: number[], set: (v: number[]) => void) => (
-    <>
-      <div className="amb-gallery-head small">
-        Piece for <code>{code}</code> {AUTOMAP_CODE_NAMES[code] ?? ''}:{' '}
-        <button className="link" onClick={() => set([])}>
-          leave off the automap
-        </button>
-      </div>
-      <PieceGallery table={table} level={level} cels={cels} palette={palette} codes={[code]} tint={tintFor(kind)} active={value} onPick={(c) => set([c])} />
-    </>
-  );
-
-  const TABS: { id: BulkTab; label: string; kind: AutomapKind }[] = [
-    { id: 'walls', label: 'Walls', kind: 'walls' },
-    { id: 'floors', label: 'Floors', kind: 'floors' },
-    { id: 'water', label: 'Water', kind: 'floors' },
-    { id: 'objects', label: 'Objects & trees', kind: 'objects' },
-  ];
-  const waterOn = water ? water.groups.filter((g) => !water.off.has(g.key)) : [];
-  const sets = tab === 'walls' ? walls : objects;
-  const setKind: AutomapKind = tab === 'walls' ? 'walls' : 'objects';
-  return (
-    <div className="ame-panel amb">
-      <div className="field-label amb-head">
-        <span>Draw all the same</span>
-        <button className="icon-btn" title="Back to picking pieces for selected kinds" onClick={onClose}>
-          ×
-        </button>
-      </div>
-      <div className="chips">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`chip${tab === t.id ? ' active' : ''}`}
-            onClick={() => {
-              setTab(t.id);
-              setActive(null);
-            }}
-          >
-            <KindIcon kind={t.kind} colour={t.id === 'water' ? '#3d8bff' : style.kinds[t.kind].colour} size={13} /> {t.label}
-          </button>
-        ))}
-      </div>
-      <label className="small">
-        <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> Only kinds without an entry (keep the others as they are)
-      </label>
-
-      {(tab === 'walls' || tab === 'objects') && (
-        <>
-          <p className="muted small">
-            {tab === 'walls'
-              ? 'Each wall shape gets its own piece (a left wall, a corner, a door each face their own way), all from one wall set. Click a shape to pick another piece for it.'
-              : 'Trees and props, one piece per code (or left off the automap, as Act 1 does with its trees). Click one to pick another piece.'}
-          </p>
-          <label className="small amb-from">
-            Pieces as in{' '}
-            <select
-              value={from}
-              onChange={(e) => {
-                setFrom(e.target.value);
-                setPick(new Map());
-              }}
-            >
-              {(table.levels.includes(level) ? table.levels : [level, ...table.levels]).map((l) => (
-                <option key={l} value={l}>
-                  {levelLabel(l)}
-                  {l === level ? ' (this level)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="amb-rows">
-            {[...sets].map(([code, list]) => row(code, list, setKind))}
-            {!sets.size && <p className="muted small">This map has none.</p>}
-          </div>
-          {active && sets.has(active) && gallery(active, setKind, chosen(active), (v) => setCode(active, v))}
-          <button
-            className="btn primary"
-            disabled={!sets.size}
-            onClick={() => {
-              for (const [code, gs] of sets) onApply(targets(gs), chosen(code), '');
-              onApply([], [], `${tab === 'walls' ? 'All walls' : 'All objects & trees'}: ${sets.size} shape${sets.size === 1 ? '' : 's'} set as in ${levelLabel(from)}. Check the preview, then save.`);
-            }}
-          >
-            Apply to all {tab === 'walls' ? 'walls' : 'objects & trees'} ({tiles(targets([...sets.values()].flat()))} tiles)
-          </button>
-        </>
-      )}
-
-      {tab === 'floors' && (
-        <>
-          <p className="muted small">
-            One piece for every floor ({floors.length} kinds, {tiles(floors)} tiles) — or leave them all off, as most of the game&apos;s levels do. Give water its
-            own piece afterwards on the Water tab.
-          </p>
-          {gallery('fl', 'floors', chosen('fl'), (v) => setCode('fl', v))}
-          <button
-            className="btn primary"
-            disabled={!floors.length}
-            onClick={() => onApply(targets(floors), chosen('fl'), `All floors: ${chosen('fl').length ? `piece ${chosen('fl')[0]}` : 'left off the automap'}. Check the preview, then save.`)}
-          >
-            Apply to all floors ({tiles(targets(floors))} tiles)
-          </button>
-        </>
-      )}
-
-      {tab === 'water' && (
-        <>
-          <p className="muted small">Water is floor nobody can walk on, dark or bluish (so not lava): those found get one piece. Untick any that aren&apos;t water.</p>
-          {!water ? (
-            <button className="btn" disabled={finding} onClick={() => void findWater()}>
-              {finding ? 'Looking at the tiles… (the first time takes a while)' : 'Find the water tiles'}
-            </button>
-          ) : (
-            <>
-              <div className="amb-water">
-                {water.groups.map((g) => {
-                  const tile = map.lib.pick(0, g.style, g.sub, 0);
-                  const on = !water.off.has(g.key);
-                  return (
-                    <label key={g.key} className={`amb-water-tile${on ? '' : ' off'}`} title={`Floor ${g.style}/${g.sub} · ${g.cells.length} on map`}>
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={() =>
-                          setWater((w) => {
-                            if (!w) return w;
-                            const off = new Set(w.off);
-                            if (off.has(g.key)) off.delete(g.key);
-                            else off.add(g.key);
-                            return { ...w, off };
-                          })
-                        }
-                      />
-                      {tile ? <Thumb tile={tile} palette={palette} /> : null}
-                      <span className="mono tiny">
-                        {g.style}/{g.sub}
-                      </span>
-                    </label>
-                  );
-                })}
-                {!water.groups.length && <p className="muted small">No floor here looks like water.</p>}
-              </div>
-              {water.groups.length > 0 && (
-                <>
-                  {gallery('fl', 'floors', waterCel ?? [], (v) => setWaterCel(v))}
-                  <button
-                    className="btn primary"
-                    disabled={!waterOn.length}
-                    onClick={() =>
-                      onApply(targets(waterOn), waterCel ?? [], `Water: ${waterOn.length} floor kind${waterOn.length === 1 ? '' : 's'} ${waterCel?.length ? `get piece ${waterCel[0]}` : 'left off the automap'}. Check the preview, then save.`)
-                    }
-                  >
-                    Apply to the water ({tiles(targets(waterOn))} tiles)
-                  </button>
-                </>
-              )}
-            </>
-          )}
-        </>
-      )}
     </div>
   );
 }
