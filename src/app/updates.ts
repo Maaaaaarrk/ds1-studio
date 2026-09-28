@@ -48,24 +48,25 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     try {
       const { check } = await import('@tauri-apps/plugin-updater');
       const update = await check();
-      if (update)
+      if (update) {
         return {
-        version: update.version,
-        notes: update.body ?? '',
-        date: update.date,
-        url: `${REPO_URL}/releases/tag/v${update.version}`,
-        install: async (onProgress) => {
-          let done = 0;
-          let total: number | null = null;
-          await update.downloadAndInstall((e) => {
-            if (e.event === 'Started') total = e.data.contentLength ?? null;
-            if (e.event === 'Progress') done += e.data.chunkLength;
-            onProgress(done, total);
-          });
-          const { relaunch } = await import('@tauri-apps/plugin-process');
-          await relaunch();
-        },
-      };
+          version: update.version,
+          notes: update.body ?? '',
+          date: update.date,
+          url: `${REPO_URL}/releases/tag/v${update.version}`,
+          install: async (onProgress) => {
+            let done = 0;
+            let total: number | null = null;
+            await update.downloadAndInstall((e) => {
+              if (e.event === 'Started') total = e.data.contentLength ?? null;
+              if (e.event === 'Progress') done += e.data.chunkLength;
+              onProgress(done, total);
+            });
+            const { relaunch } = await import('@tauri-apps/plugin-process');
+            await relaunch();
+          },
+        };
+      }
       // A release is published a minute or two before its installers and update feed are uploaded.
       why = 'Its installer is still being uploaded (this takes a few minutes after a release appears). Check again shortly and it will install itself.';
     } catch (e) {
