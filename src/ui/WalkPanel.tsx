@@ -22,6 +22,31 @@ interface Props {
   onDone: () => void;
 }
 
+/** What the walkability overlay's colours mean, and the brush's (the same colours as MapView draws them). */
+export function WalkLegend({ floating = false }: { floating?: boolean }) {
+  const rows: { fill: string; stroke?: string; dashed?: boolean; text: string }[] = [
+    { fill: 'rgba(255, 176, 40, 0.6)', text: "Can't be walked on" },
+    { fill: 'rgba(255, 60, 70, 0.65)', text: "Can't be walked, jumped or teleported over" },
+    { fill: 'none', stroke: '#8a8f98', dashed: true, text: 'Walkable (no colour)' },
+    { fill: 'rgba(255, 176, 40, 0.28)', stroke: 'rgb(255, 176, 40)', text: 'Brush: will block' },
+    { fill: 'rgba(110, 230, 140, 0.28)', stroke: 'rgb(110, 230, 140)', text: 'Brush: will make walkable' },
+  ];
+  return (
+    <div className={floating ? 'walk-legend floating' : 'walk-legend'}>
+      {floating && <div className="walk-legend-title">Walkability</div>}
+      {rows.map((r) => (
+        <div key={r.text} className="walk-legend-row">
+          <svg className="walk-legend-swatch" viewBox="0 0 20 10" aria-hidden>
+            <polygon points="10,0.8 19.2,5 10,9.2 0.8,5" fill={r.fill} stroke={r.stroke ?? 'none'} strokeWidth={1.3} strokeDasharray={r.dashed ? '2 1.5' : undefined} />
+          </svg>
+          {r.text}
+        </div>
+      ))}
+      <div className="walk-legend-note">Each diamond is one sub-tile (5×5 per cell). Blocks to sight &amp; light aren&apos;t drawn.</div>
+    </div>
+  );
+}
+
 /** The side panel while the walkability overlay is on: painting sub-tiles blocked or walkable, for this map only. */
 export function WalkPanel({ brush, onChange, busy, canWrite, libraryPath, last, onDone }: Props) {
   const set = (patch: Partial<WalkBrush>) => onChange({ ...brush, ...patch });
@@ -33,9 +58,9 @@ export function WalkPanel({ brush, onChange, busy, canWrite, libraryPath, last, 
       </div>
       <div className="panel-body">
         <p className="small muted">
-          Click or drag on the map to paint sub-tiles. <b>Shift</b>+drag paints a rectangle; hold <b>Ctrl</b> to do the opposite. Amber can&apos;t be
-          walked, red can&apos;t be jumped or teleported over either.
+          Click or drag on the map to paint sub-tiles. <b>Shift</b>+drag paints a rectangle; hold <b>Ctrl</b> to do the opposite.
         </p>
+        <WalkLegend />
         <div className="field-label">Paint</div>
         <div className="segmented">
           <button className={brush.mode === 'block' ? 'active' : ''} onClick={() => set({ mode: 'block' })} title="Block the chosen movement on the sub-tiles you paint">

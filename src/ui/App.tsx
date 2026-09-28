@@ -91,7 +91,7 @@ import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
-import { WalkPanel, type WalkBrush } from './WalkPanel';
+import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
 import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
 import { tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
@@ -2255,6 +2255,7 @@ export function App() {
       </aside>
 
       <main className="stage">
+        {map && scene && visibility.walkable && <WalkLegend floating />}
         <ErrorBoundary
           what="the map view"
           resetKey={map}
