@@ -62,9 +62,10 @@ import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { ACT0_PALETTE, PALETTE_NAMES } from '../formats/palette';
+import { act0Convert, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, type CustomDt1Plan } from '../game/customDt1';
-import { addToSelection, clampRect, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
+import { addToSelection, clampRect, fillEdits, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
@@ -122,7 +123,7 @@ import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
-import { isBuiltinPath, specialTileInfo } from '../game/specialTiles';
+import { isBuiltinPath, PLACEABLE_SPECIALS, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
 import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
@@ -541,6 +542,22 @@ export function App() {
   }, [tileSet]);
   const pickBrush = useCallback(
     (b: Brush, add = false) => {
+      // An area selected with the Select tool: the tile clicked fills it (one undo step), on its kind of layer.
+      if (!add && doc && selection && tool === 'select') {
+        const layer: LayerRef =
+          b.orientation === Orientation.Floor
+            ? activeLayer.kind === 'floor' ? activeLayer : { kind: 'floor', index: 0 }
+            : b.orientation === Orientation.Shadow
+              ? { kind: 'shadow', index: 0 }
+              : activeLayer.kind === 'wall' ? activeLayer : { kind: 'wall', index: 0 };
+        const edits = fillEdits(doc, selection, layer, b);
+        if (doc.apply(edits, `Fill ${edits.length} cells with ${b.main}/${b.sub}`)) bump();
+        setBrush(b);
+        setMix([]);
+        if (tileSet) setRecentTileList(noteTileUse(tileSet, b));
+        notify(`Filled ${edits.length} selected cell${edits.length === 1 ? '' : 's'} with tile ${b.main}/${b.sub} on ${layerLabel(layer)} · Ctrl+Z to undo · Esc to deselect and paint instead`);
+        return;
+      }
       if (add && brush) {
         // Ctrl+click: add to / remove from the random mix painted together with the brush.
         const same = (x: Brush) => x.orientation === b.orientation && x.main === b.main && x.sub === b.sub;
@@ -553,7 +570,7 @@ export function App() {
       setTool('paint');
       if (tileSet) setRecentTileList(noteTileUse(tileSet, b));
     },
-    [brush, tileSet],
+    [brush, tileSet, doc, selection, tool, activeLayer, notify],
   );
 
   // Autosave: every 20 s, keep a copy of a map with unsaved changes (in the app's own storage) for recovery.
@@ -1833,11 +1850,58 @@ export function App() {
 
   /** The DT1 just imported, for the library window to show. */
   const [revealDt1, setRevealDt1] = useState<string | null>(null);
+  /**
+   * Act 0 is the standard: DT1s using colours that change between acts get the nearest colours that are the same in
+   * every act, judged in the act they were drawn for (their folder's, else this map's). Returns the files as written.
+   */
+  const toAct0 = useCallback(
+    async (files: { path: string; bytes: Uint8Array }[]): Promise<{ files: { path: string; bytes: Uint8Array }[]; converted: string[] }> => {
+      if (!gd || !files.length) return { files, converted: [] };
+      const a0 = await loadAct0Palette(gd.fs);
+      const converted: string[] = [];
+      const out = [];
+      for (const f of files) {
+        const c = act0Convert(f.bytes, await gd.palette(dt1Act(f.path) ?? Math.min(4, map?.ds1.act ?? 0)), a0.usable);
+        if (c) converted.push(f.path);
+        out.push(c ? { path: f.path, bytes: c.bytes } : f);
+      }
+      return { files: out, converted };
+    },
+    [gd, map],
+  );
+  /** Adds tile libraries to the map, converting `convert` (the new ones) to the Act 0 colours in the mod first. */
+  const addLibraries = useCallback(
+    async (paths: string[], convert: string[]) => {
+      if (!gd) return;
+      let converted: string[] = [];
+      if (convert.length && data.status === 'ready' && data.saveTarget) {
+        try {
+          const read = (await Promise.all(convert.map(async (p) => ({ path: gd.fs.exactPath(p) ?? p, bytes: await gd.fs.read(p) })))).filter((f): f is { path: string; bytes: Uint8Array } => !!f.bytes);
+          const r = await toAct0(read);
+          const writes = r.files.filter((f) => r.converted.includes(f.path));
+          if (writes.length) {
+            await writeFiles(writes);
+            for (const w of writes) gd.forgetDt1(w.path);
+          }
+          converted = r.converted;
+        } catch (e) {
+          notify(`Couldn't convert to Act 0 colours: ${(e as Error).message}`, true);
+        }
+      }
+      await applyDt1s(paths);
+      if (converted.length) notify(`Added ${convert.length} tile ${convert.length === 1 ? 'library' : 'libraries'}; converted ${converted.length} to Act 0 colours (the same in every act): ${converted.map((p) => p.split('/').pop()).join(', ')}`);
+    },
+    [gd, data, toAct0, writeFiles, applyDt1s, notify],
+  );
+
   const importDt1 = useCallback(
     async (c: ImportDt1Choice) => {
       if (!importing || importing.kind !== 'dt1' || !c.files.length) return;
       setImportBusy(true);
       try {
+        // Imported DT1s come in Act 0 colours, the standard (so they're stable in every act).
+        const act0 = await toAct0(c.files);
+        c = { ...c, files: act0.files };
         await writeFiles(c.files);
         try {
           localStorage.setItem('ds1studio.importFolder', c.files[0].path.split('/')[4] ?? 'custom');
@@ -1847,7 +1911,7 @@ export function App() {
         setImporting(null);
         setRevealDt1(c.files[0].path);
         const n = c.files.length;
-        const what = n === 1 ? c.files[0].path.split('/').pop() : `${n} DT1s`;
+        const what = `${n === 1 ? c.files[0].path.split('/').pop() : `${n} DT1s`}${act0.converted.length ? ` (${act0.converted.length} converted to Act 0 colours)` : ''}`;
         if (c.addToMap && map) {
           // Same as adding them in Tile libraries: the map's list, LvlTypes File slots and the Dt1Mask.
           await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...c.files.map((f) => f.path)]);
@@ -1862,7 +1926,7 @@ export function App() {
         setImportBusy(false);
       }
     },
-    [importing, map, writeFiles, applyDt1s, reloadTables, notify],
+    [importing, map, writeFiles, applyDt1s, reloadTables, notify, toAct0],
   );
 
   const readImportDt1 = useCallback((p: string) => (gd ? gd.dt1(p) : Promise.resolve(null)), [gd]);
@@ -2769,6 +2833,28 @@ export function App() {
                 : tool === 'paint' && !brush
                   ? 'Paint: choose a tile in the Tiles panel first (or Pick one from the map)'
                   : `${TOOLS.find((t) => t.id === tool)!.hint} · right-click for more`;
+  /**
+   * Puts a special tile (orientation 10, invisible in game) at a cell, on the first wall layer free there; a new wall
+   * layer when all are taken (up to 4).
+   */
+  const placeSpecial = (x: number, y: number, main: number, sub: number, label: string) => {
+    if (!doc) return;
+    const walls = doc.ds1.walls.length;
+    let index = -1;
+    for (let i = 0; i < walls && index < 0; i++) if (isEmptyCell(doc.cell({ kind: 'wall', index: i }, x, y))) index = i;
+    if (index < 0 && walls >= 4) return notify(`Cell ${x}, ${y} has a tile on all 4 wall layers: clear one to put ${label} here.`, true);
+    const brushed: Brush = { orientation: Orientation.SpecialTile1, main, sub };
+    doc.mutate((d) => {
+      if (index < 0) {
+        index = d.walls.length;
+        d.walls.push(Array.from({ length: d.width * d.height }, () => ({ ...EMPTY_CELL, orientation: 0, orientationHigh: 0 })));
+      }
+      const layer: LayerRef = { kind: 'wall', index };
+      (d.walls[index] as unknown[])[y * d.width + x] = MapDocument.painted(layer, d.walls[index][y * d.width + x], brushed);
+    }, `Place ${label}`);
+    bump();
+    notify(`${label} placed at cell ${x}, ${y} (Wall ${index + 1}) · Ctrl+Z to undo`);
+  };
   /** The map's right-click menu for a cell. */
   const mapMenuEntries = (m: { cell: [number, number]; world: [number, number] }): (MenuEntry | null)[] => {
     if (!doc || !scene) return [];
@@ -2793,6 +2879,10 @@ export function App() {
               },
             },
             { label: 'Pick this tile', onClick: () => pickAt(x, y, m.world), shortcut: kb['tool.pick'] },
+            {
+              label: 'Place a special tile here',
+              children: PLACEABLE_SPECIALS.map((sp) => ({ label: sp.label, title: sp.help, onClick: () => placeSpecial(x, y, sp.main, sp.sub, sp.label) })),
+            },
             null,
           ]
         : []),
@@ -3520,7 +3610,7 @@ export function App() {
         <Dt1LibraryDialog
           map={map}
           gd={data.gd}
-          onApply={(p) => void applyDt1s(p)}
+          onApply={(p, o) => void addLibraries(p, o?.toAct0 ?? [])}
           onCreateCustom={canWrite ? createCustomDt1 : null}
           onImportFiles={canWrite ? (mode) => void pickImport('dt1', mode) : null}
           reveal={revealDt1}

@@ -32,6 +32,15 @@ export function specialTileInfo(main: number, sub: number): { label: string; hel
   return { label: `Special ${main}/${sub}`, help: `Special tile ${main}/${sub}: a marker the game uses internally (not drawn in game).` };
 }
 
+/** The special tiles offered on the map's right-click menu: the arrival spots, then the level links (warps). */
+export const PLACEABLE_SPECIALS: { main: number; sub: number; label: string; help: string }[] = [
+  ...['30/11', '30/0', '31/0', '32/0', '33/0'].map((k) => {
+    const [main, sub] = k.split('/').map(Number);
+    return { main, sub, ...NAMED[k] };
+  }),
+  ...Array.from({ length: 8 }, (_, vis) => ({ main: vis, sub: 0, ...specialTileInfo(vis, 0) })),
+];
+
 /** Virtual path of the built-in special tiles (not a real DT1: nothing to load, save or add to a level). */
 export const BUILTIN_SPECIALS_PATH = 'builtin/special tiles';
 

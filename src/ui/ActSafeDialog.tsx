@@ -105,7 +105,9 @@ export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onClose }: 
           ...(out.find((r) => r.path === d.earlier)?.unsafePixels === 0 ? [d.later] : []),
         ]),
       );
-      setOn(Object.fromEntries(out.map((r) => [r.path, r.unsafePixels > 0 && !r.fromArchive && !safeCopy.has(r.path) && (actFromPath(r.path) ?? 0) !== mapAct])));
+      // Act 0 is the standard: every DT1 still using colours that change between acts is converted (unless an act-safe
+      // copy of it is loaded too, where removing it is the fix).
+      setOn(Object.fromEntries(out.map((r) => [r.path, r.unsafePixels > 0 && !safeCopy.has(r.path)])));
     })().catch((e) => live && setError((e as Error).message));
     return () => {
       live = false;

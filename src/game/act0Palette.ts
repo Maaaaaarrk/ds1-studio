@@ -1,6 +1,7 @@
 import { palettePath, parsePalette, type Palette } from '../formats/palette';
 import type { LayeredFs } from '../vfs/vfs';
-import { hueRemap } from '../formats/dt1Edit';
+import { hueRemap, recolorDt1 } from '../formats/dt1Edit';
+import { decodeTile, parseDt1 } from '../formats/dt1';
 
 /**
  * The "Act 0" palette: only the colours that look the same in every act, so tiles drawn with it don't shift colour
@@ -96,6 +97,30 @@ export function loadAct0Palette(fs: LayeredFs): Promise<Act0Palette> {
  */
 export function act0Remap(home: Palette, usable: ArrayLike<boolean>): Uint8Array {
   return hueRemap(home, { allowed: usable, metric: 'rgb' });
+}
+
+/** The act a tile library was drawn for, from its folder (ACT1-ACT4, expansion = Act 5); null when the folder doesn't say. */
+export function dt1Act(path: string): number | null {
+  const m = /^data\/global\/tiles\/(?:act(\d)|(expansion))\//i.exec(path);
+  if (!m) return null;
+  return m[2] ? 4 : Math.min(4, Math.max(0, Number(m[1]) - 1));
+}
+
+/**
+ * A DT1 converted to the Act 0 colours (see act0Remap), judged by `home`, the palette of the act it was drawn for.
+ * null when it already uses only Act 0 colours (or isn't a DT1 the game reads).
+ */
+export function act0Convert(bytes: Uint8Array, home: Palette, usable: ArrayLike<boolean>): { bytes: Uint8Array; pixels: number } | null {
+  let pixels = 0;
+  try {
+    for (const t of parseDt1(bytes).tiles) {
+      const img = decodeTile(t);
+      if (img) for (const p of img.pixels) if (p && !usable[p]) pixels++;
+    }
+  } catch {
+    return null;
+  }
+  return pixels ? { bytes: recolorDt1(bytes, act0Remap(home, usable)), pixels } : null;
 }
 
 /**

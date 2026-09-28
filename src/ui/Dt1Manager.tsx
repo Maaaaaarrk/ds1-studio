@@ -5,7 +5,7 @@ import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
 import { Thumb, TilePreview, tilePicture, usePreview } from './TilePalette';
-import { act0Remap, loadAct0Palette } from '../game/act0Palette';
+import { act0Remap, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { ACT0_PALETTE, type Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
@@ -19,7 +19,8 @@ interface Props {
   gd: GameData;
   /** Placed tiles per DT1 path (normalized), to warn before removing a library in use. */
   usage: Map<string, number>;
-  onApply: (paths: string[]) => void;
+  /** `toAct0`: libraries to convert to the Act 0 colours as they are added. */
+  onApply: (paths: string[], opts?: { toAct0: string[] }) => void;
   onClose: () => void;
 }
 
@@ -244,11 +245,7 @@ export function Dt1Viewer({
 }
 
 /** The act a tile library belongs to, from its folder (act1…act5, expansion = Act 5); null when it doesn't say. */
-function libraryAct(path: string): number | null {
-  const m = /^data\/global\/tiles\/(?:act(\d)|(expansion))\//i.exec(path);
-  if (!m) return null;
-  return m[2] ? 4 : Math.min(4, Math.max(0, Number(m[1]) - 1));
-}
+const libraryAct = dt1Act;
 
 /** A palette whose entry i shows the colour of remap[i]: draws tiles as a remap would leave them. */
 function remapPalette(palette: Palette, remap: Uint8Array): Palette {
@@ -285,6 +282,7 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
   const [dt1, setDt1] = useState<Dt1 | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
   const [picks, setPicks] = useState<TilePick[]>([]);
+  const [toAct0, setToAct0] = useState(true);
   // Colours: the library's own act (from its folder), the map's act, or Act 0 (magenta = colours that change by act).
   // A map shown in the Act 0 colours (a new map) opens the library in them too.
   const [palMode, setPalMode] = useState<'own' | 'map' | 'act0'>(map.paletteAct === ACT0_PALETTE ? 'act0' : 'own');
@@ -410,15 +408,18 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
                 <span className="muted small">none yet</span>
               )}
             </div>
+            <label className="small act0-standard" title="Colours that change between acts are snapped to the nearest colour that is the same in every act, so the tiles look right in any act. A DT1 from the game's archives gets a converted copy in your mod, which every map using it then shares.">
+              <input type="checkbox" checked={toAct0} onChange={(e) => setToAct0(e.target.checked)} /> Convert them to <b>Act 0 colours</b> (the same in every act; recommended)
+            </label>
             <p className="muted small">
-              Nothing is copied (the libraries are already in the game or your mod): they are added to the map, and its level type and Dt1Mask are updated so
-              the game loads them (originals kept as .bak).
+              They are added to the map, and its level type and Dt1Mask are updated so the game loads them (originals kept as .bak).
+              {toAct0 ? ' Libraries using colours that change between acts are converted first (in your mod).' : ' Nothing is copied: the libraries are already in the game or your mod.'}
             </p>
             <div className="modal-actions">
               <button className="btn" onClick={onClose}>
                 Cancel
               </button>
-              <button className="btn primary" disabled={!chosen.length} onClick={() => onApply([...current, ...chosen])}>
+              <button className="btn primary" disabled={!chosen.length} onClick={() => onApply([...current, ...chosen], { toAct0: toAct0 ? chosen : [] })}>
                 Add {chosen.length || ''} to the map
               </button>
             </div>
@@ -459,7 +460,8 @@ function CustomDt1Panel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hovered, hover] = usePreview();
-  const [actSafe, setActSafe] = useState(false);
+  // Act 0 colours are the standard: a custom DT1 is act-safe unless you untick it.
+  const [actSafe, setActSafe] = useState(true);
   /** Act 0 conversion: per act a library can be drawn for, the remap to act-safe colours. */
   const [safe, setSafe] = useState<{ usable: boolean[]; remaps: Uint8Array[] } | null>(null);
   const bytes = useRef(new Map<string, Uint8Array>());
