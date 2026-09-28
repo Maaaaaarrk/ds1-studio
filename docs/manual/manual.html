@@ -280,7 +280,7 @@
   </div>
 
   <h2 id="s-overlays"><span class="num">2.4</span>View modes, grid, rooms</h2>
-  <p id="s-modes"><b>View modes.</b> The <b>View</b> tab's <b>Mode</b> group switches what the right-hand panel is for, one mode at a time: <b>Tiles</b> (editing: the Tiles, Cell, History, Layers and Map panels), <b>Walkability</b> (<kbd>W</kbd>), <b>Automap</b> (<kbd>A</kbd>), <b>Level light</b> (<kbd>Shift</kbd>+<kbd>L</kbd>) and <b>Roof hiding</b> (<kbd>H</kbd>). Each mode draws its view on the map and replaces the side panels with only its own options; <b>Done</b> at the top of the panel (or the mode's button or key again) goes back to Tiles. The <b>Show</b> group's overlays (grid, rooms, minimap, sprites, markers, As if inside) are not modes: they work in any mode.</p>
+  <p id="s-modes"><b>View modes.</b> The <b>View</b> tab's <b>Mode</b> group switches what the right-hand panel is for, one mode at a time: <b>Tiles</b> (editing: the Tiles, Cell, History, Layers and Map panels), <b>Walkability</b> (<kbd>W</kbd>), <b>Automap</b> (<kbd>A</kbd>), <b>Level light</b> (<kbd>Shift</kbd>+<kbd>L</kbd>) and <b>Roof hiding</b> (<kbd>H</kbd>). Each mode draws its view on the map and replaces the side panels with only its own options; <b>Done</b> at the top of the panel (or the mode's button or key again) goes back to Tiles. <kbd>Tab</kbd> steps through the views in turn (Tiles, Walkability, Automap, Level light, Roof hiding) and <kbd>Shift</kbd>+<kbd>Tab</kbd> goes back. The <b>Show</b> group's overlays (grid, rooms, minimap, sprites, markers, As if inside) are not modes: they work in any mode.</p>
   <figure><img src="img/ribbon-view.png" alt="The View ribbon" /><figcaption>The View ribbon: Navigate, Mode (one at a time), Show (overlays), Colours and Picture.</figcaption></figure>
   <figure class="medium"><img src="img/mode-light.png" alt="Level light mode" /><figcaption>View → Level light on the Worldstone Chamber (Intensity 40): the side panel holds only the light's settings.</figcaption></figure>
   <div class="pair">
@@ -326,7 +326,7 @@
     <tr><td>Paint</td><td><kbd>B</kbd></td><td>Paints the tile chosen in the <a href="#s-palette">Tiles panel</a> on the active layer.</td></tr>
     <tr><td>Erase</td><td><kbd>E</kbd></td><td>Clears cells on the active layer.</td></tr>
     <tr><td>Pick</td><td><kbd>I</kbd></td><td>Click a tile on the map to paint with it.</td></tr>
-    <tr><td>Objects</td><td><kbd>O</kbd></td><td>Select, move, add and delete objects and NPCs (<a href="#ch-objects">chapter 4</a>). <kbd>Tab</kbd> switches between tile and object editing.</td></tr>
+    <tr><td>Objects</td><td><kbd>O</kbd></td><td>Select, move, add and delete objects and NPCs (<a href="#ch-objects">chapter 4</a>). <kbd>Shift</kbd>+<kbd>O</kbd> switches between tile and object editing.</td></tr>
   </table>
   <p>The <b>Active layer</b> list chooses which layer Paint, Erase, Fill and Clear work on. Floors take floor tiles; wall layers take walls, roofs, lower walls, trees, objects and special tiles.</p>
 
@@ -418,7 +418,7 @@
     <figure><img src="img/resize.png" alt="Resizing" /><figcaption>Map → Resize: drag the handles on the edges.</figcaption></figure>
     <figure><img src="img/new-map.png" alt="New map" /><figcaption>Map → New map.</figcaption></figure>
   </div>
-  <p><b>Map → Resize</b> shows handles on the four edges: drag them to add or remove cells (objects move with the cells). <b>Resize…</b> does it by numbers. <b>Map → New map</b> creates an empty map for a level type, size, act and number of layers; it's saved where <i>Save path</i> says. Use <a href="#s-addgame">Add to game</a> to make the game load it.</p>
+  <p><b>Map → Resize</b> shows handles on the four edges: drag them to add or remove cells (objects move with the cells). <b>Resize…</b> does it by numbers. When the map is a whole level of its own, saving it after a resize also sets that level's size in Levels.txt (SizeX/SizeY, all difficulties) to match: the game stops with an error building a level whose map isn't its size. <b>Map → New map</b> creates an empty map for a level type, size, act and number of layers; it's saved where <i>Save path</i> says. Use <a href="#s-addgame">Add to game</a> to make the game load it.</p>
 </section>
 
 <!-- ============================================================ 4 OBJECTS -->
@@ -428,14 +428,14 @@
 
   <h2 id="s-gallery"><span class="num">4.1</span>Placing from the gallery</h2>
   <ol class="steps">
-    <li>Switch to <b>Objects</b> (<kbd>O</kbd>, or <kbd>Tab</kbd> from a tile tool).</li>
+    <li>Switch to <b>Objects</b> (<kbd>O</kbd>, or <kbd>Shift</kbd>+<kbd>O</kbd> from a tile tool).</li>
     <li>In <b>Objects &amp; NPCs</b>, filter by <i>NPCs</i> or <i>Objects</i> or type a name; every one is shown with its sprite.</li>
     <li>Click one, then click the map to place it. Keep clicking to place more; <kbd>Esc</kbd> stops.</li>
   </ol>
   <p>The list is the act's placeable objects and NPCs, worked out from the game's own tables (and your mod's).</p>
 
   <h2 id="s-editobj"><span class="num">4.2</span>Moving and editing objects</h2>
-  <p>In object mode, drag an object to move it; <kbd>Delete</kbd> removes the selected one. The <b>Preview</b> panel animates the selected object in every direction. The <b>Object</b> panel edits its type, id, position, flags and its NPC path (the points an NPC walks between).</p>
+  <p>In object mode, drag an object to move it; <kbd>Delete</kbd> removes the selected one. <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selected object onto the cursor, shown in <b>green</b>; <kbd>Ctrl</kbd>+<kbd>X</kbd> cuts it, taking it off the map and showing it in <b>red</b>. Click the map to put it down (an NPC's path moves with it); <kbd>Ctrl</kbd>+<kbd>V</kbd> brings it back for another copy, and <kbd>Esc</kbd> drops it from the cursor. The <b>Preview</b> panel animates the selected object in every direction. The <b>Object</b> panel edits its type, id, position, flags and its NPC path (the points an NPC walks between).</p>
 
   <h2 id="s-inmap"><span class="num">4.3</span>“In this map”: find any object</h2>
   <div class="pair">
@@ -740,7 +740,7 @@
         <tr><td>Erase tool</td><td><kbd>E</kbd></td></tr>
         <tr><td>Pick tool</td><td><kbd>I</kbd></td></tr>
         <tr><td>Objects tool</td><td><kbd>O</kbd></td></tr>
-        <tr><td>Toggle tiles / objects editing</td><td><kbd>Tab</kbd></td></tr>
+        <tr><td>Toggle tiles / objects editing</td><td><kbd>Shift</kbd>+<kbd>O</kbd></td></tr>
       </table>
       <h3>File and edit</h3>
       <table>
@@ -757,6 +757,7 @@
     <div>
       <h3>View</h3>
       <table>
+        <tr><td>Next / previous view</td><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td></tr>
         <tr><td>Fit map</td><td><kbd>F</kbd></td></tr>
         <tr><td>Game view</td><td><kbd>Z</kbd></td></tr>
         <tr><td>Grid</td><td><kbd>G</kbd></td></tr>
