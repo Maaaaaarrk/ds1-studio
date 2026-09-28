@@ -58,7 +58,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
+import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
@@ -79,6 +79,7 @@ import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, ty
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, modeOf, oneMode, TOOLS, withMode, type Tool, type ViewMode, type Visibility } from './state';
 import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
+import { ClipboardPanel } from './ClipboardPanel';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
@@ -282,6 +283,8 @@ export function App() {
   const [stack, setStack] = useState<{ items: DrawItem[]; index: number; anchor?: [number, number] } | null>(null);
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
+  /** The Copied panel: from a copy or cut until Esc. */
+  const [clipPane, setClipPane] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
   const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
@@ -659,6 +662,24 @@ export function App() {
     return { popTargetCells: cells, popAreaTargets: perArea };
   }, [map, popAreas]);
   /**
+   * Whether a cell's tile is on screen: its layer is shown in Layers, and it isn't one of the tiles As if inside hides.
+   * Copy, cut and clearing everything take what you see, so the roof over a floor you copy stays where it is.
+   */
+  const cellShown = useCallback(
+    (layer: LayerRef, x: number, y: number, cell: TileCell | WallCell) => {
+      if (layer.kind === 'floor') return visibility.floors[layer.index] ?? true;
+      if (layer.kind === 'shadow') return visibility.shadows;
+      if (!(visibility.walls[layer.index] ?? true)) return false;
+      const o = (cell as WallCell).orientation;
+      if (o === Orientation.Roof && !visibility.roofs) return false;
+      if (o >= Orientation.LowerWallsEquivalentToLeftWall && !visibility.lowerWalls) return false;
+      if ((o === Orientation.SpecialTile1 || o === Orientation.SpecialTile2) && !visibility.specials) return false;
+      return !(visibility.popsInside && popTargetCells.has(`${layer.index}:${x}:${y}`));
+    },
+    [visibility, popTargetCells],
+  );
+
+  /**
    * Whether a click can land on a tile of this kind/layer/cell: in a hide area only one side of the building is in
    * reach. "As if inside" hides the tiles that fade, so clicks go through to the floors and walls inside; otherwise
    * the roof is on top, so the floors under it can't be picked or selected through it.
@@ -997,15 +1018,38 @@ export function App() {
         // One tile of a stack (Shift+wheel): just its layer, no objects.
         setClipboard({ ...clip, layers: clip.layers.filter((l) => layerKey(l.layer) === layerKey(onlyLayer)), objects: undefined });
         if (cut && doc.apply(clearEdits(doc, selection, [onlyLayer]))) bump();
-        notify(`${cut ? 'Cut' : 'Copied'} ${layerLabel(onlyLayer)} only`);
+        notify(`${cut ? 'Cut' : 'Copied'} ${layerLabel(onlyLayer)} only · move over the map to preview, click to paste, Esc when done`);
+        setClipPane(true);
+        setPasting(true);
         return;
       }
-      setClipboard(clip);
-      const objects = clip.objects?.length ?? 0;
+      // Only what is on screen: tiles hidden by As if inside or switched off in Layers stay behind.
+      let left = 0;
+      const shown = {
+        ...clip,
+        layers: clip.layers
+          .map(({ layer, cells }) => ({
+            layer,
+            cells: cells.map((c, i) => {
+              if (isEmptyCell(c) || cellShown(layer, selection.x0 + (i % clip.width), selection.y0 + Math.floor(i / clip.width), c)) return c;
+              left++;
+              return layer.kind === 'wall' ? { ...EMPTY_CELL, orientation: 0, orientationHigh: 0 } : EMPTY_CELL;
+            }),
+          }))
+          .filter((l) => l.cells.some((c) => !isEmptyCell(c))),
+      };
+      setClipboard(shown);
+      const objects = shown.objects?.length ?? 0;
       if (cut) clearArea(selection, true, `Cut ${size}`);
-      notify(`${cut ? 'Cut' : 'Copied'} ${size} cells (all layers${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${cut ? ': paste to move them' : ''}`);
+      const layerNames = shown.layers.map((l) => layerLabel(l.layer)).join(', ') || 'nothing visible';
+      notify(
+        `${cut ? 'Cut' : 'Copied'} ${size} (${layerNames}${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${left ? ` · ${left} hidden tile${left === 1 ? '' : 's'} left out` : ''} · move over the map to preview, click to paste, Esc when done`,
+      );
+      // Straight into pasting: the copied block follows the mouse to show where it would go.
+      setClipPane(true);
+      setPasting(true);
     },
-    [doc, selection, notify, onlyLayer], // eslint-disable-line react-hooks/exhaustive-deps
+    [doc, selection, notify, onlyLayer, cellShown], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
   const [pasteOffer, setPasteOffer] = useState<{ clip: Clipboard; tiles: number; different: number; dt1s: string[]; label: string } | null>(null);
@@ -1034,7 +1078,8 @@ export function App() {
    */
   function clearArea(r: CellSelection, everything: boolean, label: string) {
     if (!doc) return;
-    const edits = clearEdits(doc, r, everything ? doc.layers() : [activeLayer]);
+    // Clearing everything takes what is on screen (see cellShown); the active layer is cleared as it is.
+    const edits = clearEdits(doc, r, everything ? doc.layers() : [activeLayer]).filter((e) => !everything || cellShown(e.layer, e.x, e.y, doc.cell(e.layer, e.x, e.y)));
     const inside = everything ? doc.ds1.objects.filter((o) => objectInRect(o, r)).length : 0;
     if (!inside) {
       if (doc.apply(edits, label)) bump();
@@ -2180,6 +2225,14 @@ export function App() {
         setMarks(undefined);
         paintAnchor.current = null;
         setPaintRect(null);
+        // After a copy, Esc stops pasting, closes the Copied panel and deselects: back to normal.
+        if (clipPane) {
+          setClipPane(false);
+          setPasting(false);
+          setSelection(null);
+          setStack(null);
+          return;
+        }
         // First Esc frees the cursor: a paste / preset, an object to place, or the tile being painted with.
         if (pasting || placing || (brush && tool === 'paint')) {
           setPasting(false);
@@ -2222,7 +2275,7 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu };
   useEffect(() => {
@@ -2843,6 +2896,22 @@ export function App() {
         )}
         {map && scene && doc && viewMode === 'tiles' && (
           <>
+            {clipPane && clipboard && (
+              <ClipboardPanel
+                clip={clipboard}
+                lib={map.lib}
+                palette={map.palette}
+                pasting={pasting}
+                canSave={canWrite}
+                defaultName={`${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} ${clipboard.width}×${clipboard.height}`}
+                onPaste={startPaste}
+                onSavePreset={savePreset}
+                onClose={() => {
+                  setClipPane(false);
+                  setPasting(false);
+                }}
+              />
+            )}
             {tool === 'object' && (
               <section className="panel object-preview-panel">
                 <div className="panel-header static">

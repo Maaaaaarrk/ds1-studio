@@ -215,7 +215,7 @@ async function ribbonTab(label) {
   await button(label);
 }
 
-const helpers = { chooseFile, sleep, js, waitFor, press, keyDown, keyUp, click, drag, wheel, button, openMap, viewport, rect, shot, gif, closeDialogs, ribbonTab, W, H };
+const helpers = { chooseFile, sleep, js, waitFor, press, keyDown, keyUp, mouse, click, drag, wheel, button, openMap, viewport, rect, shot, gif, closeDialogs, ribbonTab, W, H };
 
 // --- Scenes ------------------------------------------------------------------------------------------------------
 // SCENES=<file> runs another scene file (e.g. for QA) instead of the docs scenes.

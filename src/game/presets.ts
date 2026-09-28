@@ -103,6 +103,19 @@ export function presetFromSelection(doc: MapDocument, lib: TileLibrary, r: CellS
   return capturePreset(doc.ds1, lib, r, name, category, selectionMask(r) ?? undefined);
 }
 
+/** A copied block (the clipboard) as a preset: its layers with anything in them, and its objects. */
+export function presetFromClipboard(clip: Clipboard, lib: TileLibrary, name: string, category: string): Preset {
+  const layers: Preset['layers'] = clip.layers
+    .map(({ layer, cells }) => ({
+      kind: layer.kind,
+      index: layer.index,
+      cells: cells.map(encodeCell),
+      ...(layer.kind === 'wall' ? { orientations: cells.map((c) => (c as WallCell).orientation ?? 0) } : {}),
+    }))
+    .filter((l) => l.cells.some((v) => v !== 0));
+  return { format: 'ds1studio-preset', version: 1, id: newId(), name, category, width: clip.width, height: clip.height, dt1s: dt1sOf(lib, layers), layers, objects: clip.objects ?? [] };
+}
+
 /** A preset as a clipboard for the paste tool (cells + objects). */
 export function presetToClipboard(p: Preset): Clipboard {
   return {

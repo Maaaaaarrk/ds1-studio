@@ -67,7 +67,7 @@ function renderPreset(p: Preset, lib: TileLibrary, palette: Palette): string | n
   return canvas.toDataURL();
 }
 
-const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: { preset: Preset; lib: TileLibrary; palette: Palette }) {
+export const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: { preset: Preset; lib: TileLibrary; palette: Palette }) {
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     const key = `${preset.id}:${preset.foundIn ?? ''}`;
