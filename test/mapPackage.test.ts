@@ -243,6 +243,33 @@ describe.runIf(hasD2)('map packages over the real game data', async () => {
     expect(same.txtWrites.some((w) => w.path === STRING_TABLES[0])).toBe(false);
   });
 
+  it('adds notes for developers: the tables as they are, the map rows with their line numbers, and a README', async () => {
+    const { unzipSync, strFromU8 } = await import('fflate');
+    const { collectMapStrings } = await import('../src/game/mapPackage');
+    const gd = await GameData.load(vanilla);
+    const map = await openMap(gd, MAP);
+    const txtRows = await collectMapTxtRows(vanilla, MAP);
+    const strings = await collectMapStrings(vanilla, txtRows);
+    const built = await buildMapPackage(vanilla, { path: MAP, ds1: map.ds1, dt1Paths: map.resolution.paths }, { ds1Bytes: (await vanilla.read(MAP))!, txtRows, strings });
+    const zip = unzipSync(built.zip);
+    const readme = strFromU8(zip['for-developers/README.txt'], true);
+    // The town's Levels row is line Id + 2 (the header, then Id 0 on line 2), and its rows file has the header and it.
+    const levels = txtRows.find((r) => r.table === 'Levels')!;
+    const id = Number(levels.row[levels.columns.indexOf('Id')]);
+    const fullLevels = strFromU8(zip['for-developers/full/Levels.txt'], true).split(/\r?\n/);
+    const line = fullLevels.findIndex((l) => l.split('\t')[levels.columns.indexOf('Id')] === String(id) && l.startsWith(levels.row[0])) + 1;
+    expect(readme).toContain('== Levels.txt - 1 row');
+    expect(readme).toContain(`In full/Levels.txt the map's rows are line ${line}.`);
+    expect(readme).toMatch(/Where: Append at the end\. The game reads this table by row position/);
+    const rows = strFromU8(zip['for-developers/rows/Levels.txt'], true).split('\r\n');
+    expect(rows[0]).toBe(fullLevels[0]);
+    expect(rows[1]).toBe(fullLevels[line - 1]);
+    expect(zip['for-developers/rows/LvlPrest.txt']).toBeDefined();
+    expect(strFromU8(zip['for-developers/strings.txt'], true)).toContain('Rogue Encampment');
+    // DS1 Studio's own import leaves the folder alone.
+    expect(readMapPackage(built.zip).files.some((f) => f.path.startsWith('for-developers'))).toBe(false);
+  });
+
   it('can leave base-game DT1s out of the zip but lists them', async () => {
     const gd = await GameData.load(vanilla);
     const map = await openMap(gd, MAP);

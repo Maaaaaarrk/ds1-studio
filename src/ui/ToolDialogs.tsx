@@ -129,6 +129,10 @@ export function ExportPackageDialog({ mapPath, building, result, coverage, onBui
         libraries, custom object sprites, and its rows from the game's tables, so the game loads it the same way for them:
       </p>
       {coverage ? <TableCoverageList coverage={coverage} /> : <p className="muted small">Reading the tables…</p>}
+      <p className="muted small">
+        For a developer adding it by hand (no DS1 Studio needed), the zip also has a <span className="mono">for-developers</span> folder: your tables as they
+        are, just the map&apos;s rows of each, and a README saying which lines are the map&apos;s, where they go and which numbers link them.
+      </p>
       {missing.length > 0 && (
         <p className="small warn-text">
           This map has no {missing.join(', ')} rows in your tables{missing.includes('LvlPrest') ? ' (it has not been added to the game yet: Map → Add to game)' : ''}. Whoever imports it keeps

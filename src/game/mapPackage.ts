@@ -3,6 +3,7 @@ import type { Ds1 } from '../formats/ds1';
 import { COMPONENTS, parseCof } from '../formats/cof';
 import { parseTxt } from '../formats/txt';
 import { CLASSIC_MPQS, normalizePath, type LayeredFs } from '../vfs/vfs';
+import { buildDevGuide, DEV_FOLDER } from './devGuide';
 import { cofPath, layerPath, type SpriteSpec } from './sprites';
 import { automapLevelFor, type AutomapTable } from './automap';
 import { mergeMapRows } from './levelTables';
@@ -114,6 +115,8 @@ export interface BuildOptions {
   includeBaseGameDt1s?: boolean;
   /** Override for the manifest's `created` (tests). */
   created?: Date;
+  /** Add the for-developers folder (README, the tables as they are, the map's rows): default true. */
+  devGuide?: boolean;
 }
 
 export interface BuildResult {
@@ -250,6 +253,10 @@ export async function buildMapPackage(
   if (opts.strings && Object.keys(opts.strings).length) manifest.strings = { ...opts.strings };
   validateTxtRows(manifest.txtRows);
   validateStrings(manifest.strings);
+  if ((opts.devGuide ?? true) && manifest.txtRows.length) {
+    const guide = await buildDevGuide(fs, { mapPath, created: opts.created ?? new Date(), rows: manifest.txtRows, strings: manifest.strings, files: files.filter((f) => !f.omitted).map((f) => f.path) });
+    for (const g of guide) zipInput[g.path] = g.bytes;
+  }
   zipInput[MANIFEST_NAME] = strToU8(JSON.stringify(manifest, null, 2));
   return { zip: zipSync(zipInput, { level: 6 }), manifest, missing };
 }
@@ -327,6 +334,8 @@ export function readMapPackage(zip: Uint8Array): MapPackage {
       manifestBytes = bytes;
       continue;
     }
+    // Notes for developers who merge by hand: not game files.
+    if (name.startsWith(`${DEV_FOLDER}/`)) continue;
     const key = normalizePath(name);
     if (seen.has(key)) throw new Error(`package: duplicate file ${name}`);
     seen.add(key);
