@@ -65,6 +65,7 @@ precision highp float;
 precision highp sampler2DArray;
 uniform sampler2DArray uAtlas;
 uniform sampler2D uPalette;
+uniform vec3 uLight;               // the level's ambient light (Levels.txt Intensity × Red/Green/Blue), 1 = unlit
 in vec2 vTex;
 flat in vec4 vRect;
 flat in float vLayer;
@@ -114,6 +115,7 @@ void main() {
     }
     rgb = toSrgb(sum / hits);
   }
+  rgb *= uLight;
   // Output is premultiplied (blendFunc ONE, ONE_MINUS_SRC_ALPHA), so alpha 0 with colour means "add".
   if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45 * coverage); return; }
   if ((vFlags & 2) != 0) rgb = mix(rgb, vec3(1.0, 0.78, 0.3), 0.35);
@@ -240,6 +242,9 @@ export class MapRenderer {
     this.instanceCount = instances.length;
   }
 
+  /** Multiplies every drawn colour: the level's light when previewing it, else 1 (tiles as stored). */
+  light: [number, number, number] = [1, 1, 1];
+
   draw(camera: Camera, background: [number, number, number]): void {
     const gl = this.gl;
     const { width, height } = this.canvas;
@@ -261,6 +266,7 @@ export class MapRenderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
     gl.uniform1i(gl.getUniformLocation(this.program, 'uPalette'), 1);
+    gl.uniform3f(gl.getUniformLocation(this.program, 'uLight'), ...this.light);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.instanceCount);
     gl.bindVertexArray(null);

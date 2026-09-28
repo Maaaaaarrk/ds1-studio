@@ -31,6 +31,8 @@ export interface Visibility {
   /** Roof/wall hide areas ("pops"), and showing the map as if a player stood in them (their tiles hidden). */
   pops: boolean;
   popsInside: boolean;
+  /** Draw the map in its level's light (Levels.txt Intensity and Red/Green/Blue), as dark or tinted as in game. */
+  light: boolean;
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
@@ -53,6 +55,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   minimap: true,
   pops: false,
   popsInside: false,
+  light: false,
 };
 
 export const ORIENTATION_NAMES: Record<number, string> = {

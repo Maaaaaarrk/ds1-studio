@@ -68,7 +68,7 @@ import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, im
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
-import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, MapInfoPanel, MapObjectsPanel, SelectionPanel } from './panels';
+import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, TOOLS, type Tool, type Visibility } from './state';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
 import { ShortcutsDialog } from './ShortcutsDialog';
@@ -78,10 +78,10 @@ import { DataTables, type TableTarget } from './DataTables';
 import { Dt1Manager } from './Dt1Manager';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
-import { setPopSettings, syncLevelTables } from '../game/levelTables';
+import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
-import { parseTxtTable, serializeTxtTable } from '../formats/txtTable';
+import { getCell, parseTxtTable, serializeTxtTable } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
 import { AutomapEditor } from './AutomapEditor';
@@ -93,7 +93,7 @@ import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
 import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
-import { tilePathProblem } from '../game/addToGame';
+import { cellFix, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
@@ -141,6 +141,16 @@ function isSingleCell(r: CellRect): boolean {
 /** Orientation used when painting a brush on a layer kind. */
 /** A map's folder, shortened for lists ("act1/town"). */
 const folderOf = (path: string) => path.replace(/^data\/global\/tiles\//i, '').replace(/\/[^/]+$/, '');
+
+/** Compatibility-check questions answered "keep it" ("<map path>|<question key>"), in this browser/app's storage. */
+const KEPT_KEY = 'ds1studio.check.kept';
+function keptAnswers(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(KEPT_KEY) ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
 
 function brushOrientation(layer: LayerRef, brush: Brush): number {
   return layer.kind === 'floor' ? Orientation.Floor : layer.kind === 'shadow' ? Orientation.Shadow : brush.orientation;
@@ -267,6 +277,9 @@ export function App() {
   const [walkBusy, setWalkBusy] = useState(false);
   const [walkLast, setWalkLast] = useState<string | null>(null);
   const walkStroke = useRef<{ anchor: [number, number]; last: [number, number]; keys: Set<number>; rect: boolean; mode: 'block' | 'clear' } | null>(null);
+  /** The open map's level light (Levels.txt), and light values being tried out in the Map panel (not applied yet). */
+  const [levelLight, setLevelLight] = useState<LevelLight | null>(null);
+  const [lightDraft, setLightDraft] = useState<LevelLight | null>(null);
   /** Applies a finished walkability stroke (set below, once the table helpers it uses exist). */
   const applyWalkRef = useRef<((paint: WalkPaint) => Promise<void>) | null>(null);
   const selectAnchor = useRef<[number, number] | null>(null);
@@ -1103,6 +1116,23 @@ export function App() {
     return next;
   }, [gd, data, map]);
 
+  // The level's light, read again whenever the tables or the map change.
+  useEffect(() => {
+    const levelId = map?.resolution.preset?.levelId ?? 0;
+    if (!gd || !levelId) return setLevelLight(null);
+    let live = true;
+    void loadTable(gd.fs, 'Levels.txt').then((t) => {
+      if (!live) return;
+      const r = t ? rowOfRecord(t, levelId) : -1;
+      if (!t || r < 0) return setLevelLight(null);
+      const n = (c: string, empty: number) => (getCell(t, r, c).trim() === '' ? empty : Number(getCell(t, r, c)) || 0);
+      setLevelLight({ levelId, name: getCell(t, r, 'Name'), intensity: n('Intensity', 0), rgb: [n('Red', 255), n('Green', 255), n('Blue', 255)] });
+    });
+    return () => {
+      live = false;
+    };
+  }, [gd, map]);
+
   const applyTableWrites = useCallback(
     async (writes: TableWrite[]) => {
       try {
@@ -1631,7 +1661,8 @@ export function App() {
     } catch {
       // the automap check is optional
     }
-    setCheckResults(await checkMap(gd, map, scene, automap));
+    const kept = keptAnswers();
+    setCheckResults(await checkMap(gd, map, scene, automap, (key) => kept.has(`${normalizePath(map.path)}|${key}`)));
   }, [gd, map, scene, automapData, automapLevel]);
   const runCheckRef = useRef(runCheck);
   runCheckRef.current = runCheck;
@@ -1652,6 +1683,18 @@ export function App() {
             return setDialog('register');
           case 'automap-editor':
             return setDialog('automap');
+          case 'keep': {
+            // "Keep it as it is": remembered for this map, so the check doesn't ask again.
+            const kept = keptAnswers();
+            kept.add(`${normalizePath(map.path)}|${fix.key}`);
+            try {
+              localStorage.setItem(KEPT_KEY, JSON.stringify([...kept]));
+            } catch {
+              // storage unavailable: asked again next time
+            }
+            notify('Kept as it is. The check won’t ask again for this map.');
+            return recheck();
+          }
           case 'place-object':
             setDialog(null);
             setTool('object');
@@ -2295,6 +2338,7 @@ export function App() {
             pops={popView}
             walkMarks={walkMarks}
             walkBrush={visibility.walkable ? { size: walkBrush.size, mode: walkBrush.mode } : null}
+            light={visibility.light ? lightMultiplier(lightDraft ?? levelLight) : null}
           />
         ) : (
           <div className="empty-stage">
@@ -2558,7 +2602,33 @@ export function App() {
             />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
             <LayersPanel map={map} scene={scene} visibility={visibility} onChange={setVisibility} keys={kb} />
-            <MapInfoPanel map={map} gd={data.gd} onReopen={reresolve} onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)} />
+            <MapInfoPanel
+              map={map}
+              gd={data.gd}
+              onReopen={reresolve}
+              onPalette={(act) => void withPalette(data.gd, map, act).then(setMap)}
+              light={
+                levelLight && {
+                  value: levelLight,
+                  shown: visibility.light,
+                  canWrite,
+                  onShow: (on) => setVisibility((v) => ({ ...v, light: on })),
+                  onDraft: setLightDraft,
+                  onApply: async (intensity, rgb) => {
+                    const t = await loadTable(data.gd.fs, 'Levels.txt');
+                    const r = t ? rowOfRecord(t, levelLight.levelId) : -1;
+                    if (!t || r < 0) return notify('Levels.txt: the level was not found', true);
+                    const fix = cellFix('Levels.txt', t, 'Level light', [
+                      { row: r, col: 'Intensity', value: String(intensity) },
+                      { row: r, col: 'Red', value: String(rgb[0]) },
+                      { row: r, col: 'Green', value: String(rgb[1]) },
+                      { row: r, col: 'Blue', value: String(rgb[2]) },
+                    ]);
+                    await applyTableWrites(fix.writes);
+                  },
+                }
+              }
+            />
           </>
         )}
         </ErrorBoundary>

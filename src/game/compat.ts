@@ -44,6 +44,8 @@ export type Fix = { label: string } & (
   | { kind: 'place-object'; type: number; id: number }
   | { kind: 'set-act'; act: number }
   | { kind: 'automap-editor' }
+  /** Answers a check's question with "keep it as it is": remembered, so it isn't asked again. */
+  | { kind: 'keep'; key: string }
 );
 
 /**
@@ -93,7 +95,7 @@ async function table(gd: GameData, name: string): Promise<TxtTable | null> {
  * the map is reachable through LvlPrest/Levels/LvlTypes, it has entry/warp markers, and objects stand on walkable
  * ground. Pure read-only analysis; results are ordered errors first.
  */
-export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap?: { pieces: AutomapPiece[] }): Promise<CheckResult[]> {
+export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap?: { pieces: AutomapPiece[] }, kept?: (key: string) => boolean): Promise<CheckResult[]> {
   const out: CheckResult[] = [];
   const { ds1, lib } = map;
 
@@ -209,6 +211,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     if (p2 && l2 && t2)
       for (const issue of verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1, {
         entryImageExists: (name) => !!gd.fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`)),
+        kept,
       }))
         out.push({
           severity: issue.severity,
@@ -217,6 +220,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
           columns: issue.columns,
           area: issue.columns?.[0]?.table === 'Levels' ? 'Level' : 'Tables',
           fixes: [
+            ...(issue.keep ? [{ kind: 'keep' as const, label: issue.keep.label, key: issue.keep.key }] : []),
             ...(issue.fix ? [{ kind: 'table-write' as const, label: issue.fix.label, writes: issue.fix.writes }] : []),
             { kind: 'open-table' as const, label: `Open ${issue.columns?.[0]?.table ?? 'LvlPrest'}.txt`, table: `${issue.columns?.[0]?.table ?? 'LvlPrest'}.txt` },
           ],

@@ -729,3 +729,15 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .walk-legend-row { display: flex; align-items: center; gap: 8px; }
 .walk-legend-swatch { width: 20px; height: 10px; flex: none; }
 .walk-legend-note { color: var(--muted, #8a8f98); font-size: 10.5px; margin-top: 2px; }
+
+/* Tile palette: the enlarged preview of the tile under the pointer. */
+.tile-preview { position: fixed; z-index: 60; background: rgba(12, 13, 17, 0.97); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); pointer-events: none; display: flex; flex-direction: column; gap: 4px; }
+.tile-preview-title { font-weight: 600; font-size: 12px; }
+.tile-preview-img { image-rendering: pixelated; align-self: center; background: repeating-conic-gradient(#1b1e24 0 25%, #14161b 0 50%) 0 0 / 16px 16px; }
+.tile-preview-line { font-size: 11px; color: var(--muted, #8a8f98); }
+
+/* Map panel: the level's light. */
+.level-light { margin: 8px 0; }
+.light-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.light-row input[type='range'] { flex: 1; }
+.light-row input[type='color'] { width: 34px; height: 20px; padding: 0; border: 1px solid var(--border); background: none; }

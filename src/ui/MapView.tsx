@@ -92,6 +92,8 @@ interface Props {
    * report every new sub-tile the cursor reaches (not just new cells).
    */
   walkBrush?: { size: 1 | 3 | 5 | 'cell'; mode: 'block' | 'clear' } | null;
+  /** Draw the map in this light (multiplies every colour), or as stored when null. */
+  light?: [number, number, number] | null;
 }
 
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
@@ -220,6 +222,7 @@ export function MapView(props: Props) {
       }
       if (!dirty.current) return;
       dirty.current = false;
+      renderer.current!.light = latest.current.light ?? [1, 1, 1];
       renderer.current!.draw(camera.current, BACKGROUND);
       drawOverlay(overlay.current!, camera.current, latest.current);
       minimapDraw.current?.();
@@ -339,7 +342,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush]);
+  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light]);
 
   // Input.
   useEffect(() => {

@@ -116,6 +116,31 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect(getCell(parseTxtTable(missing.fix!.writes[0].bytes), P, 'LevelId')).toBe('38');
   });
 
+  it('asks whether a quest should lock the level (Rite of Passage: keep it for maps), once', async () => {
+    const { setCell } = await import('../src/formats/txtTable');
+    const rel = 'Act1/Tristram/Tri_Town4.ds1';
+    const ds1 = await ds1Of(rel);
+    const L = rowOfRecord(tables.levels, 38);
+    const levels = setCell(setCell(tables.levels, L, 'QuestFlag', '39'), L, 'QuestFlagEx', '39');
+    const ask = verifyInGame({ ...tables, levels }, rel, ds1).find((i) => /Rite of Passage/.test(i.title))!;
+    expect(ask.title).toBe('Should players have to finish Rite of Passage (the Ancients) before entering this map?');
+    expect(ask.detail).toMatch(/for a typical map, keep it/);
+    expect(ask.keep).toEqual({ key: 'quest:38:39', label: 'Yes, keep it (usual for maps)' });
+    const removed = parseTxtTable(ask.fix!.writes[0].bytes);
+    expect([getCell(removed, L, 'QuestFlag'), getCell(removed, L, 'QuestFlagEx')]).toEqual(['', '']);
+    // Answered "keep": not asked again, only noted (removing stays possible).
+    const kept = verifyInGame({ ...tables, levels }, rel, ds1, { kept: (k) => k === 'quest:38:39' }).find((i) => /Rite of Passage/.test(i.title))!;
+    expect(kept.title).toMatch(/you chose to keep this/);
+    expect(kept.keep).toBeUndefined();
+    // The game's own quest-locked levels use the quests these names say.
+    const { QUEST_NAMES } = await import('../src/game/addToGame');
+    const names = dataRows(tables.levels).map((r) => [getCell(tables.levels, r, 'Name'), QUEST_NAMES[num(getCell(tables.levels, r, 'QuestFlag'))]]).filter(([, q]) => q);
+    expect(names).toContainEqual(['Act 5 - Baal Temple 1', 'Rite of Passage (the Ancients)']);
+    expect(names).toContainEqual(['Act 2 - Valley of the Kings', 'The Summoner']);
+    expect(names).toContainEqual(['Act 1 - Moo Moo Farm', "Terror's End (Diablo)"]);
+    expect(names).toContainEqual(['Act 3 - Mephisto 1', 'The Blackened Temple']);
+  });
+
   it('flags AutoMap 1 on a level that is not a town (it crashes the game on entry), with a fix', async () => {
     const { setCell } = await import('../src/formats/txtTable');
     const rel = 'Act1/Tristram/Tri_Town4.ds1';

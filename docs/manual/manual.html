@@ -285,6 +285,7 @@
     <figure><img src="../media/rooms.png" alt="Rooms" /><figcaption><b>Rooms 8×8</b> (<kbd>R</kbd>) and <b>Grid</b> (<kbd>G</kbd>): the rooms the game builds levels from, and the cell grid.</figcaption></figure>
   </div>
   <p><b>Automap</b> (<kbd>A</kbd>) draws the in-game automap over the map, as players will see it (<a href="#s-automap">see The automap</a>).</p>
+  <p><b>Level light</b> (Layers panel) draws the map as brightly and in the colour the game lights its level: Levels.txt's <code>Intensity</code> (1-255) and <code>Red</code>/<code>Green</code>/<code>Blue</code>; 0 means the act's own daylight, as towns and outdoor levels use. The <b>Map</b> panel shows and changes them (<b>Level light</b>: slider, colour, <b>Apply to Levels.txt</b>), previewing while you move the slider. In game the player's own light radius also brightens the area around them.</p>
 
   <h2 id="s-gameview"><span class="num">2.5</span>Game view</h2>
   <figure class="medium"><img src="../media/game-view.png" alt="Game view" /><figcaption>Game view: the 800×600 screen around the selection.</figcaption></figure>
@@ -337,6 +338,7 @@
         <li><b>Right-click</b> a tile to <b>pin</b> it (★) to the strip at the top; <b>Recent</b> lists what you used last. Both are remembered per tile set (level type).</li>
         <li>The drop-down shows one DT1 at a time; on wall layers the chips filter walls, objects, roofs, lower walls and special tiles; the box finds a tile by <i>main/sub</i> number.</li>
         <li><kbd>Ctrl</kbd>+wheel over the panel zooms the thumbnails.</li>
+        <li><b>Rest the pointer</b> on a tile for an enlarged view of it beside the panel (crisp pixels, up to 3×) with its size, variants, source DT1 and what clicking does. Thumbnails and this view are shown a little brighter than the game's dark palettes; the map and the files are unchanged.</li>
       </ul>
     </div>
   </div>

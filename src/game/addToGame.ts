@@ -442,7 +442,18 @@ export interface TableIssue {
   columns?: { table: string; col: string }[];
   /** A safe one-click fix: the table(s) as they should be. */
   fix?: TableFix;
+  /** A question the map maker answers once: this answer ("keep it as it is") is remembered under `key`. */
+  keep?: { key: string; label: string };
 }
+
+/** Quest names by the number Levels.txt's QuestFlag uses (the game's quest state ids). */
+export const QUEST_NAMES: Record<number, string> = {
+  1: 'Den of Evil', 2: "Sisters' Burial Grounds", 3: 'Tools of the Trade', 4: 'The Search for Cain', 5: 'The Forgotten Tower', 6: 'Sisters to the Slaughter (Andariel)',
+  9: "Radament's Lair", 10: 'The Horadric Staff', 11: 'The Tainted Sun', 12: 'The Arcane Sanctuary', 13: 'The Summoner', 14: 'The Seven Tombs (Duriel)',
+  17: "Lam Esen's Tome", 18: "Khalim's Will", 19: 'The Blade of the Old Religion', 20: 'The Golden Bird', 21: 'The Blackened Temple', 22: 'The Guardian (Mephisto)',
+  25: 'The Fallen Angel', 26: "Terror's End (Diablo)", 27: "Hell's Forge",
+  35: 'Siege on Harrogath', 36: 'Rescue on Mount Arreat', 37: 'Prison of Ice', 38: 'Betrayal of Harrogath', 39: 'Rite of Passage (the Ancients)', 40: 'Eve of Destruction (Baal)',
+};
 
 export interface TableFix {
   label: string;
@@ -525,7 +536,7 @@ export function verifyInGame(
   mapRel: string,
   ds1: { width: number; height: number },
   /** Whether a loading-screen image exists (ENTRY_IMAGE_DIR + name + .dc6); without it only empty EntryFiles are flagged. */
-  opts: { entryImageExists?: (entryFile: string) => boolean } = {},
+  opts: { entryImageExists?: (entryFile: string) => boolean; /** Questions already answered "keep it" (TableIssue.keep). */ kept?: (key: string) => boolean } = {},
 ): TableIssue[] {
   const { prest, levels, types } = tables;
   const out: TableIssue[] = [];
@@ -663,18 +674,31 @@ export function verifyInGame(
         columns: [{ table: 'Levels', col: 'Pal' }],
         fix: cellFix('Levels.txt', levels, `Set Pal to ${tilesAct} (Act ${tilesAct + 1} colours)`, [{ row: lRow, col: 'Pal', value: String(tilesAct) }]),
       });
-    const quest = getCell(levels, lRow, 'QuestFlag').trim();
-    if (quest && quest !== '0')
-      out.push({
-        severity: 'info',
-        title: `Level ${levelId} needs quest flag ${quest} to enter`,
-        detail: 'Players can only enter after that quest (a level copied from another one keeps its requirement). Fine if intended.',
-        columns: [{ table: 'Levels', col: 'QuestFlag' }],
-        fix: cellFix('Levels.txt', levels, 'Remove the quest requirement', [
-          { row: lRow, col: 'QuestFlag', value: '' },
-          { row: lRow, col: 'QuestFlagEx', value: '' },
-        ]),
-      });
+    // A quest the level is locked behind: a question for the map maker, asked once. Every map level of the game's
+    // endgame (Worldstone Keep) and of PD2 needs Rite of Passage, so that's the usual answer for a map.
+    const quest = num(getCell(levels, lRow, 'QuestFlag'));
+    if (quest) {
+      const key = `quest:${levelId}:${quest}`;
+      const name = QUEST_NAMES[quest] ?? `quest ${quest}`;
+      const remove = cellFix('Levels.txt', levels, 'No, remove it (special areas only)', [
+        { row: lRow, col: 'QuestFlag', value: '' },
+        { row: lRow, col: 'QuestFlagEx', value: '' },
+      ]);
+      if (opts.kept?.(key))
+        out.push({ severity: 'info', title: `Players need ${name} done to enter (you chose to keep this)`, columns: [{ table: 'Levels', col: 'QuestFlag' }], fix: remove });
+      else
+        out.push({
+          severity: 'info',
+          title: `Should players have to finish ${name} before entering this map?`,
+          detail:
+            quest === 39
+              ? "The level is locked until a character has beaten the three Ancients on Mount Arreat (the Rite of Passage quest) in that difficulty. The game's own Worldstone Keep and every PD2 map work this way, so for a typical map, keep it. Only remove it for a special area everyone should reach earlier: a town, a guild hall, a meeting place."
+              : `The level is locked until a character has finished ${name} in that difficulty (a level copied from another one keeps its requirement). Keep it if that's intended; remove it for an area everyone should reach.`,
+          columns: [{ table: 'Levels', col: 'QuestFlag' }],
+          fix: remove,
+          keep: { key, label: quest === 39 ? 'Yes, keep it (usual for maps)' : 'Yes, keep it' },
+        });
+    }
     // The loading screen (see ENTRY_IMAGE_DIR): an Act 5 level whose image the game can't open crashes while loading.
     const entry = getCell(levels, lRow, 'EntryFile').trim();
     const noImage = !entry ? 'empty' : opts.entryImageExists && !opts.entryImageExists(entry) ? 'missing' : null;

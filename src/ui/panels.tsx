@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { decodeCell, isEmptyCell, withFields, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { PALETTE_NAMES } from '../formats/palette';
@@ -78,6 +78,7 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
         <Toggle label="Rooms (8×8)" hotkey={keys['view.rooms']} swatch="rgb(90,200,255)" checked={v.rooms} onChange={(x) => set({ rooms: x })} />
         <Toggle label="Grid" hotkey={keys['view.grid']} checked={v.grid} onChange={(x) => set({ grid: x })} />
         <Toggle label="Walkability" hotkey={keys['view.walkable']} swatch="linear-gradient(90deg, rgb(255,176,40) 50%, rgb(255,60,70) 50%)" checked={v.walkable} onChange={(x) => set({ walkable: x })} />
+        <Toggle label="Level light" swatch="linear-gradient(90deg, #2a2a2a, #d8c9a0)" checked={v.light} onChange={(x) => set({ light: x })} />
         {scene.animated && <Toggle label="Animate floors" checked={v.animate} onChange={(x) => set({ animate: x })} />}
       </div>
       <p className="muted small">
@@ -575,7 +576,86 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
   );
 }
 
-export function MapInfoPanel({ map, gd, onReopen, onPalette }: { map: OpenMap; gd: GameData; onReopen: (o?: MapOverride) => void; onPalette: (act: number) => void }) {
+/** The open map's level light (Levels.txt), for the Map panel. */
+export interface LevelLight {
+  levelId: number;
+  name: string;
+  /** 0 = the act's own daylight (towns and outdoor levels); else a fixed light level 1-255. */
+  intensity: number;
+  rgb: [number, number, number];
+}
+
+/** Levels.txt light as a colour multiplier (null = daylight, drawn as stored). */
+export function lightMultiplier(l: LevelLight | null): [number, number, number] | null {
+  if (!l || !l.intensity) return null;
+  return l.rgb.map((c) => (l.intensity / 255) * (c / 255)) as [number, number, number];
+}
+
+const toHex = (rgb: [number, number, number]) => `#${rgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+
+/** The level's light: how bright and what colour the game lights it, previewable on the map and editable. */
+function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDraft }: { light: LevelLight; shown: boolean; canWrite: boolean; onShow: (on: boolean) => void; onApply: (intensity: number, rgb: [number, number, number]) => Promise<void>; onDraft: (d: LevelLight | null) => void }) {
+  const [intensity, setIntensity] = useState(light.intensity);
+  const [rgb, setRgb] = useState(light.rgb);
+  const [busy, setBusy] = useState(false);
+  const key = `${light.levelId}:${light.intensity}:${light.rgb.join(',')}`;
+  const [seen, setSeen] = useState(key);
+  if (seen !== key) {
+    // Reloaded from the tables (another map, or just applied): start from them again.
+    setSeen(key);
+    setIntensity(light.intensity);
+    setRgb(light.rgb);
+  }
+  const changed = intensity !== light.intensity || rgb.some((c, i) => c !== light.rgb[i]);
+  // Values being tried out (not applied yet) show on the map while previewing.
+  useEffect(() => onDraft(changed ? { ...light, intensity, rgb } : null), [changed, intensity, rgb.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onDraft(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="level-light">
+      <div className="field-label">
+        <span>
+          Level light <HelpTip text="How brightly the game lights this level (Levels.txt Intensity, 1-255) and in what colour (Red/Green/Blue). 0 means the act's own daylight, as towns and outdoor levels use. In game the player's own light radius also brightens the area around them, so the preview is how the level looks away from the player." />
+        </span>
+        <span className="muted small">level {light.levelId}</span>
+      </div>
+      <label className="mini-check">
+        <input type="checkbox" checked={shown} onChange={(e) => onShow(e.target.checked)} /> Preview on the map
+      </label>
+      <div className="light-row">
+        <span className="small">Intensity</span>
+        <input type="range" min={0} max={255} value={intensity} onChange={(e) => setIntensity(Number(e.target.value))} />
+        <span className="small mono">{intensity || 'daylight'}</span>
+      </div>
+      <div className="light-row">
+        <span className="small">Colour</span>
+        <input type="color" value={toHex(rgb)} onChange={(e) => setRgb(fromHex(e.target.value))} />
+        <span className="small mono">{rgb.join(', ')}</span>
+      </div>
+      {changed && (
+        <div className="light-row">
+          <button
+            className="btn small"
+            disabled={!canWrite || busy}
+            title={canWrite ? 'Write Intensity, Red, Green and Blue into Levels.txt' : 'No writable mod folder'}
+            onClick={async () => {
+              setBusy(true);
+              await onApply(intensity, rgb);
+              setBusy(false);
+            }}
+          >
+            {busy ? 'Saving…' : 'Apply to Levels.txt'}
+          </button>
+          <button className="btn small" onClick={() => (setIntensity(light.intensity), setRgb(light.rgb))}>
+            Reset
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MapInfoPanel({ map, gd, onReopen, onPalette, light }: { map: OpenMap; gd: GameData; onReopen: (o?: MapOverride) => void; onPalette: (act: number) => void; light?: { value: LevelLight; shown: boolean; canWrite: boolean; onShow: (on: boolean) => void; onApply: (intensity: number, rgb: [number, number, number]) => Promise<void>; onDraft: (d: LevelLight | null) => void } | null }) {
   const { ds1, resolution: r, lib } = map;
   const sourceText = {
     lvlprest: 'from LvlPrest.txt',
@@ -635,6 +715,8 @@ export function MapInfoPanel({ map, gd, onReopen, onPalette }: { map: OpenMap; g
           ))}
         </select>
       </div>
+
+      {light && <LevelLightEditor light={light.value} shown={light.shown} canWrite={light.canWrite} onShow={light.onShow} onApply={light.onApply} onDraft={light.onDraft} />}
 
       <div className="field-label">
         Tile libraries <span className="muted small">{lib.loaded.length}</span>

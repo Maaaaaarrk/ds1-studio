@@ -1,4 +1,5 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { decodeTile, Orientation, type Dt1Tile } from '../formats/dt1';
 import type { Palette } from '../formats/palette';
 import type { TileLibrary } from '../game/GameData';
@@ -28,6 +29,7 @@ const sameBrush = (a: Brush, b: Brush) => a.orientation === b.orientation && a.m
 /** A strip of small tile buttons (recent / favourite tiles). */
 function TileStrip({ label, list, lib, palette, layerKind, brush, onPick, onToggleFavourite, favourites }: { label: string; list: Brush[]; lib: TileLibrary; palette: Palette; layerKind: LayerKind; brush: Brush | null; onPick: Props['onPick']; onToggleFavourite?: (b: Brush) => void; favourites: Brush[] }) {
   const shown = list.filter((b) => fitsLayer(layerKind, b.orientation)).map((b) => ({ b, tile: lib.pick(b.orientation, b.main, b.sub, 0) })).filter((x) => x.tile);
+  const [preview, hover] = usePreview();
   if (!shown.length) return null;
   return (
     <div className="tile-strip">
@@ -37,7 +39,11 @@ function TileStrip({ label, list, lib, palette, layerKind, brush, onPick, onTogg
           <button
             key={`${b.orientation}:${b.main}:${b.sub}`}
             className={`thumb mini${brush && sameBrush(brush, b) ? ' active' : ''}`}
-            title={`${b.main}/${b.sub}${layerKind === 'wall' ? ` · o${b.orientation}` : ''} · click to paint, Ctrl+click to add to the mix, right-click to ${favourites.some((f) => sameBrush(f, b)) ? 'unpin' : 'pin'}`}
+            {...hover(() => ({
+              tile: tile!,
+              title: `${ORIENTATION_NAMES[b.orientation] ?? `o${b.orientation}`} · main ${b.main} · sub ${b.sub}`,
+              lines: [`Click: paint · Ctrl+click: add to the mix · right-click: ${favourites.some((f) => sameBrush(f, b)) ? 'unpin' : 'pin'}`],
+            }))}
             onClick={(e) => onPick(b, e.ctrlKey || e.metaKey || e.shiftKey)}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -48,6 +54,7 @@ function TileStrip({ label, list, lib, palette, layerKind, brush, onPick, onTogg
           </button>
         ))}
       </div>
+      {preview && <TilePreview p={preview} palette={palette} />}
     </div>
   );
 }
@@ -70,15 +77,25 @@ function fitsLayer(kind: LayerKind, o: number): boolean {
   return o !== Orientation.Floor && o !== Orientation.Shadow && o !== Orientation.LeftPartOfNorthCornerWall;
 }
 
-/** Tile thumbnails, cached per palette. */
-const thumbCache = new WeakMap<Palette, WeakMap<Dt1Tile, string | null>>();
+/**
+ * The game's palettes are dark (the game lights tiles up at run time), so the palette's tiles are shown brighter: a
+ * gamma lift of each channel. Only these pictures change; the map and the files don't.
+ */
+const LIFT = (() => {
+  const t = new Uint8Array(256);
+  for (let v = 0; v < 256; v++) t[v] = Math.min(255, Math.round(255 * Math.pow(v / 255, 0.72)));
+  return t;
+})();
 
-function thumbnail(tile: Dt1Tile, palette: Palette): string | null {
+/** Tile pictures (brightened), cached per palette. */
+const thumbCache = new WeakMap<Palette, WeakMap<Dt1Tile, { url: string; width: number; height: number } | null>>();
+
+function tilePicture(tile: Dt1Tile, palette: Palette): { url: string; width: number; height: number } | null {
   let byTile = thumbCache.get(palette);
   if (!byTile) thumbCache.set(palette, (byTile = new WeakMap()));
   if (byTile.has(tile)) return byTile.get(tile)!;
   const img = decodeTile(tile);
-  let url: string | null = null;
+  let pic: { url: string; width: number; height: number } | null = null;
   if (img && img.width > 0 && img.height > 0) {
     const canvas = document.createElement('canvas');
     canvas.width = img.width;
@@ -87,13 +104,76 @@ function thumbnail(tile: Dt1Tile, palette: Palette): string | null {
     const data = ctx.createImageData(img.width, img.height);
     for (let i = 0; i < img.pixels.length; i++) {
       const p = img.pixels[i] * 4;
-      data.data.set(palette.subarray(p, p + 4), i * 4);
+      data.data[i * 4] = LIFT[palette[p]];
+      data.data[i * 4 + 1] = LIFT[palette[p + 1]];
+      data.data[i * 4 + 2] = LIFT[palette[p + 2]];
+      data.data[i * 4 + 3] = palette[p + 3];
     }
     ctx.putImageData(data, 0, 0);
-    url = canvas.toDataURL();
+    pic = { url: canvas.toDataURL(), width: img.width, height: img.height };
   }
-  byTile.set(tile, url);
-  return url;
+  byTile.set(tile, pic);
+  return pic;
+}
+
+const thumbnail = (tile: Dt1Tile, palette: Palette) => tilePicture(tile, palette)?.url ?? null;
+
+/** What the hover preview shows: the tile, where it sits on screen, and lines about it. */
+interface PreviewState {
+  tile: Dt1Tile;
+  rect: DOMRect;
+  title: string;
+  lines: string[];
+}
+
+/**
+ * An enlarged view of a tile while the pointer rests on it in the palette, beside the side panel: the picture up to 3×
+ * (crisp pixels), and what the tile is.
+ */
+function TilePreview({ p, palette }: { p: PreviewState; palette: Palette }) {
+  const pic = tilePicture(p.tile, palette);
+  const scale = pic ? Math.max(1, Math.min(3, 300 / pic.width, 280 / pic.height)) : 1;
+  const w = Math.max(200, (pic ? pic.width * scale : 0) + 20);
+  const h = (pic ? pic.height * scale : 40) + 30 + p.lines.length * 16;
+  const left = Math.max(8, p.rect.left - w - 12);
+  const top = Math.min(Math.max(8, p.rect.top + p.rect.height / 2 - h / 2), window.innerHeight - h - 8);
+  return createPortal(
+    <div className="tile-preview" style={{ left, top, width: w }}>
+      <div className="tile-preview-title">{p.title}</div>
+      {pic ? (
+        <img src={pic.url} alt="" width={pic.width * scale} height={pic.height * scale} className="tile-preview-img" />
+      ) : (
+        <div className="muted small">No picture (invisible in game)</div>
+      )}
+      {p.lines.map((l) => (
+        <div key={l} className="tile-preview-line">
+          {l}
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+/** Hover handlers that open the preview after a short rest (none while the mouse just passes over). */
+function usePreview(): [PreviewState | null, (make: () => Omit<PreviewState, 'rect'>) => { onMouseEnter: (e: ReactMouseEvent) => void; onMouseLeave: () => void }, () => void] {
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const timer = useRef<number | null>(null);
+  const hide = () => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    setPreview(null);
+  };
+  useEffect(() => hide, []);
+  const handlers = (make: () => Omit<PreviewState, 'rect'>) => ({
+    onMouseEnter: (e: ReactMouseEvent) => {
+      const el = e.currentTarget as HTMLElement;
+      if (timer.current) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setPreview({ ...make(), rect: el.getBoundingClientRect() }), 250);
+    },
+    onMouseLeave: hide,
+  });
+  return [preview, handlers, hide];
 }
 
 export const Thumb = memo(function Thumb({ tile, palette }: { tile: Dt1Tile; palette: Palette }) {
@@ -134,6 +214,7 @@ const shortPath = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
   const [filter, setFilter] = useState<WallFilter>('all');
   const [query, setQuery] = useState('');
+  const [preview, hover, hidePreview] = usePreview();
   const [dt1, setDt1] = useState<string>('all');
   const grid = useRef<HTMLDivElement>(null);
   /** Set by a focus request until the focused thumbnail has been scrolled into view. */
@@ -246,6 +327,7 @@ export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, o
         ref={grid}
         style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumb + 14}px, 1fr))`, ['--thumb-h' as string]: `${thumb}px`, maxHeight: gridH, height: gridH }}
         title="Ctrl + scroll to zoom the thumbnails"
+        onScroll={hidePreview}
       >
         {entries.map((e) => {
           const me = { orientation: e.orientation, main: e.main, sub: e.sub };
@@ -261,9 +343,19 @@ export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, o
             <button
               key={e.index !== undefined ? `i${e.index}` : `${e.orientation}:${e.main}:${e.sub}`}
               className={`thumb${active ? ' active' : ''}${mixed ? ' mixed' : ''}${isFocused(e) ? ' focused' : ''}`}
-              title={`${src ? `${src} · ` : ''}${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}${variants}${rarity}${special ? `
-${special.label}: ${special.help}` : ''}
-Click: paint with it · Ctrl+click: add to a random mix · right-click: ${pinned ? 'unpin' : 'pin to the top'}`}
+              {...hover(() => {
+                const pic = tilePicture(e.tiles[0], palette);
+                return {
+                  tile: e.tiles[0],
+                  title: `${ORIENTATION_NAMES[e.orientation] ?? `o${e.orientation}`} · main ${e.main} · sub ${e.sub}`,
+                  lines: [
+                    ...(src ? [src] : []),
+                    [pic ? `${pic.width}×${pic.height} px` : '', variants.replace(/^ · /, ''), rarity.replace(/^ · /, '')].filter(Boolean).join(' · '),
+                    ...(special ? [`${special.label}: ${special.help}`] : []),
+                    `Click: paint with it · Ctrl+click: add to a random mix · right-click: ${pinned ? 'unpin' : 'pin to the top'}`,
+                  ].filter(Boolean),
+                };
+              })}
               onClick={(ev) => onPick(me, ev.ctrlKey || ev.metaKey || ev.shiftKey)}
               onContextMenu={(ev) => {
                 ev.preventDefault();
@@ -284,6 +376,7 @@ Click: paint with it · Ctrl+click: add to a random mix · right-click: ${pinned
         {entries.length === 0 && <div className="muted small pad">No tiles for this layer in {dt1 === 'all' ? 'the loaded DT1s' : 'this DT1'}.</div>}
       </div>
       <Splitter axis="y" direction={1} size={gridH} onResize={setGridH} className="pane-handle" title="Drag to make the tiles pane taller or shorter" />
+      {preview && <TilePreview p={preview} palette={palette} />}
     </div>
   );
 }
