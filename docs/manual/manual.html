@@ -604,6 +604,7 @@
   <h2 id="s-check"><span class="num">9.4</span>Compatibility check</h2>
   <figure class="medium"><img src="../media/compatibility.png" alt="Compatibility check" /><figcaption>Home → Compatibility.</figcaption></figure>
   <p>Checks the map will load and play in game: missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled <code>.bin</code> reminders. Most results offer one-click <b>fixes</b>, and <b>Show on map</b> marks the cells involved. Map edits made by fixes can be undone.</p>
+  <p><b>Ways out.</b> A warp tile whose link has no level in <code>Levels.txt</code> leads nowhere; the fix opens the <a href="#ch-warps">warp link</a> editor for it. A level built from this map alone, with no working warp and no waypoint, can only be left by town portal (a player without a scroll or tome is stuck): <b>Add an exit warp…</b> opens the link editor with the act's town chosen, then gives you the warp tile to click where players should leave. Pick a <b>Kind of warp</b> that suits the map before applying. If leaving by town portal is what you want, ignore the warning.</p>
 
   <h2 id="s-automap"><span class="num">9.5</span>The automap</h2>
   <div class="pair">
@@ -655,6 +656,8 @@
   </ul>
   <h2 id="s-errors"><span class="num">12.2</span>If something goes wrong</h2>
   <p>If part of the app fails, it shows what happened instead of a blank window, with <b>Try again</b>, <b>Close this map</b>, <b>Report this bug</b> (pre-filled with the error details) and <b>Reload DS1 Studio</b>. Your unsaved changes are kept in the autosave.</p>
+  <h3 id="s-crashlog">When the game crashes</h3>
+  <p>Diablo II writes every crash to a log in its folder (<code>D2&lt;date&gt;.txt</code>). <b>Home → Crash log</b> reads the newest crashes from your game and mod folders and says, in plain words, what they mean and what to do: a missing loading-screen image (<code>EntryFile</code>), a level placed too far out for the automap, <code>AutoMap</code> 1 on a level that isn't a town, a damaged <code>.tbl</code>, or a tile library, map or sprite the game couldn't open just before. The same crash repeated is shown once with a count. When the latest crash is one a map can cause, <b>Run compatibility check</b> finds and fixes it. Crashes it doesn't recognise are shown with where they happened, for reporting.</p>
   <h2 id="s-bin"><span class="num">12.3</span>Compiled .bin tables</h2>
   <p>The game reads compiled <code>.bin</code> copies of the <code>.txt</code> tables. After changing tables (Add to game, warps, tile libraries, cube recipes…), start the game once with <code>-direct -txt</code> so it rebuilds them, if your mod ships <code>.bin</code> files.</p>
   <h2 id="s-faq"><span class="num">12.4</span>Common questions</h2>

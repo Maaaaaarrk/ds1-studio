@@ -219,7 +219,11 @@ again replaces the editor's earlier rows instead of piling them up.
 - **Compatibility check:** missing tiles and DT1s, table wiring, DT1s used but not loaded by the level type, entry
   markers, a missing waypoint, NPCs on unwalkable ground, stacked objects, walls missing from the automap, compiled
   `.bin` reminders — each with one-click fixes: add the DT1s that contain the missing tiles, update LvlTypes/Dt1Mask,
-  move NPCs to walkable ground, spread stacked objects, place a waypoint, and so on (map edits can be undone).
+  move NPCs to walkable ground, spread stacked objects, place a waypoint, and so on (map edits can be undone). It also
+  warns about warps that lead nowhere and levels with no way out but a town portal, and helps add an exit warp.
+- **Crash log:** reads the game's own crash log (D2<date>.txt) and explains the latest crashes in plain words: a
+  missing loading-screen image, a level placed too far out for the automap, a damaged .tbl, a file the game couldn't
+  open, with what to fix.
 
 | | |
 | :-: | :-: |
