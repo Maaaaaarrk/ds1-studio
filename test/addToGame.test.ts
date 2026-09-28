@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseDs1 } from '../src/formats/ds1';
 import { getCell, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../src/formats/txtTable';
-import { dataRows, ENTRY_IMAGE_DIR, planAddToGame, rowOfRecord, verifyInGame, type AddToGamePlan } from '../src/game/addToGame';
+import { dataRows, ENTRY_IMAGE_DIR, levelSizeFix, planAddToGame, rowOfRecord, verifyInGame, type AddToGamePlan } from '../src/game/addToGame';
 import { GameData } from '../src/game/GameData';
 import { LayeredFs, MpqSource, normalizePath } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
@@ -376,5 +376,32 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect([getCell(next.levels, L, 'SizeX'), getCell(next.levels, L, 'SizeY')]).toEqual(['40', '40']);
     // Unchanged tables serialize to the same bytes.
     expect(serializeTxtTable(tables.types)).toEqual(serializeTxtTable(parseTxtTable(serializeTxtTable(tables.types))));
+  });
+
+});
+
+describe('level size after a resize', () => {
+  const tab = (lines: string[]) => parseTxtTable(new TextEncoder().encode(lines.map((l) => l.join('\t')).join('\r\n') + '\r\n'));
+
+  it('keeps a whole-level preset the size of its resized map (Levels SizeX/SizeY = DS1 size - 1)', () => {
+    const prest = tab([
+      ['Name', 'Def', 'LevelId', 'SizeX', 'SizeY', 'File1'],
+      ['a', '0', '0', '0', '0', '0'],
+      ['guild3', '1', '1', '0', '0', 'expansion/Map/guild3.ds1'],
+      ['fixed', '2', '2', '30', '30', 'expansion/Map/guild3.ds1'],
+    ]);
+    const levels = tab([
+      ['Name', 'Id', 'DrlgType', 'SizeX', 'SizeY', 'SizeX(N)', 'SizeY(N)', 'SizeX(H)', 'SizeY(H)'],
+      ['Null', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['guild3', '1', '2', '40', '40', '40', '40', '40', '40'],
+      ['other', '2', '2', '40', '40', '40', '40', '40', '40'],
+    ]);
+    const fix = levelSizeFix({ prest, levels }, 'Expansion/Map/Guild3.ds1', { width: 56, height: 58 })!;
+    expect(fix.label).toBe('Set level 1 "guild3" to the map\'s size 55×57');
+    const out = parseTxtTable(fix.writes[0].bytes);
+    expect(['SizeX', 'SizeY', 'SizeX(N)', 'SizeY(N)', 'SizeX(H)', 'SizeY(H)'].map((c) => getCell(out, 1, c))).toEqual(['55', '57', '55', '57', '55', '57']);
+    // The preset with its own size (row "fixed") leaves its level alone; a map already the right size needs nothing.
+    expect(getCell(out, 2, 'SizeX')).toBe('40');
+    expect(levelSizeFix({ prest, levels: out }, 'expansion/Map/guild3.ds1', { width: 56, height: 58 })).toBeNull();
   });
 });

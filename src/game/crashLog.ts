@@ -147,6 +147,16 @@ export function explainCrash(c: Crash, levelsWithEntry?: (entry: string) => stri
       detail: "The automap keeps positions in 16 bits: a level whose Levels.txt OffsetX − OffsetY or OffsetX + OffsetY is too large makes the game stop as soon as a player, NPC or object is put on the automap (usually a few steps in). The compatibility check finds the level and moves it to a free spot inside the range.",
     };
   }
+  // D2Common building a preset level whose DS1 isn't the size Levels.txt gives the level (DrlgPreset, lines 2239/2240).
+  const inCommon = (lo: number, hi: number) => c.address !== undefined && c.address >= lo && c.address <= hi;
+  if (c.kind === 'halt' && (inCommon(0x6fd5c060, 0x6fd5c680) || ((c.line === 2239 || c.line === 2240) && (c.address === undefined || inCommon(0x6fd50000, 0x6fdf9000))))) {
+    return {
+      known: true,
+      check: true,
+      title: "A preset level's map isn't the size the level expects",
+      detail: `The game checks, as it builds a preset level (entering it, or opening a portal to it), that the DS1's ${c.line === 2240 ? 'height' : 'width'} matches the level's Levels.txt SizeX/SizeY (the DS1 size minus one, all difficulties). This happens after resizing a map without updating the level. Open the map and save it (DS1 Studio updates the level size), or run the compatibility check and apply its fix.`,
+    };
+  }
   // D2Client revealing the whole automap of a level whose LvlPrest AutoMap is 1 but that isn't a town.
   if (c.kind === 'halt' && inClient(0x6fb11900, 0x6fb11a40)) {
     return {

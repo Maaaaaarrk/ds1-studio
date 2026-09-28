@@ -43,6 +43,10 @@ describe('crash logs', () => {
     expect(missing.detail).toMatch(/Levels using it: 205 Guild 4/);
     expect(explainCrash(automap).title).toMatch(/too far out/);
     expect(explainCrash({ ...automap, address: 0x6fb119c1, line: undefined }).title).toMatch(/AutoMap is 1/);
+    // D2Common's preset builder: the DS1 isn't the level's size (seen after resizing a map; halt 6fd5c664, line 2239).
+    const size = explainCrash({ time: '', kind: 'halt', what: 'Unrecoverable internal error 6fd5c664', address: 0x6fd5c664, module: 'D2COMMON.dll', offset: 0xc664, line: 2239, failedFiles: [] });
+    expect(size).toMatchObject({ known: true, check: true, title: "A preset level's map isn't the size the level expects" });
+    expect(size.detail).toMatch(/width/);
     expect(explainCrash({ time: '', kind: 'exception', what: 'ACCESS_VIOLATION', failedFiles: ['DATA\\GLOBAL\\TILES\\Guild\\PD2\\house9\\x.dt1'] }).title).toBe("The game couldn't open a tile library (DT1): x.dt1");
     const unknown = explainCrash({ time: '', kind: 'halt', what: 'Unrecoverable internal error 6ff6339e', module: 'Fog.dll', offset: 0x1339e, line: 646, failedFiles: [] });
     expect(unknown.known).toBe(false);

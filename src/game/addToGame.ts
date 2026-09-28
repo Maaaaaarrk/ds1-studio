@@ -531,6 +531,34 @@ export function recordOrderFix(table: TableName, doc: TxtTableDoc, col: string):
  * Checks that the game's tables load a map the way Add to game sets it up (the rules at the top of this file). Used by
  * the compatibility check and the tests; `ds1` sizes as DS1 Studio reads them.
  */
+/**
+ * The level-size cells to change after a map is resized: for every whole-level preset built from this map (the first
+ * LvlPrest row of its level lists the map, the level is DrlgType 2 and the row's SizeX/SizeY are 0), Levels SizeX/SizeY
+ * for all difficulties must be the DS1 size minus one — D2Common halts building the level otherwise (line 2239/2240).
+ * null when nothing needs changing.
+ */
+export function levelSizeFix(tables: { prest: TxtTableDoc; levels: TxtTableDoc }, mapRel: string, ds1: { width: number; height: number }): TableFix | null {
+  const { prest, levels } = tables;
+  const want = normalizePath(mapRel);
+  const cells: { row: number; col: string; value: string }[] = [];
+  const names: string[] = [];
+  for (const r of dataRows(prest)) {
+    if (![1, 2, 3, 4, 5, 6].some((i) => normalizePath(getCell(prest, r, `File${i}`)) === want)) continue;
+    if (num(getCell(prest, r, 'SizeX')) || num(getCell(prest, r, 'SizeY'))) continue;
+    const levelId = num(getCell(prest, r, 'LevelId'));
+    if (!levelId || dataRows(prest).find((x) => num(getCell(prest, x, 'LevelId')) === levelId) !== r) continue;
+    const lRow = rowOfRecord(levels, levelId);
+    if (lRow < 0 || num(getCell(levels, lRow, 'DrlgType')) !== 2) continue;
+    const before = cells.length;
+    for (const s of ['', '(N)', '(H)']) {
+      for (const [c, v] of [[`SizeX${s}`, ds1.width - 1], [`SizeY${s}`, ds1.height - 1]] as const)
+        if (has(levels, c) && num(getCell(levels, lRow, c)) !== v) cells.push({ row: lRow, col: c, value: String(v) });
+    }
+    if (cells.length > before) names.push(`${levelId} "${getCell(levels, lRow, 'Name')}"`);
+  }
+  return cells.length ? cellFix('Levels.txt', levels, `Set level ${names.join(', ')} to the map's size ${ds1.width - 1}×${ds1.height - 1}`, cells) : null;
+}
+
 export function verifyInGame(
   tables: { prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc },
   mapRel: string,
@@ -640,9 +668,9 @@ export function verifyInGame(
       const need = `${ds1.width - 1}×${ds1.height - 1}`;
       if (sizes.some((s) => s !== need))
         out.push({
-          severity: 'warning',
-          title: `Level ${levelId} size ${[...new Set(sizes)].join(' / ')} doesn't match the map (${need})`,
-          detail: 'The level size (Levels SizeX/SizeY, per difficulty) is the DS1 size minus one, as in every game preset level. Too small cuts the map off; too big leaves blank space.',
+          severity: 'error',
+          title: `Level ${levelId} size ${[...new Set(sizes)].join(' / ')} doesn't match the map (${need}): the game crashes building it`,
+          detail: 'The level size (Levels SizeX/SizeY, per difficulty) must be the DS1 size minus one, as in every game preset level. D2Common checks it when it builds the level (entering it, or opening a portal to it) and stops the game if it differs. Resizing the map changes the DS1 size; saving it in DS1 Studio updates the level too.',
           columns: [{ table: 'Levels', col: 'SizeX' }],
           fix: cellFix(
             'Levels.txt',

@@ -109,7 +109,7 @@ import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
 import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
-import { cellFix, rowOfRecord, tilePathProblem } from '../game/addToGame';
+import { cellFix, levelSizeFix, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
@@ -2208,13 +2208,28 @@ export function App() {
       }
       doc.ds1.version = WRITE_VERSION;
       doc.markSaved();
+      // A whole-level preset must be exactly the level's size (Levels SizeX/SizeY = DS1 size - 1) or the game stops
+      // building it: after a resize, keep the level in step.
+      if (data.saveTarget) {
+        const [prest, levels] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt')]);
+        const fix = prest && levels ? levelSizeFix({ prest, levels }, doc.path.replace(/^data\/global\/tiles\//i, ''), doc.ds1) : null;
+        if (fix) {
+          try {
+            await writeFiles(fix.writes);
+            await reloadTables();
+            notify(`Saved ${name}. The map's size changed, so Levels.txt was updated to match: ${fix.writes[0].summary.join('; ')} (the old file is kept as .bak)`);
+          } catch (e) {
+            notify(`Saved ${name}, but couldn't update the level's size in Levels.txt (${(e as Error).message}). The game will stop building this level until SizeX/SizeY are ${doc.ds1.width - 1}×${doc.ds1.height - 1}: run the compatibility check.`, true);
+          }
+        }
+      }
       // Saved: the autosaved copy isn't needed any more.
       void deleteRecovery(doc.path).then(() => listRecoveries().then(setRecoveries));
       bump();
     } catch (e) {
       notify(`Save failed: ${(e as Error).message}`, true);
     }
-  }, [doc, gd, data, notify]);
+  }, [doc, gd, data, notify, writeFiles, reloadTables]);
 
   const exportFile = useCallback(async () => {
     if (!doc) return;
