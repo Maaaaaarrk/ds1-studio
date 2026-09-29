@@ -31,7 +31,10 @@ describe('wall click and Shift+wheel selection', () => {
   });
   it('enters individual selection only for Shift+wheel, including a missing wheel modifier flag', () => {
     expect(cycleWithWheel(false,false,false)).toBe(false);
-    expect(cycleWithWheel(false,true,false)).toBe(true);
+    expect(cycleWithWheel(false,true,false,120,0)).toBe(true);
+    expect(cycleWithWheel(false,true,false,0,120)).toBe(false);
+    expect(cycleWithWheel(false,true,false,0,-120)).toBe(false);
+    expect(cycleWithWheel(false,false,false,120,0)).toBe(false);
     expect(cycleWithWheel(true,false,false)).toBe(true);
     expect(cycleWithWheel(true,true,true)).toBe(false);
   });

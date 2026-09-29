@@ -52,7 +52,7 @@ function BigTile({ tile, palette }: { tile: Dt1Tile; palette: Palette }) {
       </div>
       <div ref={ref} className="dt1v-big">
         {pic ? (
-          <img src={pic.url} alt="" width={pic.width * scale} height={pic.height * scale} className="tile-preview-img" />
+          <img src={pic.url} alt="" width={pic.width * scale} height={pic.height * scale} className={`tile-preview-img${tile.orientation === 13 ? ' shadow-preview' : ''}`} />
         ) : (
           <span className="muted small">No picture (invisible in game)</span>
         )}
@@ -140,11 +140,11 @@ export function Dt1Viewer({
         <div className="chips">
           {KINDS.map((k) => {
             const n = dt1 ? dt1.tiles.filter((t) => k.test(t.orientation)).length : 0;
-            return k.id === 'all' || n ? (
-              <button key={k.id} className={`chip${kind === k.id ? ' active' : ''}`} onClick={() => setKind(k.id)}>
+            return (
+              <button key={k.id} className={`chip${kind === k.id ? ' active' : ''}`} disabled={k.id !== 'all' && !n} onClick={() => setKind(k.id)}>
                 {k.label} {k.id !== 'all' && <span className="muted">{n}</span>}
               </button>
-            ) : null;
+            );
           })}
           {usage && (
             <button className={`chip used-chip${kind === 'used' ? ' active' : ''}`} onClick={() => setKind('used')} title="Only the tiles this map places">

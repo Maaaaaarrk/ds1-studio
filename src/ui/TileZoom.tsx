@@ -5,19 +5,21 @@ import type { Palette } from '../formats/palette';
 interface Props {
   image: TileImage;
   palette: Palette;
+  shadow?: boolean;
 }
 
 /**
  * A close-up of one tile that fills its container: mouse wheel zooms around the cursor, drag pans, and a pixel grid
  * appears when zoomed in far enough. Pixels are drawn crisp (no smoothing), exactly as stored.
  */
-export function TileZoom({ image, palette }: Props) {
+export function TileZoom({ image, palette, shadow = false }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 300, h: 300 });
   const [view, setView] = useState<{ zoom: number; x: number; y: number } | null>(null); // x/y = image px at the centre
   const [grid, setGrid] = useState(true);
-  const [bg, setBg] = useState<'checker' | 'black' | 'grey'>('checker');
+  const [bg, setBg] = useState<'checker' | 'black' | 'grey' | 'light'>(shadow ? 'light' : 'checker');
+  useEffect(() => setBg(shadow ? 'light' : 'checker'), [shadow]);
   const pan = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
 
   // The tile as an image once per change; drawing then only scales it.
@@ -55,7 +57,7 @@ export function TileZoom({ image, palette }: Props) {
     c.height = Math.round(size.h * dpr);
     const ctx = c.getContext('2d')!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = bg === 'black' ? '#000' : bg === 'grey' ? '#6b6b73' : '#1a1b21';
+    ctx.fillStyle = bg === 'black' ? '#000' : bg === 'light' ? '#b8bbc0' : bg === 'grey' ? '#6b6b73' : '#1a1b21';
     ctx.fillRect(0, 0, size.w, size.h);
     const left = size.w / 2 - v.x * v.zoom;
     const top = size.h / 2 - v.y * v.zoom;
@@ -140,6 +142,7 @@ export function TileZoom({ image, palette }: Props) {
           <option value="checker">checker</option>
           <option value="black">black</option>
           <option value="grey">grey</option>
+          <option value="light">light</option>
         </select>
       </div>
       <div

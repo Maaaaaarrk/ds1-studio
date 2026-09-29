@@ -530,7 +530,7 @@ export function MapView(props: Props) {
       const cam = camera.current;
       const [wx, wy] = toWorld(ev);
       const s = latest.current;
-      if (cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey)) {
+      if (cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey, ev.deltaX, ev.deltaY)) {
         // Shift+wheel picks one tile out of a stack instead of zooming (Windows turns it into a horizontal scroll).
         const d = ev.deltaY || ev.deltaX;
         if (d) s.onCycle(d > 0 ? 1 : -1, [wx, wy]);

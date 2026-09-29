@@ -534,6 +534,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             onClose={() => setZoomed(null)}
           >
             <TileZoom
+              shadow={dt1.tiles[zoomed].orientation === Orientation.Shadow}
               image={edits.get(zoomed) ?? decodeTile(dt1.tiles[zoomed]) ?? { width: 1, height: 1, offsetX: 0, offsetY: 0, pixels: new Uint8Array(1) }}
               palette={changes && (picked.has(zoomed)) ? previewPal : palette}
             />

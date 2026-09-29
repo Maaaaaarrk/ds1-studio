@@ -13,6 +13,7 @@ interface Props {
   lib: TileLibrary;
   palette: Palette;
   layerKind: LayerKind;
+  onLayerKindChange?: (kind: LayerKind) => void;
   brush: Brush | null;
   /** Extra tiles painted at random together with the brush (Ctrl+click adds). */
   mix?: Brush[];
@@ -143,7 +144,7 @@ export function TilePreview({ p, palette }: { p: PreviewState; palette: Palette 
     <div className="tile-preview" style={{ left, top, width: w }}>
       <div className="tile-preview-title">{p.title}</div>
       {pic ? (
-        <img src={pic.url} alt="" width={pic.width * scale} height={pic.height * scale} className="tile-preview-img" />
+        <img src={pic.url} alt="" width={pic.width * scale} height={pic.height * scale} className={`tile-preview-img${p.tile.orientation === Orientation.Shadow ? ' shadow-preview' : ''}`} />
       ) : (
         <div className="muted small">No picture (invisible in game)</div>
       )}
@@ -193,7 +194,7 @@ export const Thumb = memo(function Thumb({ tile, palette }: { tile: Dt1Tile; pal
     io.observe(el);
     return () => io.disconnect();
   }, [tile, palette]);
-  return <div ref={ref} className="thumb-img" style={url ? { backgroundImage: `url(${url})` } : undefined} />;
+  return <div ref={ref} className={`thumb-img${tile.orientation === Orientation.Shadow ? ' shadow-thumb' : ''}`} style={url ? { backgroundImage: `url(${url})` } : undefined} />;
 });
 
 /** A tile to reveal in the palette (switches to its DT1 and scrolls to it); `seq` re-triggers for the same tile. */
@@ -213,7 +214,7 @@ interface Entry {
 
 const shortPath = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
-export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
+export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
   const [filter, setFilter] = useState<WallFilter>('all');
   const [query, setQuery] = useState('');
   const [preview, hover, hidePreview] = usePreview();
@@ -303,6 +304,9 @@ export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, o
   return (
     <div className="tile-palette">
       <div className="palette-controls">
+        {onLayerKindChange && <div className="chips" aria-label="Tile categories">
+          {(['floor', 'wall', 'shadow'] as const).map((kind) => <button key={kind} className={`chip${layerKind === kind ? ' active' : ''}`} onClick={() => onLayerKindChange(kind)}>{kind === 'floor' ? 'Floors' : kind === 'wall' ? 'Walls / objects' : 'Shadows'}</button>)}
+        </div>}
         <select className="dt1-select" value={dt1} onChange={(e) => setDt1(e.target.value)} title="Browse one tile library (DT1) at a time">
           <option value="all">All tile libraries (combined)</option>
           {dt1s.map((d) => (

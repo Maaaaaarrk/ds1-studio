@@ -108,6 +108,7 @@ import { buildDt1, dt1Records } from '../formats/dt1Write';
 import { renameInLvlTypes } from '../game/dt1Review';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
+import { MapRecipesDialog } from './MapRecipes';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
@@ -325,7 +326,7 @@ export function App() {
   /** The Copied panel: from a copy or cut until Esc. */
   const [clipPane, setClipPane] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'mapRecipes' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -2998,6 +2999,10 @@ export function App() {
             { label: 'Export picture…', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the whole map (or the selection) as a PNG' },
           ],
         },
+        {
+          label: 'Map access',
+          items: [{ label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('mapRecipes'), disabled: noMap, title: 'View existing cube recipes for the open map' }],
+        },
       ],
     },
     {
@@ -3575,6 +3580,10 @@ export function App() {
                 lib={map.lib}
                 palette={map.palette}
                 layerKind={activeLayer.kind}
+                onLayerKindChange={(kind) => {
+                  const next = layers.find((l) => l.kind === kind);
+                  if (next) { setActiveLayer(next); setPaletteFocus(null); }
+                }}
                 brush={brush}
                 mix={mix}
                 focus={paletteFocus}
@@ -4053,6 +4062,7 @@ export function App() {
           initial={registerInitial}
         />
       )}
+      {dialog === 'mapRecipes' && doc && <MapRecipesDialog fs={data.gd.fs} mapPath={doc.path} onClose={() => setDialog(null)} />}
       {dialog === 'cube' && doc && (
         <CubeRecipeDialog
           fs={data.gd.fs}

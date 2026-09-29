@@ -5,14 +5,16 @@
 // Dev-server-only smoke harness. Exercise the real canvas wheel handler and React effects.
 // Open an isolated overlapping-wall map and click its artwork.
 // F4/F5=hover at click/adjacent cell, F6=plain wheel, F7=Ctrl zoom, F8/F9=Shift forward/reverse, F10=three Shift events.
+// F11 simulates a missed Shift release followed by a plain vertical wheel: this must zoom.
 let point = null;
 window.addEventListener('pointerdown', event => {
   if (event.target.matches?.('.viewport-overlay')) point = [event.clientX, event.clientY];
 });
 window.addEventListener('keydown', event => {
-  if (!point || !['F4','F5','F6','F7','F8','F9','F10'].includes(event.code)) return;
+  if (!point || !['F4','F5','F6','F7','F8','F9','F10','F11'].includes(event.code)) return;
   event.preventDefault();
   const canvas = document.querySelector('.viewport-overlay');
+  if (event.code === 'F11') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft' }));
   if (event.code === 'F4' || event.code === 'F5') {
     canvas?.dispatchEvent(new PointerEvent('pointermove', {clientX:point[0] + (event.code === 'F5' ? 90 : 0),clientY:point[1] + (event.code === 'F5' ? 45 : 0),bubbles:true}));
     return;
@@ -21,5 +23,6 @@ window.addEventListener('keydown', event => {
     clientX: point[0], clientY: point[1], deltaY: event.code === 'F9' ? -120 : 120,
     shiftKey: ['F8','F9','F10'].includes(event.code), ctrlKey:event.code === 'F7', bubbles: true, cancelable: true,
   }));
+  if (event.code === 'F11') window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft' }));
 });
 </script></body></html>

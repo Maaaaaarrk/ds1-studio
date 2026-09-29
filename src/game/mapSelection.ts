@@ -16,8 +16,10 @@ export function tileEmphasis(item: DrawItem, selection: CellSelection | null, fo
 }
 
 /** Only an explicit Shift gesture enters individual-tile selection. */
-export function cycleWithWheel(shift: boolean, trackedShift: boolean, ctrl: boolean): boolean {
-  return !ctrl && (shift || trackedShift);
+export function cycleWithWheel(shift: boolean, trackedShift: boolean, ctrl: boolean, deltaX = 0, deltaY = 0): boolean {
+  // Windows can translate Shift+wheel into horizontal scrolling without a modifier.
+  // Only that horizontal event needs the tracked key: a plain vertical wheel always zooms.
+  return !ctrl && (shift || (trackedShift && deltaX !== 0 && deltaY === 0));
 }
 
 export function stackMatchesLayer(stack: TileStack, layer: LayerRef): boolean {
