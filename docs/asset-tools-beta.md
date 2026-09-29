@@ -1,6 +1,6 @@
-# DS1 Studio 0.2.16-beta.1 — asset tools
+# DS1 Studio 0.2.16 — asset tools
 
-This beta adds the requested map management, cleanup, selection, floor and water tools. Use the portable executable from a writable folder. Recovery folders are created beside that executable; keep them with it if you move the app.
+This release adds map management, cleanup, selection, floor and water tools. Update through Help → Check for updates or use the installer from the GitHub release. Recovery folders are created beside the executable, which must be in a writable folder; keep those recovery folders with it if you move the app.
 
 ## Where to find the changes
 
@@ -61,4 +61,4 @@ Use the playback and frame controls to review the loop. Preview FPS affects this
 
 The implementation includes regression tests for cleanup grouping, saved/shadowed map references, water encoding, floor reroll, per-cell automap clearing, input projection and selection behavior. Native recovery tests exercise deletion, partial moves, restore conflicts, stale files, invalid paths, failed backups and DS1 recovery. Browser checks exercise the new dialogs on isolated test assets.
 
-This is a beta build. Browser verification and native file-operation tests do not replace a playthrough in Diablo II/PD2. The native desktop dialogs and the generated water should be checked in game before treating this as a stable release. The local game assets used during development were read only; UI save tests used an isolated fixture folder.
+Validation passed: 230 application tests, five native recovery tests, type checking and a Windows production build. Browser verification and native file-operation tests do not replace a playthrough in Diablo II/PD2. Native desktop UI and in-game validation, particularly generated water, remain outstanding. The local game assets used during development were read only; UI save tests used an isolated fixture folder.
