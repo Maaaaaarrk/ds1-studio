@@ -65,6 +65,8 @@ interface Props {
   /** The selected cell, if one. */
   cell: { x: number; y: number } | null;
   canSave: boolean;
+  hasSelection: boolean;
+  onClearSelection: () => void;
   onSet: (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => void;
   /** Friendlier label for numeric level names (their LvlTypes name). */
   levelLabel?: (level: string) => string;
@@ -138,6 +140,10 @@ export function AutomapPanel(props: Props) {
         <button className="btn primary ame-open" onClick={props.onOpenEditor}>
           Open automap editor…
         </button>
+        <button className="btn ame-open" disabled={!canSave || !level || !props.hasSelection} onClick={props.onClearSelection}>
+          Clear selected automap pieces…
+        </button>
+        <p className="muted small">Select cells on the map to clear just their pieces. A small tile library preserves their graphics while other cells keep their automap pieces. Undo restores the selected pieces.</p>
         <p className="muted small">
           What the map looks like on the in-game automap (Tab in game). Outlined walls have no AutoMap.txt entry and won&apos;t show. Select a cell to
           see and change its pieces.

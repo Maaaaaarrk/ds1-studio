@@ -62,11 +62,11 @@ export const DEFAULT_VISIBILITY: Visibility = {
  * What the right-hand panel is for. Views with options of their own are modes, one at a time: each replaces the
  * side panel with just its options. Plain overlays (grid, rooms, sprites…) are not modes and combine freely.
  */
-export type ViewMode = 'tiles' | 'walk' | 'automap' | 'light' | 'roofs';
+export type ViewMode = 'tiles' | 'objects' | 'walk' | 'automap' | 'light' | 'roofs';
 
 /** The views in the order Tab steps through them. */
-export const VIEW_CYCLE: ViewMode[] = ['tiles', 'walk', 'automap', 'light', 'roofs'];
-export const VIEW_NAMES: Record<ViewMode, string> = { tiles: 'Tiles', walk: 'Walkability', automap: 'Automap', light: 'Level light', roofs: 'Roof hiding' };
+export const VIEW_CYCLE: ViewMode[] = ['tiles', 'objects', 'walk', 'automap', 'light', 'roofs'];
+export const VIEW_NAMES: Record<ViewMode, string> = { tiles: 'Tiles', objects: 'Objects', walk: 'Walkability', automap: 'Automap', light: 'Level light', roofs: 'Roof hiding' };
 
 /** The view after (dir 1) or before (dir -1) `mode`. */
 export function nextView(mode: ViewMode, dir: 1 | -1): ViewMode {

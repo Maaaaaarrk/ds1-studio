@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, type WallCell } from '../formats/ds1';
 import { decodeTile, Orientation, type Dt1, type TileImage } from '../formats/dt1';
 import { setManyTilePixels } from '../formats/dt1Paint';
@@ -17,7 +17,8 @@ import { hueRemap, recolorDt1, swapRemap } from '../formats/dt1Edit';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { presetToClipboard, type Preset } from '../game/presets';
-import type { CellRect } from '../game/clipboard';
+import { inSelection, type CellSelection } from '../game/clipboard';
+import { selectTileIndices } from '../game/tileSelection';
 import { ORIENTATION_NAMES } from './state';
 import { Thumb } from './TilePalette';
 import { isBuiltinPath } from '../game/specialTiles';
@@ -39,7 +40,7 @@ interface Props {
   /** Saved + suggested presets (their tiles can be selected in one go). */
   presets: Preset[];
   /** The map selection, to select the tiles used there. */
-  selection: CellRect | null;
+  selection: CellSelection | null;
   canSave: boolean;
   onSave: (r: Dt1EditResult) => Promise<void>;
   onClose: () => void;
@@ -124,6 +125,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   }, [palAct, gd]);
   const palette = useMemo(() => (pal.act0 ? act0Display(pal.act0, homePalette, highlightUnsafe) : pal.palette), [pal, homePalette, highlightUnsafe]);
   const [dt1, setDt1] = useState<Dt1 | null>(null);
+  const selectionAnchor = useRef<number | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [adjust, setAdjust] = useState<Adjust>(NO_ADJUST);
   const [name, setName] = useState('');
@@ -143,6 +145,10 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   const [iniMessage, setIniMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    let live = true;
+    selectionAnchor.current = null;
+    setAdjust(NO_ADJUST);
+    setError(null);
     setDt1(null);
     setPicked(new Set());
     setEdits(new Map());
@@ -152,9 +158,11 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     setRawBytes(null);
     setIniMessage(null);
     if (!path) return;
-    void gd.dt1(path).then(setDt1);
-    void gd.fs.read(path).then((b) => setRawBytes(b ?? null));
+    void Promise.all([gd.dt1(path), gd.fs.read(path)]).then(([tiles, bytes]) => {
+      if (live) { setDt1(tiles); setRawBytes(bytes); }
+    }).catch(e => live && setError(String(e)));
     setName(path.split('/').pop()!.replace(/\.dt1$/i, '') + '_edit');
+    return () => { live = false; };
   }, [path, gd]);
 
   const remap = useMemo(() => {
@@ -213,6 +221,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     const cells = [];
     for (let y = selection.y0; y <= selection.y1; y++)
       for (let x = selection.x0; x <= selection.x1; x++) {
+        if (!inSelection(selection, x, y) || x < 0 || y < 0 || x >= map.ds1.width || y >= map.ds1.height) continue;
         const i = y * map.ds1.width + x;
         for (const f of map.ds1.floors) cells.push({ kind: 'floor', cell: f[i] });
         for (const w of map.ds1.walls) cells.push({ kind: 'wall', cell: w[i] });
@@ -220,17 +229,13 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     return tilesMatching(keysOfCells(cells));
   };
 
-  const toggle = (i: number, range: boolean) => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (range && prev.size) {
-        const last = [...prev].pop()!;
-        for (let k = Math.min(last, i); k <= Math.max(last, i); k++) next.add(k);
-      } else if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
+  const toggle = (i: number, shift: boolean, additive: boolean) => {
+    if (busy) return;
+    setPicked(prev => selectTileIndices(prev, i, selectionAnchor.current, dt1?.tiles.length ?? 0, { shift, toggle: additive }));
+    if (!shift) selectionAnchor.current = i;
   };
+  const discardAllowed = () => !busy && ((!edits.size && !settingsEdits.size && isNeutral(adjust)) || window.confirm('Discard the unsaved pixel, colour and tile-setting changes?'));
+  const close = () => { if (discardAllowed()) onClose(); };
 
   // Tile settings (.ini fields): the file's values with pending changes on top.
   const settingsOf = (i: number): TileSettings => ({ ...readTileSettings(rawBytes!, i), ...(settingsEdits.get(i) ?? {}) });
@@ -293,7 +298,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       const bytes = await gd.fs.read(path);
       if (!bytes) throw new Error(`${path} not found`);
       const painted = edits.size ? setManyTilePixels(bytes, [...edits].map(([tileIndex, image]) => ({ tileIndex, image }))) : bytes;
-      const recoloured = changes ? recolorDt1(painted, remap, picked.size ? [...picked] : undefined) : painted;
+      const recoloured = changes ? recolorDt1(painted, remap, [...picked]) : painted;
       const out = settingsEdits.size ? writeTileSettings(recoloured, settingsEdits) : recoloured;
       await onSave({ path: newPath, bytes: out, switchMap: switchMap && !overwrite && inMapLib, original: path });
     } catch (e) {
@@ -305,9 +310,10 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
 
   const set = <K extends keyof Adjust>(k: K, v: Adjust[K]) => setAdjust((a) => ({ ...a, [k]: v }));
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal dt1-editor" role="dialog" aria-label="DT1 editor" onKeyDown={(e) => e.stopPropagation()}>
         <div className="modal-title">DT1 editor</div>
+        {busy && <div className="modal-busy-shield" role="status">Saving tile changes…</div>}
         <div className="dte-top">
           <span className="mono small dte-current">{short(path)}</span>
           <label className="small" title="DT1s store palette indices: this palette is used to show, recolour and paint them">
@@ -329,7 +335,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
               text={`Act 0 holds only the ${pal.usable ? pal.usable.filter(Boolean).length : 225} colours that look the same in every act (Gimli's act0 palette${pal.source === 'derived' ? ', worked out from your game palettes because it couldn’t be downloaded' : ''}), so tiles edited with it can be used in any act. Tick “highlight” to see which pixels use colours that change between acts (magenta); “Make act-safe” converts them. The pixel painter only offers Act 0 colours.`}
             />
           </label>
-          <span className="muted small">{dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'none selected = whole DT1'}` : 'loading…'}</span>
+          <span className="muted small">{dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'no tiles selected'}` : 'loading…'}</span>
           <button className="btn small" onClick={() => setPicked(new Set(dt1?.tiles.map((_, i) => i)))}>
             Select all
           </button>
@@ -382,15 +388,15 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           />
         )}
         <div className="dte-body" hidden={painting !== null}>
-          <Dt1Tree all={allDt1s} inMap={libs} selected={path} onSelect={setPath} />
+          <Dt1Tree all={allDt1s} inMap={libs} selected={path} onSelect={p => { if (p !== path && discardAllowed()) setPath(p); }} />
           <div
             className="thumb-grid dte-grid"
             style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size + 14}px, 1fr))`, ['--thumb-h' as string]: `${size}px` }}
             onWheel={(e) => e.ctrlKey && setSize((v) => Math.round(Math.min(200, Math.max(36, v * Math.exp(-e.deltaY * 0.0015)))))}
-            title="Click to select tiles (Shift+click for a range) · Ctrl + scroll to zoom"
+            title="Click: one tile · Ctrl+click: toggle · Shift+click: range · Ctrl + scroll to zoom"
           >
             {dt1?.tiles.map((t, i) => {
-              const affected = changes && (picked.size === 0 || picked.has(i));
+              const affected = changes && (picked.has(i));
               const edited = edits.get(i);
               return (
                 <div
@@ -398,10 +404,10 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
                   className={`thumb${picked.has(i) ? ' active' : ''}${edited ? ' edited' : ''}`}
                   title={`#${i} · ${ORIENTATION_NAMES[t.orientation] ?? `o${t.orientation}`} · ${t.mainIndex}/${t.subIndex}${edited ? ' · painted' : ''} · double-click to paint`}
                   onClick={(e) => {
-                    toggle(i, e.shiftKey);
+                    toggle(i, e.shiftKey, e.ctrlKey || e.metaKey);
                     setZoomed(i);
                   }}
-                  onDoubleClick={() => t.blocks.length && setPainting(i)}
+                  onDoubleClick={() => !busy && t.blocks.length && setPainting(i)}
                 >
                   {edited ? <ImageThumb image={edited} palette={affected ? previewPal : palette} /> : <Thumb tile={t} palette={affected ? previewPal : palette} />}
                   <span className="thumb-label">
@@ -520,7 +526,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
               <>
                 Tile #{zoomed} · {dt1.tiles[zoomed].mainIndex}/{dt1.tiles[zoomed].subIndex}
                 {edits.has(zoomed) ? ' · painted' : ''}
-                {changes && (picked.size === 0 || picked.has(zoomed)) ? ' · recolour preview' : ''}
+                {changes && (picked.has(zoomed)) ? ' · recolour preview' : ''}
               </>
             }
             storageKey="dt1-zoom"
@@ -529,15 +535,15 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           >
             <TileZoom
               image={edits.get(zoomed) ?? decodeTile(dt1.tiles[zoomed]) ?? { width: 1, height: 1, offsetX: 0, offsetY: 0, pixels: new Uint8Array(1) }}
-              palette={changes && (picked.size === 0 || picked.has(zoomed)) ? previewPal : palette}
+              palette={changes && (picked.has(zoomed)) ? previewPal : palette}
             />
           </FloatingWindow>
         )}
         <div className="modal-actions" hidden={painting !== null}>
-          <button className="btn" onClick={() => (!edits.size || window.confirm('Discard the painted tiles?')) && onClose()}>
+          <button className="btn" onClick={close}>
             Close
           </button>
-          <button className="btn primary" disabled={!canSave || !dt1 || busy || !validName} onClick={() => void save()} title={canSave ? '' : 'No writable mod folder'}>
+          <button className="btn primary" disabled={!canSave || !dt1 || busy || !validName || (changes && !picked.size)} onClick={() => void save()} title={canSave ? '' : 'No writable mod folder'}>
             {busy ? 'Saving…' : overwrite ? 'Save (overwrite)' : changes || edits.size || settingsEdits.size ? 'Save edited copy' : 'Save copy'}
           </button>
         </div>

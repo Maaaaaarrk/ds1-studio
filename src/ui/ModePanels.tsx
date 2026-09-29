@@ -13,6 +13,7 @@ import { KindIcon } from './AutomapLook';
  */
 
 const MODE_NAMES: Record<Exclude<ViewMode, 'tiles'>, string> = {
+  objects: 'Objects',
   walk: 'Walkability',
   automap: 'Automap',
   light: 'Level light',

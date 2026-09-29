@@ -26,6 +26,9 @@ interface Props {
   /** Renames a DT1 (same folder); resolves to its new path. */
   onRename: (path: string, name: string) => Promise<string>;
   onOpenLibrary: () => void;
+  onSelectLibrary: (path: string) => void;
+  onDetach: (path: string) => Promise<void>;
+  onRestore: () => void;
   onClose: () => void;
 }
 
@@ -33,7 +36,7 @@ interface Props {
  * Map → Tile libraries: the DT1s the map is attached to, what of each it uses (tiles marked, and shown on the map),
  * and taking a whole library off the map, taking one tile out of a DT1, or renaming a DT1.
  */
-export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCells, onRemoveTile, onRename, onOpenLibrary, onClose }: Props) {
+export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCells, onRemoveTile, onRename, onOpenLibrary, onSelectLibrary, onDetach, onRestore, onClose }: Props) {
   const original = useMemo(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path), [map]);
   const [paths, setPaths] = useState<string[]>(original);
   useEffect(() => setPaths(original), [original]);
@@ -42,20 +45,23 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const tileUsage = useMemo(() => mapTileUsage(ds1), [ds1]);
   useEffect(() => {
     setDt1(null);
     setRenaming(null);
     setError(null);
-    if (selected) void gd.dt1(selected).then(setDt1);
+    let live = true;
+    if (selected) void gd.dt1(selected).then(d => live && setDt1(d)).catch(e => live && setError(String(e)));
+    return () => { live = false; };
   }, [selected, gd]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !busy) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, busy]);
 
   /** Where a DT1 comes from, and whether it is the mod's own file (the only kind changed in place). */
   const origin = (p: string) => {
@@ -97,7 +103,7 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" onMouseDown={(e) => !busy && e.target === e.currentTarget && onClose()}>
       <div className="modal dt1-manager dt1-library dt1-review" role="dialog" aria-label="Tile libraries">
         <div className="modal-title">Tile libraries · {map.path.split('/').pop()}</div>
         <div className="dt1l-cols">
@@ -105,8 +111,9 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
             <div className="field-label">
               This map&apos;s tile libraries <span className="muted small">{paths.length}</span>
             </div>
+            <input className="search" aria-label="Search map libraries" placeholder="Search map libraries…" value={query} onChange={e => setQuery(e.target.value)} />
             <ul className="dt1m-list dt1r-list">
-              {original.map((p) => {
+              {original.filter(p => p.toLowerCase().includes(query.toLowerCase())).map((p) => {
                 const drawn = drawnOf(p);
                 const u = usedOf(p);
                 const o = origin(p);
@@ -138,7 +145,7 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
                 );
               })}
             </ul>
-            <button className="btn small" onClick={onOpenLibrary} title="Browse every tile library, add your own DT1s, or build a custom one">
+            <button className="btn small" disabled={busy} onClick={onOpenLibrary} title="Browse every tile library, add your own DT1s, or build a custom one">
               + Add libraries…
             </button>
             <p className="muted small">
@@ -157,6 +164,8 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
                 usage={tileUsage}
                 headActions={
                   <span className="dt1r-actions">
+                    <button className="btn small" disabled={busy || !dt1} onClick={() => onSelectLibrary(selected)}>Select matching map tiles</button>
+                    <button className="btn small danger" disabled={busy || !dt1 || !modRoot} onClick={() => void run(() => onDetach(selected))}>Clear tiles & detach…</button>
                     {renaming === null ? (
                       <button className="btn small" disabled={busy || !!cantChange || !!gd.fs.baseSources.some((s) => /\.mpq$/i.test(s.label) && s.has(selected))} title={cantChange ?? 'Rename the file, and every level type that loads it'} onClick={() => setRenaming(name)}>
                         Rename…
@@ -196,18 +205,18 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
                     <button
                       className="btn small danger"
                       disabled={busy || !!cantChange}
-                      title={cantChange ?? 'Take this tile out of the DT1 file (the original is kept as .bak)'}
+                      title={cantChange ?? 'Remove this whole tile group, keeping a recoverable original in Deleted DT1s'}
                       onClick={() => {
                         const lines = [
                           `Take tile #${index} (${tile.mainIndex}/${tile.subIndex}) out of ${short(selected)}?`,
                           uses ? `\nThis map places it in ${uses} cell${uses === 1 ? '' : 's'}: ${uses === 1 ? 'it' : 'they'} will show as missing unless another variant remains.` : '',
                           otherTypes.length ? `\nOther level types load this DT1 too (${otherTypes.join(', ')}): their maps lose the tile as well.` : '',
-                          '\nThe original file is kept as .bak.',
+                          '\nEvery animation frame and random variant in this tile group is removed together. The original is kept in Deleted DT1s beside the app. Use “Deleted by accident?” to restore it.',
                         ];
                         if (window.confirm(lines.join(''))) void run(() => onRemoveTile(selected, index));
                       }}
                     >
-                      Remove this tile from the DT1…
+                      Remove this tile group from the DT1…
                     </button>
                   </div>
                 )}
@@ -233,7 +242,8 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
           </p>
         )}
         <div className="modal-actions">
-          <button className="btn" onClick={onClose}>
+          <button className="btn" disabled={busy} onClick={onRestore}>Deleted by accident?</button>
+          <button className="btn" disabled={busy} onClick={onClose}>
             Close
           </button>
           <button className="btn primary" disabled={!removed.length || busy} onClick={() => onApply(paths)}>

@@ -76,6 +76,10 @@ async function binaries(dir: string): Promise<LooseSource | null> {
  */
 export async function loadFromTauri(config: DesktopConfig): Promise<LayeredFs> {
   const sources: FileSource[] = [];
+  if (config.saveDir && !config.modDirs.some(p => p.replace(/\\/g, '/').toLowerCase() === config.saveDir!.replace(/\\/g, '/').toLowerCase())) {
+    const saved = await looseData(config.saveDir + '/data', config.saveDir);
+    if (saved) sources.push(saved);
+  }
   for (const mod of config.modDirs) {
     const loose = await looseData(`${mod}/data`, mod);
     if (loose) sources.push(loose);

@@ -152,6 +152,8 @@ export class LayeredFs {
     for (const s of this.sources)
       for (const p of s.list()) {
         const key = normalizePath(p);
+        // Quarantined assets stay on disk for recovery but are outside the active editor library.
+        if (/(^|\/)pd2 ?assets\/unused\//.test(key)) continue;
         if (this.gone.has(key)) continue;
         const prev = all.get(key);
         // Some listfiles are all lower-case; keep the first spelling that preserves the game's original casing.

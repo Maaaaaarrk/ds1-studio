@@ -4,6 +4,7 @@
 //! (the first mod folder unless `saveDir` is set), only for the file kinds `writable` allows, keeping the original
 //! as `<name>.bak`.
 
+mod asset_files;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -521,6 +522,10 @@ pub fn run() {
             mcp_out,
             app_exe,
             pick_import,
+            asset_files::list_managed_assets,
+            asset_files::archive_asset,
+            asset_files::list_recycled_assets,
+            asset_files::restore_asset,
             read_picked
         ])
         .run(tauri::generate_context!())

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ContextMenu } from './ContextMenu';
 
 interface Props {
   /** A button that folds the list away, shown first in its header. */
@@ -7,6 +8,7 @@ interface Props {
   current: string | null;
   loading: string | null;
   onOpen: (path: string) => void;
+  onDelete?: (path: string) => void;
 }
 
 const PREFIX = 'data/global/tiles/';
@@ -18,8 +20,9 @@ const dirOf = (f: string) => {
 };
 
 /** Folder-grouped, filterable list of every DS1 known to the file system. Folders start collapsed. */
-export function FileBrowser({ files, current, loading, onOpen, collapse }: Props) {
+export function FileBrowser({ files, current, loading, onOpen, onDelete, collapse }: Props) {
   const [query, setQuery] = useState('');
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const groups = useMemo(() => {
@@ -86,6 +89,7 @@ export function FileBrowser({ files, current, loading, onOpen, collapse }: Props
                     key={f}
                     className={`browser-file${f === current ? ' active' : ''}${f === loading ? ' loading' : ''}`}
                     onClick={() => onOpen(f)}
+                    onContextMenu={(e) => { e.preventDefault(); setMenu({ path: f, x: e.clientX, y: e.clientY }); }}
                     title={f}
                   >
                     {f.slice(f.lastIndexOf('/') + 1)}
@@ -96,6 +100,9 @@ export function FileBrowser({ files, current, loading, onOpen, collapse }: Props
         })}
         {groups.length === 0 && <div className="muted small pad">No matches.</div>}
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} title={menu.path.split('/').pop()} onClose={() => setMenu(null)}
+        entries={[{ label: 'Open map', onClick: () => onOpen(menu.path) }, null,
+          { label: 'Delete DS1…', disabled: !onDelete, title: 'Remove the loose file and keep a recoverable backup.', onClick: () => onDelete?.(menu.path) }]} />}
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { specialTileInfo } from '../game/specialTiles';
 import { Minimap } from './Minimap';
 import { hideRect, popTargets, triggerRect, type PopArea } from '../game/pops';
 import type { Ds1 } from '../formats/ds1';
+import { canvasToWorld } from '../render/inputProjection';
 
 export interface HoverInfo {
   cellX: number;
@@ -398,12 +399,13 @@ export function MapView(props: Props) {
     /** Where a right/middle button went down, to tell a click from a pan. */
     let panStart: { x: number; y: number } | null = null;
     let stroke: [number, number] | null = null;
+    let pointer: number | null = null;
     let space = false;
     const dpr = () => window.devicePixelRatio || 1;
     const toWorld = (ev: MouseEvent): [number, number] => {
       const r = el.getBoundingClientRect();
       const cam = camera.current;
-      return [cam.x + ((ev.clientX - r.left) * dpr() - el.width / 2) / cam.zoom, cam.y + ((ev.clientY - r.top) * dpr() - el.height / 2) / cam.zoom];
+      return canvasToWorld(ev.clientX, ev.clientY, r, el, cam);
     };
     const toCell = (ev: MouseEvent): [number, number] => {
       const [fx, fy] = worldToCell(...toWorld(ev));
@@ -414,6 +416,8 @@ export function MapView(props: Props) {
       el.style.cursor = pan ? 'grabbing' : space ? 'grab' : t === 'pick' ? 'copy' : t === 'select' ? 'default' : 'crosshair';
     };
     const down = (ev: PointerEvent) => {
+      if (pointer !== null || document.querySelector('.modal-backdrop')) return;
+      pointer = ev.pointerId;
       el.setPointerCapture(ev.pointerId);
       // Resize handles take precedence over tools.
       if (ev.button === 0 && latest.current.resizeMode) {
@@ -441,6 +445,7 @@ export function MapView(props: Props) {
       setCursor();
     };
     const move = (ev: PointerEvent) => {
+      if (pointer !== null && pointer !== ev.pointerId) return;
       if (resizeDrag.current) {
         const { width: w, height: h } = latest.current.map.ds1;
         const [fx, fy] = worldToCell(...toWorld(ev));
@@ -482,6 +487,8 @@ export function MapView(props: Props) {
       }
     };
     const up = (ev: PointerEvent) => {
+      if (pointer !== ev.pointerId) return;
+      pointer = null;
       if (resizeDrag.current) {
         const { delta } = resizeDrag.current;
         resizeDrag.current = null;
@@ -508,9 +515,7 @@ export function MapView(props: Props) {
     const wheel = (ev: WheelEvent) => {
       ev.preventDefault();
       const cam = camera.current;
-      const r = el.getBoundingClientRect();
-      const wx = cam.x + ((ev.clientX - r.left) * dpr() - el.width / 2) / cam.zoom;
-      const wy = cam.y + ((ev.clientY - r.top) * dpr() - el.height / 2) / cam.zoom;
+      const [wx, wy] = toWorld(ev);
       if (ev.shiftKey) {
         // Shift+wheel picks one tile out of a stack instead of zooming (Windows turns it into a horizontal scroll).
         const d = ev.deltaY || ev.deltaX;
@@ -542,7 +547,7 @@ export function MapView(props: Props) {
         ev.preventDefault();
       }
       if (ev.key === 'Shift' && arrows.current.size) arrows.current.add('Shift');
-      if (ev.code === 'Space' && !(ev.target instanceof HTMLInputElement)) {
+      if (ev.code === 'Space' && !typing(ev.target) && !(ev.target instanceof HTMLElement && ev.target.closest('button,[role="dialog"]')) && !document.querySelector('.modal-backdrop')) {
         space = true;
         setCursor();
         ev.preventDefault();
@@ -561,18 +566,27 @@ export function MapView(props: Props) {
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
+    const cancel = () => {
+      if (stroke) latest.current.onStroke('end', [], cursorWorld.current ?? [0, 0]);
+      stroke = null; pan = null; panStart = null; resizeDrag.current = null; space = false;
+      const id = pointer; pointer = null;
+      if (id !== null && el.hasPointerCapture(id)) el.releasePointerCapture(id);
+      arrows.current.clear(); setCursor(); dirty.current = true;
+    };
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('lostpointercapture', cancel);
     el.addEventListener('pointerleave', leave);
     el.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keydown);
     window.addEventListener('keyup', keyup);
-    const blur = () => arrows.current.clear(); // no stuck keys after Alt+Tab
+    const blur = cancel;
     window.addEventListener('blur', blur);
     return () => {
       el.removeEventListener('pointerdown', down);
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
+      el.removeEventListener('pointercancel', cancel);
+      el.removeEventListener('lostpointercapture', cancel);
       el.removeEventListener('pointerleave', leave);
       el.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', keydown);
@@ -852,7 +866,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   const { ds1 } = map;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(cam.zoom, 0, 0, cam.zoom, canvas.width / 2 - cam.x * cam.zoom, canvas.height / 2 - cam.y * cam.zoom);
+  ctx.setTransform(cam.zoom, 0, 0, cam.zoom, canvas.width / 2 - Math.round(cam.x * cam.zoom), canvas.height / 2 - Math.round(cam.y * cam.zoom));
   const px = 1 / cam.zoom; // one device pixel in world units
 
   if (s.automapImage) {

@@ -64,14 +64,14 @@ import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { ACT0_PALETTE, PALETTE_NAMES } from '../formats/palette';
 import { act0Convert, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { GameData } from '../game/GameData';
-import { customAutomapEdits, type CustomDt1Plan } from '../game/customDt1';
-import { addToSelection, clampRect, fillEdits, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
+import { customAutomapEdits, planCustomDt1, type CustomDt1Plan } from '../game/customDt1';
+import { cellKey, addToSelection, clampRect, fillEdits, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { guessDrawnAct, openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, cellToWorld, hitTest, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
@@ -92,7 +92,17 @@ import { Modal, NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } fr
 import { DataTables, type TableTarget } from './DataTables';
 import { Dt1LibraryDialog } from './Dt1Manager';
 import { MapDt1Review } from './Dt1Review';
-import { renameInLvlTypes, withoutTile } from '../game/dt1Review';
+import { AssetCleanup } from './AssetCleanup';
+import './assetTools.css';
+import { FloorRerollDialog } from './FloorRerollDialog';
+import { WaterEditor, type WaterSave } from './WaterEditor';
+import { archiveAsset, findManagedAsset, managedAssets } from '../vfs/assetFiles';
+import { splitUnusedTiles, tileIdentity, usesOfLibrary } from '../game/assetUsage';
+import { smartFloorReroll, type FloorChoice, type RerollOptions } from '../game/floorReroll';
+import { prepareFloorLibrary } from '../game/floorLibrary';
+import { planAutomapClear } from '../game/automapClear';
+import { buildDt1, dt1Records } from '../formats/dt1Write';
+import { renameInLvlTypes } from '../game/dt1Review';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
@@ -191,6 +201,7 @@ export function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   // The view mode used last comes back next time (per browser/app).
+  const [tool, setTool] = useState<Tool>(() => { try { return localStorage.getItem('ds1studio.viewMode') === 'objects' ? 'object' : 'select'; } catch { return 'select'; } });
   const [visibility, setVisibilityRaw] = useState<Visibility>(() => {
     try {
       const saved = localStorage.getItem('ds1studio.viewMode');
@@ -201,10 +212,14 @@ export function App() {
   });
   /** Every visibility change keeps one view mode at a time (see ViewMode). */
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
-  const viewMode = modeOf(visibility);
+  const viewMode: ViewMode = tool === 'object' ? 'objects' : modeOf(visibility);
   /** Switches to a view mode, or back to editing tiles when it is already on. */
-  const toggleMode = useCallback((m: ViewMode) => setVisibility((v) => withMode(v, modeOf(v) === m ? 'tiles' : m)), [setVisibility]);
-  const exitMode = useCallback(() => setVisibility((v) => withMode(v, 'tiles')), [setVisibility]);
+  const toggleMode = useCallback((m: ViewMode) => {
+    const next = viewMode === m ? 'tiles' : m;
+    setTool(next === 'objects' ? 'object' : 'select');
+    setVisibility(v => withMode(v, next));
+  }, [setVisibility, viewMode]);
+  const exitMode = useCallback(() => { setTool('select'); setVisibility((v) => withMode(v, 'tiles')); }, [setVisibility]);
   useEffect(() => {
     try {
       localStorage.setItem('ds1studio.viewMode', viewMode);
@@ -212,6 +227,8 @@ export function App() {
       // per-viewer convenience only
     }
   }, [viewMode]);
+  const [modeAlert, setModeAlert] = useState<string | null>(null);
+  useEffect(() => { if (!modeAlert) return; const t = setTimeout(() => setModeAlert(null), 2500); return () => clearTimeout(t); }, [modeAlert]);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fitSignal, setFitSignal] = useState(0);
@@ -236,12 +253,18 @@ export function App() {
     // Re-frame the view at the new size when Game view is on.
     setGameView((g) => (g.on ? { ...g, signal: g.signal + 1, center: null } : g));
   }, []);
-  const [tool, setTool] = useState<Tool>('select');
+
   const [activeLayer, setActiveLayer] = useState<LayerRef>({ kind: 'floor', index: 0 });
   const [brush, setBrush] = useState<Brush | null>(null);
   /** Extra tiles painted at random together with the brush (Ctrl+click in the Tiles panel). */
   const [mix, setMix] = useState<Brush[]>([]);
   /** How Paint and Erase apply: freehand, a dragged rectangle, or a flood fill of the connected area. */
+  useEffect(() => {
+    const fits = (b: Brush) => activeLayer.kind === 'floor' ? b.orientation === 0 : activeLayer.kind === 'shadow' ? b.orientation === 13 : b.orientation !== 0 && b.orientation !== 13;
+    setMix(m => m.filter(fits));
+    setBrush(b => b && fits(b) ? b : null);
+    setStack(null);
+  }, [activeLayer.kind, activeLayer.index]);
   const [paintMode, setPaintMode] = useState<'brush' | 'rect' | 'fill'>('brush');
   /** The rectangle being dragged in rectangle mode (previewed as an outline). */
   const [paintRect, setPaintRect] = useState<CellRect | null>(null);
@@ -295,7 +318,7 @@ export function App() {
   /** The Copied panel: from a copy or cut until Esc. */
   const [clipPane, setClipPane] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -475,6 +498,15 @@ export function App() {
   };
 
   const gd = data.status === 'ready' ? data.gd : null;
+  const currentContext = useRef({ gd, map, doc });
+  currentContext.current = { gd, map, doc };
+  const mapRequest = useRef(0);
+  const [cleanupPalette, setCleanupPalette] = useState<Uint8Array | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (gd && (dialog === 'cleanup' || dialog === 'restore')) void gd.palette(0).then(p => live && setCleanupPalette(p)).catch(e => notify(String(e), true));
+    return () => { live = false; };
+  }, [gd, dialog, notify]);
   const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
   const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
 
@@ -496,9 +528,11 @@ export function App() {
     async (path: string, confirmed = false, using?: GameData) => {
       const g = using ?? gd;
       if (!g || (!confirmed && !confirmDiscard())) return;
+      const request = ++mapRequest.current;
       setLoadingPath(path);
       try {
         const m = await openMap(g, path);
+        if (request !== mapRequest.current) return;
         setMap(m);
         setDoc(new MapDocument(path, m.ds1));
         setRecentMapList(addRecentMap(path));
@@ -519,7 +553,7 @@ export function App() {
       } catch (e) {
         notify(`${path}: ${(e as Error).message}`, true);
       } finally {
-        setLoadingPath(null);
+        if (request === mapRequest.current) setLoadingPath(null);
       }
     },
     [gd, confirmDiscard, notify],
@@ -799,6 +833,7 @@ export function App() {
         const orientation = hit.tile.orientation === Orientation.LeftPartOfNorthCornerWall ? Orientation.RightPartOfNorthCornerWall : hit.tile.orientation;
         focusTile(hit.tile, layer);
         setBrush({ orientation, main: hit.tile.mainIndex, sub: hit.tile.subIndex });
+        setMix([]);
         setTool('paint');
         notify(`Picked ${hit.tile.mainIndex}/${hit.tile.subIndex} from ${layerLabel(layer)}`);
         return;
@@ -813,6 +848,7 @@ export function App() {
         const orientation = layer.kind === 'wall' ? (c as WallCell).orientation : layer.kind === 'floor' ? Orientation.Floor : Orientation.Shadow;
         setActiveLayer(layer);
         setBrush({ orientation, main: c.mainIndex, sub: c.subIndex });
+        setMix([]);
         setTool('paint');
         notify(`Picked ${c.mainIndex}/${c.subIndex} from ${layerLabel(layer)}`);
         return;
@@ -979,17 +1015,8 @@ export function App() {
         const cell = cells[cells.length - 1];
         if (phase === 'start' && cell) {
           selectAnchor.current = cell;
-          // Clicking a tile selects the cell it belongs to (tall walls and trees overlap the cells behind them)
-          // and reveals the tile in its DT1 in the Tiles panel.
-          const opaque = scene ? hitTestAll(scene, world[0], world[1], hittable) : [];
-          const hit = opaque[0];
-          const hits = scene && hit ? stackAt(scene, world[0], world[1], hittable) : opaque;
-          setStack(hits.length > 1 ? { items: hits, index: -1, anchor: world } : null);
-          if (hit) {
-            selectAnchor.current = [hit.cellX, hit.cellY];
-            focusTile(hit.tile, layerOfItem(hit));
-            if (hits.length > 1) notify(`${hits.length} tiles overlap here: Shift+wheel to pick one layer`);
-          }
+          // Selection follows the grid; Alt+click and the Pick tool target visible tile pixels.
+          setStack(null);
           // Shift adds to the selection: a cell per click, a rectangle per drag (irregular shapes).
           selectBase.current = mods?.shift && selection ? selection : null;
           const r = clampRect(rectFrom(selectAnchor.current, selectAnchor.current), doc.ds1.width, doc.ds1.height);
@@ -1177,6 +1204,7 @@ export function App() {
   }, [doc, selection, brush, mix, activeLayer, notify]);
   const rerollSelection = useCallback(() => {
     if (!doc || !selection) return;
+    if (activeLayer.kind === 'floor') { setDialog('floors'); return; }
     const edits = rerollEdits(doc, selection, [activeLayer]);
     if (doc.apply(edits, `Re-roll ${layerLabel(activeLayer)}`)) {
       bump();
@@ -1341,9 +1369,13 @@ export function App() {
     const next = await GameData.load(gd.fs);
     const files = gd.fs.list((p) => p.endsWith('.ds1') && p.startsWith('data/global/tiles/'));
     setData({ ...data, gd: next, files });
-    if (map) setMap(await openMap(next, map.path, undefined, map.ds1));
+    if (map) {
+      const request = mapRequest.current;
+      const refreshed = await openMap(next, map.path, map.resolution.source === 'manual' ? { source: 'manual', paths: map.resolution.paths, lvlType: map.resolution.lvlType } : undefined, map.ds1);
+      if (currentContext.current.doc === doc && request === mapRequest.current) setMap(refreshed);
+    }
     return next;
-  }, [gd, data, map]);
+  }, [gd, data, map, doc]);
 
   // The level's light, read again whenever the tables or the map change.
   useEffect(() => {
@@ -1404,57 +1436,188 @@ export function App() {
     return usage;
   }, [scene, map]);
 
+  const libraryDocuments = useRef(new WeakSet<MapDocument>());
   const applyDt1s = useCallback(
-    async (paths: string[], opts: { keepOpen?: boolean } = {}) => {
+    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean } = {}) => {
       if (!gd || !map || !doc) return;
-      // The DS1's embedded list mirrors the libraries (WinDS1 keeps its own DS1EDIT_* notes in there too).
-      mutate((d) => {
-        const notes = d.files.filter((f) => !/data[\\/]/i.test(f));
-        d.files = [...paths.map(embeddedFileName), ...notes];
-      });
-      if (!opts.keepOpen) setDialog(null);
-      // Keep the game's tables in step, or the game won't load the new tiles: new DT1s go into free File slots of
-      // the level type (LvlTypes.txt) and the preset's Dt1Mask (LvlPrest.txt) selects exactly these libraries.
-      let tableNote = '';
-      let problem = false;
-      // A map the game doesn't load yet (a new one): its tables are made by Add to game, with these libraries.
-      if (!map.resolution.preset) tableNote = ' (Game → Add to game puts them in the game tables when the map is ready)';
-      else if (data.status === 'ready' && data.saveTarget) {
+      let note = '';
+      if (map.resolution.preset) {
         try {
-          // Tables get each file's own spelling (capitals kept).
-          const writes = await syncLevelTables(gd.fs, map.path, paths.map((p) => gd.fs.exactPath(p) ?? p), map.resolution.lvlType?.id);
-          if (writes.length) {
-            await writeFiles(writes);
-            await reloadTables();
-            notify(`Tile libraries: ${paths.length}. Updated ${writes.flatMap((w) => w.summary).join('; ')}`);
-            return;
-          }
+          const writes = await syncLevelTables(gd.fs, map.path, paths.map(p => gd.fs.exactPath(p) ?? p), map.resolution.lvlType?.id);
+          if (writes.length) await writeFiles(writes);
         } catch (e) {
-          tableNote = ` (game tables not updated: ${(e as Error).message})`;
-          problem = true;
+          if (opts.strict) throw e;
+          note = ' Game tables could not be updated: ' + String(e);
         }
-      } else {
-        tableNote = ' (no writable mod folder, so LvlTypes/Dt1Mask were not updated)';
-        problem = true;
       }
-      setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths }, map.ds1));
-      notify(`Tile libraries: ${paths.length}${tableNote}`, problem);
+      if (currentContext.current.doc !== doc) return;
+      libraryDocuments.current.add(doc);
+      mutate(d => { d.files = [...paths.map(embeddedFileName), ...d.files.filter(f => !/data[\\/]/i.test(f))]; });
+      const next = await GameData.load(gd.fs);
+      const auto = next.resolveDt1s(map.path, doc.ds1);
+      const matches = auto.paths.map(normalizePath).join('|') === paths.map(normalizePath).join('|');
+      const refreshed = await openMap(next, map.path, matches ? undefined : { source: 'manual', paths, lvlType: next.lvlType(map.resolution.lvlType?.id ?? -1) ?? map.resolution.lvlType }, doc.ds1);
+      if (currentContext.current.doc !== doc) return;
+      setData(d => d.status === 'ready' ? { ...d, gd: next } : d);
+      setMap(refreshed);
+      if (!opts.keepOpen) setDialog(null);
+      notify('Tile libraries: ' + paths.length + note, !!note);
     },
-    [gd, map, doc, data, mutate, notify, writeFiles, reloadTables],
+    [gd, map, doc, mutate, writeFiles, notify],
   );
 
-  /** Tile libraries: takes one tile out of a mod DT1 (the file is rewritten; the original is kept as .bak). */
-  const removeDt1Tile = useCallback(
-    async (path: string, index: number) => {
-      if (!gd) return;
-      const bytes = await gd.fs.read(path);
-      if (!bytes) throw new Error(`${path} was not found.`);
-      await writeFiles([{ path: gd.fs.exactPath(path) ?? path, bytes: withoutTile(bytes, index) }]);
-      await reloadTables();
-      notify(`Took tile #${index} out of ${path.split('/').pop()} (the original is kept as .bak).`);
-    },
-    [gd, writeFiles, reloadTables, notify],
-  );
+  // Library changes are part of map undo. Restore their previews as the embedded list changes.
+  useEffect(() => {
+    if (!gd || !map || !doc || !libraryDocuments.current.has(doc)) return;
+    const paths = doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p);
+    if (paths.map(normalizePath).join('|') === map.resolution.paths.map(normalizePath).join('|')) return;
+    let live = true;
+    void openMap(gd, map.path, { source: 'manual', paths, lvlType: map.resolution.lvlType }, doc.ds1)
+      .then(m => { if (live && currentContext.current.doc === doc) setMap(m); })
+      .catch(e => live && notify(String(e), true));
+    return () => { live = false; };
+  }, [gd, map, doc, revision, notify]);
+
+  /** Re-index physical assets without discarding the open document. */
+  const refreshAssets = useCallback(async () => {
+    if (!isTauri || !desktopCfg || data.status !== 'ready') return;
+    const previous = currentContext.current;
+    const request = mapRequest.current;
+    const fs = await loadFromTauri(desktopCfg);
+    const next = await GameData.load(fs);
+    setData(d => d.status === 'ready' ? { ...d, gd: next, files: fs.list(p => p.endsWith('.ds1') && p.startsWith('data/global/tiles/')) } : d);
+    if (previous.map && previous.doc) {
+      const m = previous.map;
+      const refreshed = await openMap(next, m.path, m.resolution.source === 'manual' ? { source: 'manual', paths: m.resolution.paths, lvlType: m.resolution.lvlType } : undefined, previous.doc.ds1);
+      if (currentContext.current.doc === previous.doc && request === mapRequest.current) setMap(refreshed);
+    }
+  }, [desktopCfg, data.status]);
+
+  const openCleanup = (restore = false) => {
+    if (flagEdits.current.size) { notify('Save or discard the pending walkability changes before managing files.', true); return; }
+    setDialog(restore ? 'restore' : 'cleanup');
+  };
+  const deleteDs1 = async (path: string) => {
+    if (!gd || !isTauri) return;
+    try {
+      const owned = findManagedAsset(await managedAssets(), path, gd.fs.locate(path));
+      if (!owned) throw new Error('This map is inside a game archive or a read-only source. Only loose DS1 files can be deleted.');
+      const active = doc && normalizePath(doc.path) === normalizePath(path);
+      if (!window.confirm('Delete ' + path + '?\n\n' + (active && doc.dirty ? 'Its unsaved edits will also be discarded.\n' : '') +
+        'A recoverable backup will be kept beside DS1 Studio in Deleted DS1s. Game table references are unchanged. If this overrides a base-game map, the base version will become visible.')) return;
+      await archiveAsset(owned, await gd.fs.readOrThrow(path), 'delete');
+      if (active && currentContext.current.doc === doc) {
+        ++mapRequest.current;
+        setMap(null); setDoc(null); setSelection(null); setHover(null); setStack(null);
+        currentContext.current = { ...currentContext.current, map: null, doc: null };
+      }
+      await deleteRecovery(path);
+      await refreshAssets();
+      notify('Deleted ' + path.split('/').pop() + '. Diagnostics → Restore assets can put it back.');
+    } catch (e) { notify(String(e), true); }
+  };
+
+  const selectMapCells = (cells: { x: number; y: number }[]) => {
+    if (!doc || !cells.length) { notify('No matching tiles in the open map.'); return; }
+    const valid = cells.filter(c => doc.inBounds(c.x, c.y));
+    if (!valid.length) return;
+    const mask = new Set<number>();
+    const area: CellSelection = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, cells: mask };
+    for (const c of valid) { area.x0 = Math.min(area.x0, c.x); area.y0 = Math.min(area.y0, c.y); area.x1 = Math.max(area.x1, c.x); area.y1 = Math.max(area.y1, c.y); mask.add(cellKey(c.x, c.y)); }
+    setSelection(area); setMarks(valid); setStack(null); setDialog(null); exitMode();
+    const [x, y] = cellToWorld(valid[0].x + 0.5, valid[0].y + 0.5);
+    setCenterOn(c => ({ x, y, signal: (c?.signal ?? 0) + 1 }));
+    notify(area.cells!.size + ' matching map cells selected.');
+  };
+  const showLibraryUses = async (path: string) => {
+    if (!gd || !doc || !map) return;
+    try {
+      if (!map.lib.loaded.some(l => normalizePath(l.path) === normalizePath(path))) { notify('This map does not load that DT1.'); return; }
+      selectMapCells(usesOfLibrary(doc.ds1, parseDt1(await gd.fs.readOrThrow(path)).tiles));
+    } catch (e) { notify(String(e), true); }
+  };
+  const detachLibrary = async (path: string) => {
+    if (!gd || !doc || !map) return;
+    const uses = usesOfLibrary(doc.ds1, parseDt1(await gd.fs.readOrThrow(path)).tiles);
+    if (!window.confirm('Clear ' + uses.length + ' matching tile placements and detach ' + path.split('/').pop() +
+      ' from this map?\n\nTile numbers shared with other libraries also match. The DT1 file stays on disk. Map changes can be undone; save the map to keep them.')) return;
+    const paths = map.lib.loaded.filter(l => !isBuiltinPath(l.path) && normalizePath(l.path) !== normalizePath(path)).map(l => l.path);
+    const writes = map.resolution.preset ? await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id) : [];
+    if (writes.length) await writeFiles(writes);
+    libraryDocuments.current.add(doc);
+    doc.mutate(d => {
+      for (const u of uses) {
+        const cells = u.layer.kind === 'floor' ? d.floors[u.layer.index] : u.layer.kind === 'wall' ? d.walls[u.layer.index] : d.shadows[u.layer.index];
+        cells[u.y * d.width + u.x] = MapDocument.painted(u.layer, cells[u.y * d.width + u.x], null);
+      }
+      d.files = [...paths.map(embeddedFileName), ...d.files.filter(f => !/data[\\/]/i.test(f))];
+    });
+    bump();
+    const next = await GameData.load(gd.fs);
+    setData(d => d.status === 'ready' ? { ...d, gd: next } : d);
+    const refreshed = await openMap(next, map.path, { source: 'manual', paths, lvlType: map.resolution.lvlType }, doc.ds1);
+    if (currentContext.current.doc === doc) setMap(refreshed);
+    setDialog(null); notify('Cleared matching placements and detached the library. Save the map to keep the changes.');
+  };
+
+  const removeDt1Tile = useCallback(async (path: string, index: number) => {
+    if (!gd) return;
+    if (!isTauri) throw new Error('Deleting DT1 tiles with recovery requires the desktop app.');
+    const owned = findManagedAsset(await managedAssets(), path, gd.fs.locate(path));
+    if (!owned) throw new Error('Only loose DT1 files can be changed here.');
+    const bytes = await gd.fs.readOrThrow(path), tiles = parseDt1(bytes).tiles, tile = tiles[index];
+    const expected = (await gd.dt1(path))?.tiles[index];
+    if (!tile || !expected || tile.orientation !== expected.orientation || tile.mainIndex !== expected.mainIndex || tile.subIndex !== expected.subIndex)
+      throw new Error('That tile changed after the viewer opened. Refresh the libraries before deleting it.');
+    const key = tileIdentity(tile.orientation, tile.mainIndex, tile.subIndex);
+    const indices = tiles.flatMap((t, i) => tileIdentity(t.orientation, t.mainIndex, t.subIndex) === key ? [i] : []);
+    const split = splitUnusedTiles(bytes, indices);
+    await archiveAsset(owned, bytes, 'delete', split.remaining, split.removed);
+    await refreshAssets();
+    notify('Removed ' + indices.length + ' tile record(s). Use Deleted by accident? to restore the original.');
+  }, [gd, refreshAssets, notify]);
+
+  const applyFloorReroll = async (choices: FloorChoice[], layer: number, options: RerollOptions) => {
+    if (!gd || !doc || !map) return;
+    const area = selection ?? { x0: 0, y0: 0, x1: doc.ds1.width - 1, y1: doc.ds1.height - 1 };
+    const sources = new Map<string, Uint8Array>();
+    for (const path of new Set(choices.map(c => c.path))) sources.set(path, await gd.fs.readOrThrow(path));
+    const plan = prepareFloorLibrary(choices, sources, new Set(map.lib.entries().map(e => tileIdentity(e.orientation, e.main, e.sub))));
+    if (plan.skipped.length || !plan.records.length) throw new Error(plan.skipped.join('\n') || 'No floor tiles could be copied.');
+    const path = 'data/global/tiles/studio/f' + Date.now().toString(36) + '.dt1';
+    const bytes = buildDt1(plan.records), tiles = parseDt1(bytes).tiles;
+    const selected = plan.tiles.map((t, i) => ({ path, index: i, tile: tiles[i], brush: { orientation: 0, main: t.newMain, sub: t.newSub } }));
+    const result = smartFloorReroll(doc, map.lib, area, layer, selected, options);
+    if (!result.edits.length) throw new Error('No eligible floors match these choices. Try other tiles or turn off Preserve walkability.');
+    const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
+    if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
+    await writeFiles([{ path, bytes }]);
+    await applyDt1s(paths, { keepOpen: true, strict: true });
+    if (currentContext.current.doc !== doc) return;
+    doc.apply(result.edits, 'Reroll floors'); bump(); setActiveLayer({ kind: 'floor', index: layer }); setDialog(null);
+    notify('Rerolled ' + result.edits.length + ' floors' + (result.skipped ? '; kept ' + result.skipped + ' cells with different walkability' : '') + '. Save the map to keep the changes.');
+  };
+  const saveWater = async (change: WaterSave) => {
+    if (!gd || !map || !doc) return;
+    const existing = await gd.fs.read(change.path);
+    if (change.expected ? !existing || existing.length !== change.expected.length || existing.some((b, i) => b !== change.expected![i]) : !!existing)
+      throw new Error(change.expected ? 'The source changed since opening. Reopen it before saving.' : 'That file already exists. Choose another name.');
+    let bytes = change.bytes;
+    const paths = map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path);
+    const listed = paths.some(p => normalizePath(p) === normalizePath(change.path));
+    if (!change.expected && change.addToMap) {
+      const plan = planCustomDt1(dt1Records(bytes).map((_, index) => ({ dt1: change.path, index })), new Map([[change.path, bytes]]), new Set(map.lib.entries().map(e => tileIdentity(e.orientation, e.main, e.sub))));
+      if (plan.skipped.length) throw new Error(plan.skipped.join('\n'));
+      bytes = buildDt1(plan.records);
+    }
+    if (change.expected) bytes.set(change.expected.subarray(8, 268), 8);
+    if (change.addToMap && !listed && map.resolution.preset) await syncLevelTables(gd.fs, map.path, [...paths, change.path], map.resolution.lvlType?.id);
+    await writeFiles([{ path: change.path, bytes }]);
+    if (change.addToMap && !listed) await applyDt1s([...paths, change.path], { keepOpen: true, strict: true });
+    else await reloadTables();
+    notify('Saved water animation in ' + change.path.split('/').pop() + '.');
+  };
+
   /**
    * Tile libraries: renames a mod DT1 in its folder. The file is written under the new name, every level type that
    * loads it (LvlTypes.txt) and this map are pointed at it, and the old file is moved aside to .bak (never deleted).
@@ -1700,6 +1863,29 @@ export function App() {
   );
 
   /** DT1 editor: write the edited DT1, optionally swap it in for the original, then reload so every cache sees it. */
+  const [clearingAutomap, setClearingAutomap] = useState(false);
+  const clearAutomapSelection = async () => {
+    if (!gd || !doc || !map || !selection || !automapLevel || clearingAutomap) return;
+    const expectedRevision = doc.revision;
+    setClearingAutomap(true);
+    try {
+      const table = await loadTable(gd.fs, 'AutoMap.txt');
+      if (!table) throw new Error('AutoMap.txt was not found.');
+      const plan = await planAutomapClear(gd, map.lib, doc.ds1, selection, automapPiecesNow ?? [], table, automapLevel);
+      if (currentContext.current.doc !== doc || doc.revision !== expectedRevision) throw new Error('The map changed while preparing the automap edit. Select the cells again.');
+      if (!plan?.edits.length) { notify('No visible automap pieces in the selection.'); return; }
+      const path = 'data/global/tiles/studio/a' + Date.now().toString(36) + '.dt1';
+      const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
+      if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
+      if (currentContext.current.doc !== doc) return;
+      await writeFiles([{ path, bytes: plan.bytes }, { path: AUTOMAP_TXT, bytes: serializeTxtTable(plan.table) }]);
+      await applyDt1s(paths, { keepOpen: true, strict: true });
+      if (currentContext.current.doc !== doc) return;
+      doc.apply(plan.edits, 'Clear selected automap pieces'); bump(); setAutomapSuggestions(null);
+      notify('Cleared selected automap pieces. Other cells keep their pieces. Save the map to keep the changes.');
+    } catch (e) { notify(String(e), true); }
+    finally { setClearingAutomap(false); }
+  };
   const saveEditedDt1 = useCallback(
     async (r: Dt1EditResult) => {
       if (!gd || !map || !doc) return;
@@ -2343,38 +2529,48 @@ export function App() {
   );
 
   const undo = useCallback(() => {
-    if (doc?.undo()) bump();
+    if (doc?.undo()) { setSelection(null); setStack(null); setHover(null); bump(); }
   }, [doc]);
   const redo = useCallback(() => {
-    if (doc?.redo()) bump();
+    if (doc?.redo()) { setSelection(null); setStack(null); setHover(null); bump(); }
   }, [doc]);
 
+  const savingMap = useRef(false);
   const save = useCallback(async () => {
-    if (!doc || !gd || data.status !== 'ready') return;
+    if (!doc || !gd || data.status !== 'ready' || savingMap.current) return;
+    doc.endStroke(); doc.endObjectEdit();
+    const savedRevision = doc.revision, savedPath = doc.path;
     const known = data.files.some((f) => f.toLowerCase() === doc.path.toLowerCase());
     if (!known) setData({ ...data, files: [...data.files, doc.path].sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1)) });
     const bytes = writeDs1(doc.ds1);
+    const savedMap = parseDs1(bytes);
     const name = doc.path.split('/').pop()!;
+    savingMap.current = true;
     try {
+      if (data.saveTarget && map?.resolution.preset && libraryDocuments.current.has(doc)) {
+        const paths = doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p);
+        const writes = await syncLevelTables(gd.fs, savedPath, paths, map.resolution.lvlType?.id);
+        if (writes.length) await writeFiles(writes);
+      }
       if (data.saveTarget) {
-        notify(await data.saveTarget.save(doc.path, bytes));
-        gd.fs.remember(doc.path, bytes, data.saveTarget.label);
+        notify(await data.saveTarget.save(savedPath, bytes));
+        gd.fs.remember(savedPath, bytes, data.saveTarget.label);
       } else {
         downloadFile(name, bytes);
         notify(`Downloaded ${name} (no writable mod folder configured)`);
       }
       doc.ds1.version = WRITE_VERSION;
-      doc.markSaved();
+      if (doc.revision === savedRevision && doc.path === savedPath) doc.markSaved();
       // A level reached by a map item: warn if portal arrivals would land on empty ground (the game stops there).
       if (map?.resolution.preset) {
-        const p = arrivalProblem(doc.ds1, (type, id) => gd.isWaypoint(doc.ds1.act, type, id));
-        if (p) notify(`Saved ${name}, but a map item's portal into this level would crash the game: ${arrivalText(p)} Game → Compatibility check can crop it.`, true);
+        const p = arrivalProblem(savedMap, (type, id) => gd.isWaypoint(savedMap.act, type, id));
+        if (p) notify(`Saved ${name}, but a map item's portal into this level would crash the game: ${arrivalText(p)} Diagnostics → Compatibility can crop it.`, true);
       }
       // A whole-level preset must be exactly the level's size (Levels SizeX/SizeY = DS1 size - 1) or the game stops
       // building it: after a resize, keep the level in step.
       if (data.saveTarget) {
         const [prest, levels] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt')]);
-        const fix = prest && levels ? levelSizeFix({ prest, levels }, doc.path.replace(/^data\/global\/tiles\//i, ''), doc.ds1) : null;
+        const fix = prest && levels ? levelSizeFix({ prest, levels }, savedPath.replace(/^data\/global\/tiles\//i, ''), savedMap) : null;
         if (fix) {
           try {
             await writeFiles(fix.writes);
@@ -2386,11 +2582,11 @@ export function App() {
         }
       }
       // Saved: the autosaved copy isn't needed any more.
-      void deleteRecovery(doc.path).then(() => listRecoveries().then(setRecoveries));
+      if (doc.revision === savedRevision && doc.path === savedPath) void deleteRecovery(savedPath).then(() => listRecoveries().then(setRecoveries));
       bump();
     } catch (e) {
       notify(`Save failed: ${(e as Error).message}`, true);
-    }
+    } finally { savingMap.current = false; }
   }, [doc, gd, data, notify, writeFiles, reloadTables, map]);
 
   const exportFile = useCallback(async () => {
@@ -2429,11 +2625,13 @@ export function App() {
   /** Tab / Shift+Tab: the next or previous view (each with its own right-hand panel). */
   const cycleView = useCallback(
     (dir: 1 | -1) => {
-      const to = nextView(modeOf(visibility), dir);
+      const to = nextView(viewMode, dir);
+      setTool(to === 'objects' ? 'object' : 'select');
+      setModeAlert(VIEW_NAMES[to] + ' mode');
       setVisibility((v) => withMode(v, to));
       notify(`View: ${VIEW_NAMES[to]} · Tab for the next`);
     },
-    [visibility, setVisibility, notify],
+    [viewMode, setVisibility, notify],
   );
 
   const toggleGameView = useCallback(() => {
@@ -2475,7 +2673,7 @@ export function App() {
       'view.popsInside': vis((v) => ({ ...v, popsInside: !v.popsInside })),
       'tool.erase': () => setTool('erase'),
       'tool.pick': () => setTool('pick'),
-      'tool.object': () => setTool('object'),
+      'tool.object': () => toggleMode('objects'),
       'tool.toggleObjects': toggleObjects,
       'edit.undo': undo,
       'edit.redo': redo,
@@ -2486,6 +2684,7 @@ export function App() {
       'edit.paste': startPaste,
       'edit.selectAll': () => {
         if (!doc) return;
+        setStack(null);
         setSelection({ x0: 0, y0: 0, x1: doc.ds1.width - 1, y1: doc.ds1.height - 1 });
         setTool('select');
       },
@@ -2529,8 +2728,8 @@ export function App() {
       'view.game': toggleGameView,
       'view.grid': vis((v) => ({ ...v, grid: !v.grid })),
       'view.rooms': vis((v) => ({ ...v, rooms: !v.rooms })),
-      'view.walkable': vis((v) => ({ ...v, walkable: !v.walkable })),
-      'view.automap': vis((v) => ({ ...v, automap: !v.automap })),
+      'view.walkable': () => toggleMode('walk'),
+      'view.automap': () => toggleMode('automap'),
       'view.markers': vis((v) => ({ ...v, objects: !v.objects })),
       'view.sprites': vis((v) => ({ ...v, sprites: !v.sprites })),
       'view.paths': vis((v) => ({ ...v, paths: !v.paths })),
@@ -2545,14 +2744,14 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView, toggleMode]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
-  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu };
+  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu || clearingAutomap };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-      if (keyState.current.dialogOpen) return;
+      if (keyState.current.dialogOpen || target.closest('[role="dialog"]')) return;
       const combo = comboOf(e);
       if (!combo) return;
       // Windows only reports Print Screen when it is released; take it there on every system (never twice).
@@ -2679,7 +2878,7 @@ export function App() {
         },
         {
           label: 'Tools',
-          items: TOOLS.map((t) => ({ label: t.label, icon: TOOL_ICONS[t.id], onClick: () => setTool(t.id), active: tool === t.id, disabled: noMap, title: t.hint, shortcut: kb[`tool.${t.id}` as ActionId] })),
+          items: TOOLS.filter(t => t.id !== 'object').map((t) => ({ label: t.label, icon: TOOL_ICONS[t.id], onClick: () => setTool(t.id), active: tool === t.id, disabled: noMap, title: t.hint, shortcut: kb[`tool.${t.id}` as ActionId] })),
         },
         {
           label: 'Paint / erase',
@@ -2727,6 +2926,7 @@ export function App() {
           label: 'Mode',
           items: [
             { label: 'Tiles', icon: <Paintbrush />, onClick: exitMode, active: viewMode === 'tiles', disabled: noMap, title: 'Edit tiles and objects: the Tiles, Cell, History, Layers and Map panels' },
+            { label: 'Objects', icon: <Box />, onClick: () => toggleMode('objects'), active: viewMode === 'objects', disabled: noMap, shortcut: kb['tool.object'], title: 'Select, move and place objects and NPCs' },
             { label: 'Walkability', icon: <Footprints />, onClick: () => toggleMode('walk'), active: viewMode === 'walk', disabled: noMap, shortcut: kb['view.walkable'], title: 'See and paint where units can walk, sub-tile by sub-tile' },
             { label: 'Automap', icon: <MapIcon />, onClick: () => toggleMode('automap'), active: viewMode === 'automap', disabled: noMap, shortcut: kb['view.automap'], title: 'Preview the in-game automap and see/change the AutoMap.txt piece of each tile' },
             { label: 'Level light', icon: <Sun />, onClick: () => toggleMode('light'), active: viewMode === 'light', disabled: noMap, shortcut: kb['view.light'], title: "The map in its level's light (Levels.txt Intensity and colour), with a player's light at the mouse; change and apply it" },
@@ -2790,6 +2990,8 @@ export function App() {
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
             { label: 'DT1 library…', icon: <Grid2x2Plus />, onClick: () => setDialog('dt1lib'), disabled: noMap, size: 'sm', title: 'Browse every tile library the game and your mods have, add DT1s from your computer, add whole libraries to the map or build a custom DT1 from single tiles' },
             { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, size: 'sm', title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+            { label: 'Reroll floors…', icon: <RefreshCw />, onClick: () => setDialog('floors'), disabled: noMap || !canWrite, size: 'sm', title: 'Choose floor tiles and reroll the selection or whole map' },
+            { label: 'Animated water…', icon: <Blend />, onClick: () => setDialog('water'), disabled: noMap || !canWrite, size: 'sm', title: 'Edit water frames or create new animated water' },
             { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, size: 'sm', title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
           ],
         },
@@ -2831,11 +3033,17 @@ export function App() {
             { label: 'CubeMain', icon: <Table2 />, onClick: () => openTable('CubeMain'), size: 'sm' },
           ],
         },
+      ],
+    },
+    {
+      id: 'diagnostics', label: 'Diagnostics', groups: [
         {
           label: 'Check',
           items: [
             { label: 'Compatibility', icon: <ShieldCheck />, onClick: () => void runCheck(), disabled: noMap, title: 'Check that this map will load and play in game' },
             { label: 'Crash log', icon: <FileWarning />, onClick: openCrashLog, title: "Read the game's crash log and see what the latest crash means for your map" },
+            { label: 'Unused DT1s…', icon: <Search />, onClick: () => openCleanup(), title: 'Find unused DT1 files and tile groups across all maps' },
+            { label: 'Restore assets…', icon: <Undo2 />, onClick: () => openCleanup(true), title: 'Restore deleted DT1s, tile groups and maps to their original folders' },
           ],
         },
       ],
@@ -2997,6 +3205,7 @@ export function App() {
             current={map?.path ?? null}
             loading={loadingPath}
             onOpen={open}
+            onDelete={isTauri ? path => void deleteDs1(path) : undefined}
             collapse={
               <button className="icon-btn" title="Fold the presets list away (more room for the map)" onClick={() => setLeftCollapsed(true)}>
                 <PanelLeftClose size={15} />
@@ -3007,6 +3216,7 @@ export function App() {
       </aside>
 
       <main className="stage">
+        {modeAlert && <div className="mode-alert" role="status" aria-live="polite">{modeAlert}</div>}
         {map && scene && visibility.walkable && <WalkLegend floating />}
         {map && scene && walkArea !== null && (() => {
           const { rgb, band } = areaColour(walkArea);
@@ -3131,13 +3341,13 @@ export function App() {
         {rightCollapsed && (
           <button className="sidebar-expand" onClick={() => setRightCollapsed(false)} title="Show the side panels">
             <PanelRightOpen size={16} />
-            <span className="sidebar-expand-label">{viewMode === 'tiles' ? 'Panels' : { walk: 'Walkability', automap: 'Automap', light: 'Level light', roofs: 'Roof hiding' }[viewMode]}</span>
+            <span className="sidebar-expand-label">{viewMode === 'tiles' ? 'Panels' : { objects: 'Objects', walk: 'Walkability', automap: 'Automap', light: 'Level light', roofs: 'Roof hiding' }[viewMode]}</span>
           </button>
         )}
         {!rightCollapsed && (
         <>
         <ErrorBoundary what="the side panel" resetKey={`${map?.path}:${tool}`} context={() => ({ map: map?.path })} compact>
-        {map && scene && doc && viewMode !== 'tiles' && (
+        {map && scene && doc && viewMode !== 'tiles' && viewMode !== 'objects' && (
           <ModeFrame mode={viewMode} onDone={exitMode}>
             {viewMode === 'walk' && (
               <WalkPanel
@@ -3166,6 +3376,8 @@ export function App() {
                   cell={selection && isSingleCell(selection) ? { x: selection.x0, y: selection.y0 } : null}
                   canSave={canWrite}
                   onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
+                  hasSelection={!!selection && !clearingAutomap}
+                  onClearSelection={() => void clearAutomapSelection()}
                   suggestions={automapSuggestions}
                   onSuggest={(floors) => {
                     if (!automapLevel) return;
@@ -3211,7 +3423,7 @@ export function App() {
             )}
           </ModeFrame>
         )}
-        {map && scene && doc && viewMode === 'tiles' && (
+        {map && scene && doc && (viewMode === 'tiles' || viewMode === 'objects') && (
           <>
             {clipPane && clipboard && (
               <ClipboardPanel
@@ -3390,6 +3602,7 @@ export function App() {
               revision={revision}
               onGoTo={(n) => {
                 doc.goTo(n);
+                setSelection(null); setStack(null); setHover(null);
                 bump();
               }}
             />
@@ -3664,6 +3877,7 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
+      {clearingAutomap && <div className="modal-backdrop"><div className="modal" role="dialog" aria-label="Clearing automap pieces"><p role="status">Clearing selected automap pieces…</p></div></div>}
       {dialog === 'dt1edit' && map && (
         <Dt1Editor
           map={map}
@@ -3725,6 +3939,11 @@ export function App() {
           onClose={() => setImporting(null)}
         />
       )}
+      {(dialog === 'cleanup' || dialog === 'restore') && (map?.palette || cleanupPalette) && (
+        <AssetCleanup gd={data.gd} map={map} palette={(map?.palette ?? cleanupPalette)!} initialRestore={dialog === 'restore'} onChanged={refreshAssets} onShowUses={path => void showLibraryUses(path)} onClose={() => setDialog(null)} />
+      )}
+      {dialog === 'floors' && map && doc && <FloorRerollDialog gd={data.gd} map={map} selection={selection} initialLayer={activeLayer.kind === 'floor' ? activeLayer.index : 0} onApply={applyFloorReroll} onClose={() => setDialog(null)} />}
+      {dialog === 'water' && map && <WaterEditor gd={data.gd} map={map} canSave={canWrite} onSave={saveWater} onClose={() => setDialog(null)} />}
       {dialog === 'dt1s' && map && doc && (
         <MapDt1Review
           map={map}
@@ -3733,11 +3952,10 @@ export function App() {
           usage={dt1Usage}
           modRoot={data.saveTarget?.label ?? null}
           onApply={(p) => void applyDt1s(p)}
-          onShowCells={(cells) => {
-            setMarks(cells);
-            setDialog(null);
-            notify(`${cells.length} cell${cells.length === 1 ? '' : 's'} marked · Esc to clear`);
-          }}
+          onShowCells={selectMapCells}
+          onSelectLibrary={path => void showLibraryUses(path)}
+          onDetach={detachLibrary}
+          onRestore={() => openCleanup(true)}
           onRemoveTile={removeDt1Tile}
           onRename={renameDt1}
           onOpenLibrary={() => setDialog('dt1lib')}

@@ -7,6 +7,7 @@ import type { Brush, LayerKind } from '../game/MapDocument';
 import { Splitter, usePersistentSize } from './Splitter';
 import { specialTileInfo } from '../game/specialTiles';
 import { ORIENTATION_NAMES } from './state';
+import { groupPaintTiles } from '../game/tileGroups';
 
 interface Props {
   lib: TileLibrary;
@@ -16,7 +17,7 @@ interface Props {
   /** Extra tiles painted at random together with the brush (Ctrl+click adds). */
   mix?: Brush[];
   focus: PaletteFocus | null;
-  /** `add`: Ctrl/Shift+click, add to (or remove from) the random mix instead of replacing the brush. */
+  /** Ctrl/Command+click adds to (or removes from) the random mix instead of replacing the brush. */
   onPick: (b: Brush, add?: boolean) => void;
   /** Recently used and pinned tiles of this map's tile set, shown above the grid. */
   recent?: Brush[];
@@ -44,7 +45,7 @@ function TileStrip({ label, list, lib, palette, layerKind, brush, onPick, onTogg
               title: `${ORIENTATION_NAMES[b.orientation] ?? `o${b.orientation}`} · main ${b.main} · sub ${b.sub}`,
               lines: [`Click: paint · Ctrl+click: add to the mix · right-click: ${favourites.some((f) => sameBrush(f, b)) ? 'unpin' : 'pin'}`],
             }))}
-            onClick={(e) => onPick(b, e.ctrlKey || e.metaKey || e.shiftKey)}
+            onClick={(e) => onPick(b, e.ctrlKey || e.metaKey)}
             onContextMenu={(e) => {
               e.preventDefault();
               onToggleFavourite?.(b);
@@ -250,7 +251,7 @@ export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, o
   }, []);
 
   // A new map (tile library) starts in the combined view.
-  useEffect(() => setDt1('all'), [lib]);
+  useEffect(() => setDt1('all'), [lib, layerKind]);
 
   // Reveal a focused tile: open its DT1, clear filters, then scroll it into view.
   useEffect(() => {
@@ -277,7 +278,7 @@ export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, o
     const all: Entry[] =
       dt1 === 'all'
         ? lib.entries()
-        : lib.tilesOf(dt1).map((t, index) => ({ orientation: t.orientation, main: t.mainIndex, sub: t.subIndex, tiles: [t], index }));
+        : groupPaintTiles(lib.tilesOf(dt1));
     return all
       .filter((e) => fitsLayer(layerKind, e.orientation) && test(e.orientation))
       .filter((e) => !q || `${e.main}/${e.sub}`.startsWith(q) || String(e.main) === q);
@@ -357,7 +358,7 @@ export function TilePalette({ lib, palette, layerKind, brush, mix = [], focus, o
                   ].filter(Boolean),
                 };
               })}
-              onClick={(ev) => onPick(me, ev.ctrlKey || ev.metaKey || ev.shiftKey)}
+              onClick={(ev) => onPick(me, ev.ctrlKey || ev.metaKey)}
               onContextMenu={(ev) => {
                 ev.preventDefault();
                 onToggleFavourite?.(me);

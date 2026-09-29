@@ -562,7 +562,7 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
         <button className="btn" disabled={!canPaste} onClick={onPaste} title="Paste; click on the map to place it (Ctrl+V)">
           Paste
         </button>
-        <button className="btn" onClick={onReroll} title={`Mix up ${layerLabel(activeLayer)} in the selection: each tile becomes a random one of the same group (main index) already used here, so repeats are less visible`}>
+        <button className="btn" onClick={onReroll} title={activeLayer.kind === 'floor' ? 'Choose floor tiles from any library and reroll the selected cells' : `Mix up ${layerLabel(activeLayer)} using variants already present in the selection`}>
           Re-roll {layerLabel(activeLayer)}
         </button>
         <button className="btn" onClick={onReplace} title="Swap one tile for another in the selection or the whole map">

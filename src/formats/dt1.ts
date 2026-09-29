@@ -63,6 +63,7 @@ export interface Dt1 {
 }
 
 export function parseDt1(bytes: Uint8Array): Dt1 {
+  if (bytes.length < 276) throw new Error('DT1 header is truncated.');
   const r = new BinaryReader(bytes);
   const v1 = r.i32();
   const v2 = r.i32();
@@ -70,10 +71,12 @@ export function parseDt1(bytes: Uint8Array): Dt1 {
   r.skip(260);
   const count = r.i32();
   const headerPtr = r.i32();
+  if (count < 0 || headerPtr < 276 || headerPtr > bytes.length || count > Math.floor((bytes.length - headerPtr) / 96))
+    throw new Error('DT1 tile headers are outside the file.');
   r.seek(headerPtr);
 
   const tiles: Dt1Tile[] = [];
-  const blockInfo: { ptr: number; count: number }[] = [];
+  const blockInfo: { ptr: number; count: number; length: number }[] = [];
   for (let i = 0; i < count; i++) {
     const direction = r.i32();
     const roofHeight = r.i16();
@@ -90,18 +93,21 @@ export function parseDt1(bytes: Uint8Array): Dt1 {
     const subTileFlags = r.bytesView(25).slice();
     r.skip(7);
     const blockPtr = r.i32();
-    r.skip(4); // block data length
+    const blockLength = r.i32();
     const blockCount = r.i32();
+    if (blockCount < 0 || blockLength < 0 || (blockCount > 0 &&
+      (blockPtr < headerPtr + count * 96 || blockPtr > bytes.length || blockLength > bytes.length - blockPtr || blockCount > Math.floor(blockLength / 20))))
+      throw new Error('DT1 block region is outside the file.');
     r.skip(12);
     tiles.push({
       direction, roofHeight, soundIndex, animated, height, width,
       orientation, mainIndex, subIndex, rarity, subTileFlags, blocks: [],
     });
-    blockInfo.push({ ptr: blockPtr, count: blockCount });
+    blockInfo.push({ ptr: blockPtr, count: blockCount, length: blockLength });
   }
 
   for (let i = 0; i < count; i++) {
-    const { ptr, count: n } = blockInfo[i];
+    const { ptr, count: n, length: regionLength } = blockInfo[i];
     if (n <= 0 || ptr <= 0) continue;
     r.seek(ptr);
     const headers: { x: number; y: number; gridX: number; gridY: number; format: number; length: number; offset: number }[] = [];
@@ -115,6 +121,8 @@ export function parseDt1(bytes: Uint8Array): Dt1 {
       const length = r.i32();
       r.skip(2);
       const offset = r.i32();
+      if (length < 0 || offset < n * 20 || offset > regionLength || length > regionLength - offset)
+        throw new Error('DT1 block pixel data is outside the file.');
       headers.push({ x, y, gridX, gridY, format, length, offset });
     }
     tiles[i].blocks = headers.map((h) => ({
@@ -154,6 +162,7 @@ export function decodeTile(tile: Dt1Tile): TileImage | null {
   }
   const width = maxX - minX;
   const height = maxY - minY;
+  if (width * height > 16_777_216) throw new Error('DT1 tile image is too large to preview safely.');
   const pixels = new Uint8Array(width * height);
 
   for (const b of tile.blocks) {
@@ -183,6 +192,7 @@ export function decodeTile(tile: Dt1Tile): TileImage | null {
           continue;
         }
         x += skip;
+        if (x + n > 32 || p + n > d.length) throw new Error('DT1 tile contains truncated or overflowing pixel runs.');
         const dst = (oy + y) * width + ox + x;
         pixels.set(d.subarray(p, p + n), dst);
         p += n;

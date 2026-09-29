@@ -4,6 +4,7 @@
  * only its region pointer changes. Layout: see parseDt1.
  */
 
+import { parseDt1 } from './dt1';
 export const DT1_HEADER_SIZE = 276;
 export const DT1_TILE_HEADER_SIZE = 96;
 
@@ -20,6 +21,7 @@ const view = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLengt
 
 /** Every tile of a DT1 as a record, in file order. */
 export function dt1Records(bytes: Uint8Array): Dt1Record[] {
+  parseDt1(bytes); // Refuse truncated records before a rewrite can silently discard their pixel data.
   const v = view(bytes);
   const count = v.getInt32(268, true);
   const headerPtr = v.getInt32(272, true);

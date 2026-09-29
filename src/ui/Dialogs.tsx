@@ -4,8 +4,7 @@ import type { ResizeDelta } from '../formats/ds1ops';
 export function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);

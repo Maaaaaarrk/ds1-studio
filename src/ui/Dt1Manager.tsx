@@ -301,8 +301,10 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
     };
   }, [gd, palMode, ownAct, map]);
   useEffect(() => {
+    let live = true;
     setDt1(null);
-    if (selected) void gd.dt1(selected).then(setDt1);
+    if (selected) void gd.dt1(selected).then(d => live && setDt1(d)).catch(() => live && setDt1(null));
+    return () => { live = false; };
   }, [selected, gd]);
   // A DT1 just imported: show it.
   useEffect(() => {

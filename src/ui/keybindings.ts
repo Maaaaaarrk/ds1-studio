@@ -22,7 +22,7 @@ export const ACTIONS = [
   { id: 'edit.delete', label: 'Delete (active layer / object)', group: 'Edit', key: 'Delete' },
   { id: 'edit.deleteAll', label: 'Delete everything (all layers + objects)', group: 'Edit', key: 'Shift+Delete' },
   { id: 'edit.replace', label: 'Find & replace tiles', group: 'Edit', key: 'Ctrl+H' },
-  { id: 'view.next', label: 'Next view (Tiles, Walkability, Automap, Level light, Roof hiding)', group: 'View', key: 'Tab' },
+  { id: 'view.next', label: 'Next view (Tiles, Objects, Walkability, Automap, Level light, Roof hiding)', group: 'View', key: 'Tab' },
   { id: 'view.prev', label: 'Previous view', group: 'View', key: 'Shift+Tab' },
   { id: 'view.fit', label: 'Fit map', group: 'View', key: 'F' },
   { id: 'view.game', label: 'Game view (what the character sees)', group: 'View', key: 'Z' },
