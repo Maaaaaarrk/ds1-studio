@@ -220,6 +220,14 @@ export function AutomapPanel(props: Props) {
                       </div>
                       <button className="btn small" disabled={!canSave || !level} onClick={() => setPicking(p)} title={canSave ? '' : 'No writable mod folder'}>
                         Change piece…
+                      </button>{' '}
+                      <button
+                        className="btn small"
+                        disabled={!canSave || !level || p.cel === null}
+                        onClick={() => onSet(p, -1, 'seq')}
+                        title={p.cel === null ? 'Not on the automap already' : `Show nothing on the automap for this kind of tile (${AUTOMAP_CODES[p.orientation]} style ${p.main} seq ${p.sub}), wherever it is on the level`}
+                      >
+                        Clear piece
                       </button>
                     </td>
                   </tr>
@@ -318,6 +326,11 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
         )}
       </div>
       <div className="cel-grid">
+        <button className={`cel-cell cel-none${piece.cel === null ? ' active' : ''}`} onClick={() => onPick(-1, scope)} title="No automap piece: these tiles aren't drawn on the automap">
+          <span className="cel-none-mark">∅</span>
+          <span className="small">No piece</span>
+          <span className="muted tiny">off the automap</span>
+        </button>
         {list.map((c) => (
           <button key={c} className={`cel-cell${piece.cel === c ? ' active' : ''}`} onClick={() => onPick(c, scope)} title={`Cel ${c}${labels.get(c) ? ` · ${labels.get(c)}` : ''}`}>
             <CelThumb frame={cels[c]} palette={palette} scale={3} />

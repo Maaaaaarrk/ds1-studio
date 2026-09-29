@@ -181,6 +181,17 @@ describe('automap rules', () => {
     expect(b.doc.rows.length).toBe(doc.rows.length);
     expect(findRule(parseAutomap(b.doc), '1 Town', 0, 0, 9)!.cels.map((c) => c.cel)).toEqual([42]);
   });
+  it('clears a piece: a row in front that matches the tile and draws nothing, the others untouched', () => {
+    const c = setAutomapCel(doc, '1 Town', 1, 2, 1, -1, 'seq');
+    expect(c.summary).toMatch(/no piece/);
+    const t = parseAutomap(c.doc);
+    expect(findRule(t, '1 Town', 1, 2, 1)!.cels).toEqual([]);
+    expect(findRule(t, '1 Town', 1, 2, 2)!.cels[0].cel).toBe(9);
+    // An exact row already there is emptied in place.
+    const d = setAutomapCel(doc, '1 Town', 0, 0, 7, -1, 'style');
+    expect(findRule(parseAutomap(d.doc), '1 Town', 0, 0, 7)!.cels).toEqual([]);
+    expect(d.doc.rows.length).toBe(doc.rows.length);
+  });
 });
 
 import { automapLevelFor } from '../src/game/automap';

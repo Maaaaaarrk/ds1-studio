@@ -243,7 +243,8 @@ export function setAutomapCel(
   const cols = celColumns(doc);
   const exact = rules.find((r) => (scope === 'seq' ? r.start === sub && (r.end === sub || r.end < 0) : r.start < 0));
   const rows = doc.rows.map((r) => r.slice());
-  const what = `${level} ${code} style ${style} ${scope === 'seq' ? `seq ${sub}` : 'all sequences'} → cel ${cel}`;
+  // cel -1: the row matches but draws nothing (Cel1 -1), so the tile is left off the automap.
+  const what = `${level} ${code} style ${style} ${scope === 'seq' ? `seq ${sub}` : 'all sequences'} → ${cel < 0 ? 'no piece (off the automap)' : `cel ${cel}`}`;
   if (exact) {
     const r = rows[exact.row];
     while (r.length < doc.columns.length) r.push('');

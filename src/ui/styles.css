@@ -961,3 +961,7 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .am-import { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 6px 0; }
 .am-import th, .am-import td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .am-import select { max-width: 280px; }
+
+/* Automap piece picker: the "no piece" choice. */
+.cel-none { justify-content: center; }
+.cel-none-mark { font-size: 26px; line-height: 1; opacity: 0.7; }
