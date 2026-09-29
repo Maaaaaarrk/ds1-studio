@@ -96,12 +96,12 @@ interface Props {
    */
   pops?: { areas: PopArea[]; popPad: number; show: boolean; inside: boolean; hidden: Set<string> };
   /** Sub-tiles being painted in walkability mode (keys sy * 65536 + sx), and whether they get blocked or cleared. */
-  walkMarks?: { keys: ReadonlySet<number>; mode: 'block' | 'clear' } | null;
+  walkMarks?: { keys: ReadonlySet<number>; mode: 'block' | 'clear' | 'replace' } | null;
   /**
    * Walkability mode's brush: the cursor shows its footprint on the sub-tile grid instead of a whole cell, and strokes
    * report every new sub-tile the cursor reaches (not just new cells).
    */
-  walkBrush?: { size: 1 | 3 | 5 | 'cell'; mode: 'block' | 'clear' } | null;
+  walkBrush?: { size: 1 | 3 | 5 | 'cell'; mode: 'block' | 'clear' | 'replace' } | null;
   /**
    * Objects on the cursor after Ctrl+C / Ctrl+X in object mode (positions relative to the cursor's sub-tile): drawn
    * tinted, green for a copy, red for a cut, until they're placed.
@@ -218,6 +218,7 @@ export function MapView(props: Props) {
     let raf = 0;
     let last = performance.now();
     const frame = () => {
+      if (!glCanvas.current || !overlay.current) return;
       raf = requestAnimationFrame(frame);
       const dpr = window.devicePixelRatio || 1;
       // Arrow keys pan smoothly while held (Shift = faster), at a steady on-screen speed whatever the zoom.
@@ -498,7 +499,7 @@ export function MapView(props: Props) {
       const inside = cx >= 0 && cy >= 0 && cx < m.ds1.width && cy < m.ds1.height;
       if (!inside) {
         if (h) hov(null);
-      } else if (!h || h.cellX !== cx || h.cellY !== cy || !oldCell || oldCell[0] !== hoverCell[0] || oldCell[1] !== hoverCell[1]) {
+      } else if (latest.current.walkBrush || !h || h.cellX !== cx || h.cellY !== cy || !oldCell || oldCell[0] !== hoverCell[0] || oldCell[1] !== hoverCell[1]) {
         hov({ cellX: cx, cellY: cy, world: cursorWorld.current });
       }
     };

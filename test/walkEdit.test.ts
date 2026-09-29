@@ -119,3 +119,62 @@ describe('walkability editing (sub-tile by sub-tile, this map only)', () => {
     expect(full.edits).toEqual([]);
   });
 });
+
+
+describe('collision regression coverage', () => {
+  it('preserves weighted variant choice for every seed when flags are removed', async () => {
+    const variants = [2, 7, 11].map((rarity, n) => {
+      const r = blockerRecord(1, 1, new Uint8Array(25).fill(7));
+      new DataView(r.header.buffer).setInt32(32, rarity, true);
+      r.header[6] = n + 10; // distinguish artwork records without a decoder dependency
+      return r;
+    });
+    const bytes = buildDt1(variants), lib = new TileLibrary(); lib.add(FLOOR, parseDt1(bytes));
+    const d = ds1();
+    const p = await planWalkEdit({ ds1: d, lib, walk: null, walkPath: WALK, read: async () => bytes, paint: { mode: 'clear', bits: 13, cells: new Map([[1, 1 << 12]]) } });
+    expect(p.skipped).toEqual([]);
+    const next = new TileLibrary(); next.add(FLOOR, parseDt1(bytes)); next.add(WALK, parseDt1(p.dt1!));
+    const sub = p.edits.find(e => e.layer.index === 0)!.cell.subIndex;
+    for (let seed = 0; seed < 2048; seed++) {
+      const before = lib.pick(0, 1, 1, seed)!, after = next.pick(0, 1, sub, seed)!;
+      expect(after.soundIndex).toBe(before.soundIndex);
+      expect(after.rarity).toBe(before.rarity);
+      expect(after.subTileFlags[12]).toBe(2);
+    }
+  });
+
+  it('supports all 256 exact combinations without altering neighbouring sub-tiles', async () => {
+    for (let bits = 0; bits <= 255; bits++) {
+      const d = ds1(), bytes = buildDt1([blockerRecord(1, 1, new Uint8Array(25).fill(0xAD))]);
+      const lib = new TileLibrary(); lib.add(FLOOR, parseDt1(bytes));
+      const p = await planWalkEdit({ ds1: d, lib, walk: null, walkPath: WALK, read: async () => bytes, paint: { mode: 'replace', bits, cells: new Map([[1, 1 << 7]]) } });
+      expect(p.skipped).toEqual([]);
+      while (d.floors.length < p.floors) d.floors.push(Array.from({ length: 4 }, () => decodeCell(0)));
+      for (const e of p.edits) d.floors[e.layer.index][e.x] = e.cell;
+      if (p.dt1) lib.add(WALK, parseDt1(p.dt1));
+      const combined = walkability(d, buildScene(d, lib), lib).slice(25, 50);
+      expect(combined[7], `combination ${bits}`).toBe(bits);
+      expect([...combined].filter((_, k) => k !== 7).every(f => f === 0xAD)).toBe(true);
+    }
+  });
+
+  it('clears both DS1 whole-cell restrictions and tile flags together, retaining the unpainted area', async () => {
+    const d = ds1(); d.floors[0][1] = { ...d.floors[0][1], prop3: 3 };
+    const lib = new TileLibrary(); lib.add(FLOOR, parseDt1(floorDt1));
+    const p = await planWalkEdit({ ds1: d, lib, walk: null, walkPath: WALK, read: async () => floorDt1, paint: { mode: 'clear', bits: 13, cells: new Map([[1, 1 << 12]]) } });
+    expect(p.changed).toBe(1); expect(p.skipped).toEqual([]);
+    const result = apply(d, p, null);
+    expect(result.d.floors[0][1].prop3 & 3).toBe(0);
+    const flags = walkability(d, buildScene(d, result.lib), result.lib).slice(25, 50);
+    expect(flags[12]).toBe(0);
+    expect([...flags].filter((_, k) => k !== 12).every(f => f === 5)).toBe(true);
+  });
+
+  it('rolls back an entire cell when preserving its unpainted flags needs an unavailable floor slot', async () => {
+    const d = ds1(); d.floors[0][1] = { ...d.floors[0][1], prop3: 3 };
+    d.floors.push(d.floors[0].map(c => ({ ...c })));
+    const lib = new TileLibrary(); lib.add(FLOOR, parseDt1(floorDt1));
+    const p = await planWalkEdit({ ds1: d, lib, walk: null, walkPath: WALK, read: async () => floorDt1, paint: { mode: 'clear', bits: 13, cells: new Map([[1, 1 << 12]]) } });
+    expect(p.skipped).toHaveLength(1); expect(p.changed).toBe(0); expect(p.edits).toEqual([]); expect(p.dt1).toBeNull();
+  });
+});

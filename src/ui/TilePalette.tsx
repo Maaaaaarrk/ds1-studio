@@ -61,16 +61,23 @@ function TileStrip({ label, list, lib, palette, layerKind, brush, onPick, onTogg
   );
 }
 
-type WallFilter = 'all' | 'walls' | 'objects' | 'roofs' | 'lower' | 'special';
-
-const WALL_FILTERS: { id: WallFilter; label: string; test: (o: number) => boolean }[] = [
-  { id: 'all', label: 'All', test: () => true },
-  { id: 'walls', label: 'Walls', test: (o) => o >= 1 && o <= 9 },
-  { id: 'objects', label: 'Objects', test: (o) => o === Orientation.PillarsColumnsAndStandaloneObjects || o === Orientation.Tree },
-  { id: 'roofs', label: 'Roofs', test: (o) => o === Orientation.Roof },
-  { id: 'lower', label: 'Lower', test: (o) => o >= 16 },
-  { id: 'special', label: 'Special', test: (o) => o === Orientation.SpecialTile1 || o === Orientation.SpecialTile2 },
+type TileCategory = 'floors' | 'walls' | 'shadows' | 'objects' | 'roofs' | 'special';
+const CATEGORIES: { id: TileCategory; label: string; kind: LayerKind }[] = [
+  { id: 'floors', label: 'Floors', kind: 'floor' },
+  { id: 'walls', label: 'Walls', kind: 'wall' },
+  { id: 'shadows', label: 'Shadows', kind: 'shadow' },
+  { id: 'objects', label: 'Objects', kind: 'wall' },
+  { id: 'roofs', label: 'Roofs', kind: 'wall' },
+  { id: 'special', label: 'Special', kind: 'wall' },
 ];
+export function tileCategory(o: number): TileCategory {
+  if (o === 0) return 'floors';
+  if (o === 13) return 'shadows';
+  if (o === 12 || o === 14) return 'objects';
+  if (o === 15) return 'roofs';
+  if (o === 10 || o === 11) return 'special';
+  return 'walls'; // Upper and lower walls share one clear category.
+}
 
 function fitsLayer(kind: LayerKind, o: number): boolean {
   if (kind === 'floor') return o === Orientation.Floor;
@@ -215,7 +222,8 @@ interface Entry {
 const shortPath = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
 export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
-  const [filter, setFilter] = useState<WallFilter>('all');
+  const [filter, setFilter] = useState<TileCategory>('walls');
+  const category = layerKind === 'floor' ? 'floors' : layerKind === 'shadow' ? 'shadows' : ['floors', 'shadows'].includes(filter) ? 'walls' : filter;
   const [query, setQuery] = useState('');
   const [preview, hover, hidePreview] = usePreview();
   const [dt1, setDt1] = useState<string>('all');
@@ -259,7 +267,7 @@ export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush,
     if (!focus) return;
     const src = lib.sourceOf(focus.tile);
     if (src) setDt1(src.path);
-    setFilter('all');
+    setFilter(tileCategory(focus.tile.orientation));
     setQuery('');
     pendingScroll.current = { seq: focus.seq, dt1: src?.path ?? null };
   }, [focus, lib]);
@@ -274,7 +282,7 @@ export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush,
   );
 
   const entries = useMemo((): Entry[] => {
-    const test = layerKind === 'wall' ? WALL_FILTERS.find((f) => f.id === filter)!.test : () => true;
+    const test = (o: number) => tileCategory(o) === category;
     const q = query.trim();
     const all: Entry[] =
       dt1 === 'all'
@@ -283,7 +291,7 @@ export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush,
     return all
       .filter((e) => fitsLayer(layerKind, e.orientation) && test(e.orientation))
       .filter((e) => !q || `${e.main}/${e.sub}`.startsWith(q) || String(e.main) === q);
-  }, [lib, layerKind, filter, query, dt1]);
+  }, [lib, layerKind, category, query, dt1]);
 
   // Scroll once the focused tile is actually rendered: opening its DT1 or switching layer re-renders the grid first.
   useLayoutEffect(() => {
@@ -304,9 +312,11 @@ export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush,
   return (
     <div className="tile-palette">
       <div className="palette-controls">
-        {onLayerKindChange && <div className="chips" aria-label="Tile categories">
-          {(['floor', 'wall', 'shadow'] as const).map((kind) => <button key={kind} className={`chip${layerKind === kind ? ' active' : ''}`} onClick={() => onLayerKindChange(kind)}>{kind === 'floor' ? 'Floors' : kind === 'wall' ? 'Walls / objects' : 'Shadows'}</button>)}
-        </div>}
+        <div className="chips" aria-label="Tile categories">
+          {CATEGORIES.filter(c => onLayerKindChange || c.kind === layerKind).map(c =>
+            <button key={c.id} className={`chip${category === c.id ? ' active' : ''}`} title={c.id === 'walls' ? 'Upper and lower wall pieces' : c.label}
+              onClick={() => { setFilter(c.id); setDt1('all'); onLayerKindChange?.(c.kind); }}>{c.label}</button>)}
+        </div>
         <select className="dt1-select" value={dt1} onChange={(e) => setDt1(e.target.value)} title="Browse one tile library (DT1) at a time">
           <option value="all">All tile libraries (combined)</option>
           {dt1s.map((d) => (
@@ -315,19 +325,10 @@ export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush,
             </option>
           ))}
         </select>
-        {layerKind === 'wall' && (
-          <div className="chips">
-            {WALL_FILTERS.map((f) => (
-              <button key={f.id} className={`chip${filter === f.id ? ' active' : ''}`} onClick={() => setFilter(f.id)}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-        )}
         <input className="search small-input" placeholder="main/sub…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-      <TileStrip label="★ Pinned" list={favourites} lib={lib} palette={palette} layerKind={layerKind} brush={brush} onPick={onPick} onToggleFavourite={onToggleFavourite} favourites={favourites} />
-      <TileStrip label="Recent" list={recent} lib={lib} palette={palette} layerKind={layerKind} brush={brush} onPick={onPick} onToggleFavourite={onToggleFavourite} favourites={favourites} />
+      <TileStrip label="★ Pinned" list={favourites.filter(b => tileCategory(b.orientation) === category)} lib={lib} palette={palette} layerKind={layerKind} brush={brush} onPick={onPick} onToggleFavourite={onToggleFavourite} favourites={favourites} />
+      <TileStrip label="Recent" list={recent.filter(b => tileCategory(b.orientation) === category)} lib={lib} palette={palette} layerKind={layerKind} brush={brush} onPick={onPick} onToggleFavourite={onToggleFavourite} favourites={favourites} />
       <div
         className="thumb-grid"
         ref={grid}

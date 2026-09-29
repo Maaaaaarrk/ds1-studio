@@ -5,17 +5,9 @@ import type { Palette } from '../formats/palette';
 import { HelpTip } from './HelpTip';
 import { ORIENTATION_NAMES } from './state';
 
-/** The eight sub-tile flag bits, as DS1Edit / DT1 Tools users know them. */
-export const FLAG_BITS: { bit: number; name: string; color: string; help: string }[] = [
-  { bit: 0x01, name: 'Block walk', color: '#ff9f40', help: 'Nobody can walk here — players, mercenaries or monsters. Used for walls, rocks, water, cliffs.' },
-  { bit: 0x02, name: 'Block light & sight', color: '#5ad15a', help: 'Blocks light and line of sight: you can’t see (or target) through it. Walls usually have this with “Block walk”.' },
-  { bit: 0x04, name: 'Block jump / teleport', color: '#4da3ff', help: 'Can’t leap or teleport onto this spot (Barbarian Leap, Sorceress Teleport…).' },
-  { bit: 0x08, name: 'Block player walk', color: '#b77dff', help: 'Players can’t walk here but mercenaries and monsters can (used for doorways and edges the player shouldn’t cross).' },
-  { bit: 0x10, name: 'Block missiles', color: '#ffe14d', help: 'Arrows, bolts and other missiles stop here even though units might walk it.' },
-  { bit: 0x20, name: 'Block light', color: '#7fe3ff', help: 'Blocks light only (not sight or movement): makes the area behind it darker.' },
-  { bit: 0x40, name: 'Monster-only block', color: '#f0f0f0', help: 'Monsters can’t walk here but players can.' },
-  { bit: 0x80, name: 'Reserved / unknown', color: '#8b8b95', help: 'Unused by the game as far as anyone knows; kept as it is.' },
-];
+import { COLLISION_FLAGS } from '../game/collisionFlags';
+
+export const FLAG_BITS = COLLISION_FLAGS;
 
 /** Plain-language explanations of every field in a DT1 Tools .ini block. */
 export const FIELD_HELP: Record<string, string> = {

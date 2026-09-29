@@ -21,13 +21,7 @@ import { isBuiltinPath } from './specialTiles';
  * map's edits never leaves a cell pointing at a tile that is gone.
  */
 
-/** Sub-tile flag bits (as in DT1s) the editor offers. */
-export const WALK_FLAGS = [
-  { bit: 0x01, name: 'Walking', help: 'Nobody can walk here (players, mercenaries, monsters).' },
-  { bit: 0x04, name: 'Jumping & teleport', help: 'Leap, Teleport and other jumps can’t land or pass here.' },
-  { bit: 0x02, name: 'Sight & light', help: 'Blocks line of sight and light (you can’t see or target through it).' },
-  { bit: 0x08, name: 'Players only', help: 'Players can’t walk here; mercenaries and monsters can.' },
-] as const;
+export { COLLISION_FLAGS as WALK_FLAGS } from './collisionFlags';
 
 /** Overlay order (row by row from the cell's top corner, as the walkability overlay uses) ↔ DT1 file order. */
 export const fileIndex = (k: number) => (4 - Math.floor(k / 5)) * 5 + (k % 5);
@@ -38,7 +32,7 @@ export function walkDt1Path(mapPath: string): string {
 }
 
 export interface WalkPaint {
-  mode: 'block' | 'clear';
+  mode: 'block' | 'clear' | 'replace';
   /** Flag bits to set or clear (WALK_FLAGS). */
   bits: number;
   /** Cell index (y * width + x) → the sub-tiles painted in it, as a 25-bit mask in overlay order. */
@@ -113,6 +107,7 @@ export async function planWalkEdit(opts: {
   const blockerFor = (flags: Uint8Array): number => {
     const found = records.find((r) => !r.blocks.length && recordInfo(r).orientation === 0 && recordInfo(r).main === blockMain && same(recordInfo(r).flags, flags));
     if (found) return recordInfo(found).sub;
+    if (blockMain < 0) throw new Error('No free floor number for a collision blocker.');
     const s = freeSub([[0, blockMain]]);
     if (s < 0) throw new Error('The walkability library is full (256 blocker patterns).');
     records.push(blockerRecord(blockMain, s, flags));
@@ -135,7 +130,8 @@ export async function planWalkEdit(opts: {
   const forkFor = async (keys: Contributor['keys'], clear: Uint8Array): Promise<number | null> => {
     const copies: { o: number; m: number; rec: Dt1Record }[] = [];
     for (const k of keys)
-      for (const t of lib.variants(k.o, k.m, k.s)) {
+      // TileLibrary inserts each file record at the front; reverse once to preserve weighted artwork choice.
+      for (const t of [...lib.variants(k.o, k.m, k.s)].reverse()) {
         const rec = await recordOf(t);
         if (!rec) return null;
         const flags = recordInfo(rec).flags.map((f, i) => f & ~clear[i]);
@@ -149,8 +145,8 @@ export async function planWalkEdit(opts: {
       if (keys.some((k) => k.o === i.orientation && k.m === i.main)) bySub.set(i.sub, [...(bySub.get(i.sub) ?? []), r]);
     }
     const body = (r: Dt1Record) => [...r.header.slice(0, 28), ...r.header.slice(32, 72), ...r.header.slice(84)].join(',') + '|' + r.blocks.join(',');
-    const want = copies.map((c) => body(c.rec)).sort().join('#');
-    for (const [s, rs] of bySub) if (rs.map(body).sort().join('#') === want) return s;
+    const want = copies.map((c) => body(c.rec)).join('#');
+    for (const [s, rs] of bySub) if (rs.map(body).join('#') === want) return s;
     const s = freeSub(keys.map((k) => [k.o, k.m]));
     if (s < 0) return null;
     for (const c of copies) {
@@ -161,85 +157,106 @@ export async function planWalkEdit(opts: {
   };
 
   for (const [i, mask] of paint.cells) {
+    if (!Number.isInteger(i) || i < 0 || i >= ds1.width * ds1.height || !(mask & 0x1ffffff)) continue;
+    const startRecords = records.length, startEdits = edits.length, startFloors = floors;
+    const startTaken = new Set(taken);
+    const clearBits = paint.mode === 'replace' ? (~paint.bits & 255) : paint.bits & 255;
     const x = i % ds1.width;
     const y = Math.floor(i / ds1.width);
-    // What adds flags to this cell: floor layers, then walls (special markers aren't loaded by the game).
-    const contributors: Contributor[] = [];
-    ds1.floors.forEach((l, index) => {
-      const c = l[i];
-      if (!isEmptyCell(c)) contributors.push({ layer: { kind: 'floor', index }, cell: c, keys: [{ o: 0, m: c.mainIndex, s: c.subIndex }] });
-    });
-    ds1.walls.forEach((l, index) => {
-      const c = l[i];
-      if (isEmptyCell(c) || c.orientation === Orientation.SpecialTile1 || c.orientation === Orientation.SpecialTile2) return;
-      const keys = [{ o: c.orientation, m: c.mainIndex, s: c.subIndex }];
-      if (c.orientation === Orientation.RightPartOfNorthCornerWall) keys.push({ o: Orientation.LeftPartOfNorthCornerWall, m: c.mainIndex, s: c.subIndex });
-      contributors.push({ layer: { kind: 'wall', index }, cell: c, keys });
-    });
-    const flagsOf = (c: Contributor) => {
-      const out = new Uint8Array(25);
-      for (const k of c.keys) for (const t of lib.variants(k.o, k.m, k.s)) t.subTileFlags.forEach((f, j) => (out[j] |= f));
-      return out;
-    };
-    const blocker = contributors.find((c) => c.layer.kind === 'floor' && isBlocker(c.cell));
-    const others = contributors.filter((c) => c !== blocker);
-    const wholeCell = contributors.filter((c) => (c.cell.prop3 & 0x02) !== 0);
-    const noFloor = !contributors.some((c) => c.layer.kind === 'floor');
-    // Current flags per file byte, without the blocker (the blocker is rebuilt below).
-    const base = new Uint8Array(25);
-    for (const c of others) flagsOf(c).forEach((f, j) => (base[j] |= f));
-    if (wholeCell.length) base.forEach((_, j) => (base[j] |= 0x01));
-    if (noFloor) base.forEach((_, j) => (base[j] |= 0x01)); // the game fills an empty cell with a hidden blocking floor
-    let want = blocker ? blockerFlags(blocker.cell) : new Uint8Array(25);
-    const before = new Uint8Array(25).map((_, j) => base[j] | want[j]);
-    const painted = new Uint8Array(25);
-    for (let k = 0; k < 25; k++) if (mask & (1 << k)) painted[fileIndex(k)] = 1;
+    try {
+      // What adds flags to this cell: floor layers, then walls (special markers aren't loaded by the game).
+      const contributors: Contributor[] = [];
+      ds1.floors.forEach((l, index) => {
+        const c = l[i];
+        if (!isEmptyCell(c)) contributors.push({ layer: { kind: 'floor', index }, cell: c, keys: [{ o: 0, m: c.mainIndex, s: c.subIndex }] });
+      });
+      ds1.walls.forEach((l, index) => {
+        const c = l[i];
+        if (isEmptyCell(c) || c.orientation === Orientation.SpecialTile1 || c.orientation === Orientation.SpecialTile2) return;
+        const keys = [{ o: c.orientation, m: c.mainIndex, s: c.subIndex }];
+        if (c.orientation === Orientation.RightPartOfNorthCornerWall) keys.push({ o: Orientation.LeftPartOfNorthCornerWall, m: c.mainIndex, s: c.subIndex });
+        contributors.push({ layer: { kind: 'wall', index }, cell: c, keys });
+      });
+      const flagsOf = (c: Contributor) => {
+        const out = new Uint8Array(25);
+        for (const k of c.keys) for (const t of lib.variants(k.o, k.m, k.s)) t.subTileFlags.forEach((f, j) => (out[j] |= f));
+        return out;
+      };
+      const blocker = contributors.find((c) => c.layer.kind === 'floor' && isBlocker(c.cell));
+      const others = contributors.filter((c) => c !== blocker);
+      const wholeCell = contributors.filter((c) => (c.cell.prop3 & 0x03) !== 0);
+      const noFloor = !contributors.some((c) => c.layer.kind === 'floor');
+      // Current flags per file byte, without the blocker (the blocker is rebuilt below).
+      const base = new Uint8Array(25);
+      for (const c of others) flagsOf(c).forEach((f, j) => (base[j] |= f));
+      const wholeFlags = wholeCell.reduce((f, c) => f | (c.cell.prop3 & 2 ? 1 : 0) | (c.cell.prop3 & 1 ? 4 : 0), 0);
+      if (wholeFlags) base.forEach((_, j) => (base[j] |= wholeFlags));
+      if (noFloor) base.forEach((_, j) => (base[j] |= 0x01)); // the game fills an empty cell with a hidden blocking floor
+      let want = blocker ? blockerFlags(blocker.cell) : new Uint8Array(25);
+      const before = new Uint8Array(25).map((_, j) => base[j] | want[j]);
+      const painted = new Uint8Array(25);
+      for (let k = 0; k < 25; k++) if (mask & (1 << k)) painted[fileIndex(k)] = 1;
 
-    if (paint.mode === 'block') {
-      want = want.map((f, j) => (painted[j] ? f | (paint.bits & ~base[j]) : f));
-    } else {
-      want = want.map((f, j) => (painted[j] ? f & ~paint.bits : f));
-      // An empty cell is blocked because it has no floor; once a (blocker) floor is there, the rest must stay blocked.
-      if (noFloor) want = want.map((f, j) => (painted[j] ? f : f | 0x01));
-      // The cell's own "unwalkable" bit blocks all of it: take it off, and block the sub-tiles not painted instead.
-      if (paint.bits & 0x01 && wholeCell.length) {
-        for (const c of wholeCell) edits.push({ layer: c.layer, x, y, cell: { ...c.cell, prop3: c.cell.prop3 & ~0x02 } });
-        want = want.map((f, j) => (painted[j] ? f : f | 0x01));
-      }
-      // Tiles blocking painted sub-tiles: this cell gets copies without those flags.
-      const clear = new Uint8Array(25).map((_, j) => (painted[j] ? paint.bits : 0));
-      for (const c of others) {
-        if (!flagsOf(c).some((f, j) => f & clear[j])) continue;
-        const s = await forkFor(c.keys, clear);
-        if (s === null) {
-          skipped.push(`(${x}, ${y}): its ${c.layer.kind} tile couldn't be copied (no free number, or a tile with no file)`);
-          continue;
+      const desired = before.map((f, j) => !painted[j] ? f : paint.mode === 'block' ? f | paint.bits : paint.mode === 'clear' ? f & ~clearBits : paint.bits);
+      if (same(before, desired)) continue;
+      // A new floor must preserve the implicit blocker everywhere not explicitly cleared.
+      if (noFloor) want = want.map((f, j) => f | (paint.mode !== 'block' && painted[j] && (clearBits & 1) ? 0 : 1));
+
+      if (paint.mode === 'block') {
+        want = want.map((f, j) => (painted[j] ? f | (paint.bits & ~base[j]) : f));
+      } else {
+        want = want.map((f, j) => (painted[j] ? f & ~clearBits : f));
+        // An empty cell is blocked because it has no floor; once a (blocker) floor is there, the rest must stay blocked.
+        if (noFloor && (clearBits & 1)) want = want.map((f, j) => (painted[j] ? f : f | 0x01));
+        // DS1 whole-cell flags become per-subtile flags; merge this with any tile copy below.
+        const restored = wholeFlags & clearBits;
+        for (const c of wholeCell) {
+          const remove = (clearBits & 1 ? 2 : 0) | (clearBits & 4 ? 1 : 0);
+          if (!(c.cell.prop3 & remove)) continue;
+          c.cell = { ...c.cell, prop3: c.cell.prop3 & ~remove };
+          edits.push({ layer: c.layer, x, y, cell: c.cell });
         }
-        edits.push({ layer: c.layer, x, y, cell: withFields(c.cell, { sub: s }) }); // keeps hidden cells hidden
+        if (restored) want = want.map((f, j) => painted[j] ? f : f | restored);
+        // Tiles blocking painted sub-tiles: this cell gets copies without those flags.
+        const clear = new Uint8Array(25).map((_, j) => (painted[j] ? clearBits : 0));
+        for (const c of others) {
+          if (!flagsOf(c).some((f, j) => f & clear[j])) continue;
+          const s = await forkFor(c.keys, clear);
+          if (s === null) {
+            throw new Error(`its ${c.layer.kind} tile couldn't be copied (no free number, or a tile with no file)`);
+          }
+          edits.push({ layer: c.layer, x, y, cell: withFields(c.cell, { sub: s }) }); // keeps hidden cells hidden
+        }
       }
-    }
 
-    // The blocker: added, changed or removed to hold `want`.
-    const hasFlags = want.some((f) => f);
-    const needFloor = noFloor && paint.mode === 'clear'; // an empty cell made walkable needs a floor there
-    if (blocker) {
-      if (!hasFlags && !needFloor && !noFloorBesides(contributors, blocker)) edits.push({ layer: blocker.layer, x, y, cell: EMPTY_CELL });
-      else if (!same(want, blockerFlags(blocker.cell))) edits.push({ layer: blocker.layer, x, y, cell: hidden(withTile(blocker.cell, blockMain, blockerFor(want), DEFAULT_PROP1.floor)) });
-    } else if (hasFlags || needFloor) {
-      const free = ds1.floors.findIndex((l) => isEmptyCell(l[i]));
-      const index = free >= 0 ? free : ds1.floors.length < 2 ? ds1.floors.length : -1;
-      if (index < 0) skipped.push(`(${x}, ${y}): both floor layers are used, so there's no room for a blocker`);
-      else {
-        if (index >= floors) floors = index + 1;
-        edits.push({ layer: { kind: 'floor', index }, x, y, cell: hidden(withTile(EMPTY_CELL, blockMain, blockerFor(want), DEFAULT_PROP1.floor)) });
+      if (paint.mode === 'replace') want = want.map((f, j) => painted[j] ? f | (paint.bits & ~(base[j] & ~clearBits)) : f);
+
+      // The blocker: added, changed or removed to hold `want`.
+      const hasFlags = want.some((f) => f);
+      const needFloor = noFloor && paint.mode !== 'block' && !!(clearBits & 1); // an empty cell made walkable needs a floor there
+      if (blocker) {
+        if (!hasFlags && !needFloor && !noFloorBesides(contributors, blocker)) edits.push({ layer: blocker.layer, x, y, cell: EMPTY_CELL });
+        else if (!same(want, blockerFlags(blocker.cell))) edits.push({ layer: blocker.layer, x, y, cell: hidden(withTile(blocker.cell, blockMain, blockerFor(want), DEFAULT_PROP1.floor)) });
+      } else if (hasFlags || needFloor) {
+        const free = ds1.floors.findIndex((l) => isEmptyCell(l[i]));
+        const index = free >= 0 ? free : ds1.floors.length < 2 ? ds1.floors.length : -1;
+        if (index < 0) throw new Error("both floor layers are used, so there's no room for a blocker");
+        else {
+          if (index >= floors) floors = index + 1;
+          edits.push({ layer: { kind: 'floor', index }, x, y, cell: hidden(withTile(EMPTY_CELL, blockMain, blockerFor(want), DEFAULT_PROP1.floor)) });
+        }
       }
+      // Count what changes (as far as the plan goes; skipped cells stay).
+      const after = new Uint8Array(25).map((_, j) => {
+        if (paint.mode === 'block') return base[j] | want[j];
+        return (base[j] & ~(painted[j] ? clearBits : 0)) | want[j];
+      });
+      for (let j = 0; j < 25; j++) if (painted[j] && after[j] !== before[j]) changed++;
+    } catch (e) {
+      records.length = startRecords; edits.length = startEdits; floors = startFloors;
+      taken.clear(); for (const key of startTaken) taken.add(key);
+      skipped.push(`(${x}, ${y}): ${e instanceof Error ? e.message : String(e)}`);
     }
-    // Count what changes (as far as the plan goes; skipped cells stay).
-    const after = new Uint8Array(25).map((_, j) => {
-      if (paint.mode === 'block') return base[j] | want[j];
-      return (base[j] & ~(painted[j] ? paint.bits : 0)) | want[j];
-    });
-    for (let j = 0; j < 25; j++) if (painted[j] && after[j] !== before[j]) changed++;
   }
   return { floors, edits, dt1: records.length > originalCount ? buildDt1(records) : null, changed, skipped };
 }

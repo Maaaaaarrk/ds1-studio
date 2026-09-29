@@ -1001,3 +1001,14 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .recipe-quantity { position: absolute; right: 1px; bottom: 0; color: #fff; text-shadow: 1px 1px 2px #000; font-size: 11px; }
 .recipe-operator { color: var(--accent); font-size: 18px; }
 .recipe-ribbon select { max-width: 260px; padding: 1px 4px; font-size: 10px; }
+
+/* Collision combinations: readable independent bits and a precise sub-tile inspector. */
+.collision-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.collision-controls:disabled { opacity: .65; }
+.collision-flag { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
+.collision-flag > span:nth-of-type(2) { flex: 1; }
+.collision-hex { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0; font-size: 12px; }
+.collision-hex input { width: 54px; }
+.collision-grid { display: block; width: 100%; max-width: 310px; margin: 8px auto; }
+.collision-grid g { cursor: pointer; }
+.collision-grid g:hover polygon, .collision-grid g:focus polygon { stroke: white; stroke-width: 2; }

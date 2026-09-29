@@ -260,6 +260,8 @@ export function walkability(ds1: Ds1, scene: Scene, lib?: TileLibrary): Uint8Arr
   const layers = [...ds1.floors, ...ds1.walls];
   for (let i = 0; i < width * height; i++) {
     const marked = layers.some((l) => l[i].prop1 !== 0 && (l[i].prop3 & 0x02) !== 0);
+    const fillLOS = layers.some((l) => l[i].prop1 !== 0 && (l[i].prop3 & 0x01) !== 0);
+    if (fillLOS) for (let k = 0; k < 25; k++) out[i * 25 + k] |= SubTileFlag.BlockJump;
     const noFloor = ds1.floors.every((l) => l[i].prop1 === 0);
     if (marked || noFloor) for (let k = 0; k < 25; k++) out[i * 25 + k] |= SubTileFlag.BlockWalk;
   }

@@ -85,7 +85,7 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
         {scene.animated && <Toggle label="Animate floors" checked={v.animate} onChange={(x) => set({ animate: x })} />}
       </div>
       <p className="muted small">
-        Objects (blue) share the monster toggle. Walkability: amber blocks walking, red also blocks jumping/teleport. Space/right-drag to pan,
+        Objects (blue) share the monster toggle. Walkability: amber marks walking restrictions; red marks jump/flight barriers. Space/right-drag to pan,
         scroll to zoom, Shift+scroll to select an individual tile, F to fit.
       </p>
     </Panel>

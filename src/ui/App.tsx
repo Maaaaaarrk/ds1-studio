@@ -368,10 +368,10 @@ export function App() {
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
   /** Walkability mode (the overlay on): the brush, the sub-tiles a stroke is painting, and its result. */
   const [walkBrush, setWalkBrush] = useState<WalkBrush>({ mode: 'block', bits: 0x01, size: 1 });
-  const [walkMarks, setWalkMarks] = useState<{ keys: ReadonlySet<number>; mode: 'block' | 'clear' } | null>(null);
+  const [walkMarks, setWalkMarks] = useState<{ keys: ReadonlySet<number>; mode: 'block' | 'clear' | 'replace' } | null>(null);
   const [walkBusy, setWalkBusy] = useState(false);
   const [walkLast, setWalkLast] = useState<string | null>(null);
-  const walkStroke = useRef<{ anchor: [number, number]; last: [number, number]; keys: Set<number>; rect: boolean; mode: 'block' | 'clear' } | null>(null);
+  const walkStroke = useRef<{ anchor: [number, number]; last: [number, number]; keys: Set<number>; rect: boolean; mode: 'block' | 'clear' | 'replace' } | null>(null);
   /** The open map's level light (Levels.txt), and light values being tried out in the Map panel (not applied yet). */
   const [levelLight, setLevelLight] = useState<LevelLight | null>(null);
   const [lightDraft, setLightDraft] = useState<LevelLight | null>(null);
@@ -888,7 +888,7 @@ export function App() {
 
   const onStroke = useCallback(
     (phase: StrokePhase, cells: [number, number][], world: [number, number], mods?: StrokeMods) => {
-      if (!doc) return;
+      if (!doc || historyBusyRef.current) return;
       // Walkability mode: strokes paint sub-tiles (Shift: a rectangle; Ctrl: the opposite of the brush).
       if (visibility.walkable && !pasting) {
         const [fx, fy] = worldToSubTile(world[0], world[1]);
@@ -935,7 +935,7 @@ export function App() {
             const cell = Math.floor(y / 5) * doc.ds1.width + Math.floor(x / 5);
             cellMasks.set(cell, (cellMasks.get(cell) ?? 0) | (1 << ((y % 5) * 5 + (x % 5))));
           }
-          if (cellMasks.size && walkBrush.bits) void applyWalkRef.current?.({ mode: st.mode, bits: walkBrush.bits, cells: cellMasks });
+          if (cellMasks.size && (walkBrush.bits || st.mode === 'replace')) void applyWalkRef.current?.({ mode: st.mode, bits: walkBrush.bits, cells: cellMasks });
           else if (!walkBrush.bits) notify('Tick at least one thing to block or allow (Walkability panel).', true);
         }
         return;
@@ -1478,7 +1478,7 @@ export function App() {
 
   const libraryDocuments = useRef(new WeakSet<MapDocument>());
   const applyDt1s = useCallback(
-    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; edits?: CellEdit[]; file?: FileHistoryChange; label?: string } = {}) => {
+    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; floors?: number; edits?: CellEdit[]; file?: FileHistoryChange; label?: string } = {}) => {
       if (!gd || !map || !doc) return;
       let note = '';
       if (map.resolution.preset) {
@@ -1494,6 +1494,7 @@ export function App() {
       libraryDocuments.current.add(doc);
       doc.mutate(d => {
         d.files = [...paths.map(embeddedFileName), ...d.files.filter(f => !/data[\\/]/i.test(f))];
+        while (d.floors.length < (opts.floors ?? 0)) d.floors.push(Array.from({ length: d.width * d.height }, () => EMPTY_CELL));
         for (const e of opts.edits ?? []) {
           const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
           layers[e.layer.index][e.y * d.width + e.x] = e.cell;
@@ -1748,37 +1749,36 @@ export function App() {
    * step.
    */
   applyWalkRef.current = async (paint: WalkPaint) => {
-    if (!gd || !map || !doc) return;
+    if (!gd || !map || !doc || historyBusyRef.current) return;
     if (!canWrite) return notify('Walkability edits need a writable mod folder: they add a small tile library for this map.', true);
     const walkPath = walkDt1Path(map.path);
     const tooLong = tilePathProblem(walkPath.replace(/^data\/global\/tiles\//i, ''));
     if (tooLong) return notify(`The map's walkability library would be ${tooLong}`, true);
+    historyBusyRef.current = true; setHistoryBusy(true);
+    const expectedRevision = doc.revision;
     setWalkBusy(true);
     try {
       const plan = await planWalkEdit({ ds1: doc.ds1, lib: map.lib, read: (p) => gd.fs.read(p), walkPath, walk: await gd.fs.read(walkPath), paint });
+      if (currentContext.current.doc !== doc || doc.revision !== expectedRevision) throw new Error('The map changed during the stroke. Please try again.');
       if (plan.dt1) {
         await writeFiles([{ path: walkPath, bytes: plan.dt1 }]);
         gd.forgetDt1(walkPath);
       }
-      if (plan.edits.length || plan.floors > doc.ds1.floors.length) {
-        doc.mutate((d) => {
-          while (d.floors.length < plan.floors) d.floors.push(Array.from({ length: d.width * d.height }, () => EMPTY_CELL));
-          for (const e of plan.edits) ((e.layer.kind === 'floor' ? d.floors : d.walls)[e.layer.index] as (typeof e.cell)[])[e.y * d.width + e.x] = e.cell;
-        }, `${paint.mode === 'block' ? 'Block' : 'Clear'} ${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'}`);
-        bump();
-      }
       const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
       const listed = libs.some((p) => normalizePath(p) === normalizePath(walkPath));
-      if (plan.dt1 && !listed) await applyDt1s([...libs, walkPath]);
-      else if (plan.dt1) setMap(await openMap(gd, map.path, { source: 'manual', lvlType: map.resolution.lvlType, paths: libs }, doc.ds1));
-      const what = paint.mode === 'block' ? 'blocked' : 'made walkable';
-      const msg = plan.changed ? `${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'} ${what}.` : `Nothing to change: those sub-tiles were already ${what === 'blocked' ? 'blocked' : 'walkable'}.`;
+      if (plan.edits.length) {
+        await applyDt1s(plan.dt1 && !listed ? [...libs, walkPath] : libs, {
+          keepOpen: true, strict: true, floors: plan.floors, edits: plan.edits,
+          label: `Paint collision on ${plan.changed} sub-tiles`,
+        });
+      }
+      const msg = plan.changed ? `${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'} updated. Other flag bits and tile artwork are preserved.` : 'No flags changed by this brush.';
       setWalkLast(`${msg}${plan.skipped.length ? ` Skipped ${plan.skipped.length} cell${plan.skipped.length === 1 ? '' : 's'}: ${plan.skipped.slice(0, 3).join('; ')}` : ''}`);
       if (plan.skipped.length) notify(`Walkability: ${plan.skipped[0]}${plan.skipped.length > 1 ? ` (+${plan.skipped.length - 1} more)` : ''}`, true);
     } catch (e) {
       notify(`Walkability: ${errorMessage(e)}`, true);
     } finally {
-      setWalkBusy(false);
+      setWalkBusy(false); historyBusyRef.current = false; setHistoryBusy(false);
     }
   };
 
@@ -3191,7 +3191,7 @@ export function App() {
   const statusHint = !map
     ? null
     : viewMode === 'walk'
-      ? `Walkability: click or drag to ${walkBrush.mode === 'block' ? 'block' : 'make walkable'} (${walkBrush.size === 'cell' ? 'whole cells' : `${walkBrush.size}×${walkBrush.size} sub-tiles`}; the brush is in the panel) · right-drag pans`
+      ? `Walkability: click or drag to ${walkBrush.mode === 'block' ? 'add flags' : walkBrush.mode === 'clear' ? 'remove flags' : 'set exact flags'} (${walkBrush.size === 'cell' ? 'whole cells' : `${walkBrush.size}×${walkBrush.size} sub-tiles`}; the brush is in the panel) · right-drag pans`
       : viewMode === 'automap'
         ? 'Automap: click a cell to see and change its automap pieces in the panel'
         : viewMode === 'light'
@@ -3475,6 +3475,8 @@ export function App() {
             {viewMode === 'walk' && (
               <WalkPanel
                 brush={walkBrush}
+                ds1={doc.ds1} lib={map.lib} scene={scene} hover={hover} revision={revision}
+                onPaint={paint => void applyWalkRef.current?.(paint)}
                 onChange={setWalkBrush}
                 busy={walkBusy}
                 canWrite={canWrite}

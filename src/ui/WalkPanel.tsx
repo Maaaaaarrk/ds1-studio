@@ -1,16 +1,28 @@
+import { useMemo, useRef, useState } from 'react';
+import type { Ds1 } from '../formats/ds1';
+import type { TileLibrary } from '../game/GameData';
+import { walkability, worldToSubTile, type Scene } from '../render/scene';
+import { collisionHex, describeCollision } from '../game/collisionFlags';
+import type { WalkPaint } from '../game/walkEdit';
 import { WALK_FLAGS } from '../game/walkEdit';
 import { HelpTip } from './HelpTip';
 
 export type WalkBrushSize = 1 | 3 | 5 | 'cell';
 
 export interface WalkBrush {
-  mode: 'block' | 'clear';
+  mode: 'block' | 'clear' | 'replace';
   /** Flag bits the brush sets or clears (WALK_FLAGS). */
   bits: number;
   size: WalkBrushSize;
 }
 
 interface Props {
+  ds1: Ds1;
+  lib: TileLibrary;
+  scene: Scene;
+  revision: number;
+  hover: { cellX: number; cellY: number; world?: [number, number] } | null;
+  onPaint: (paint: WalkPaint) => void;
   brush: WalkBrush;
   onChange: (b: WalkBrush) => void;
   busy: boolean;
@@ -26,10 +38,10 @@ interface Props {
 export function WalkLegend({ floating = false }: { floating?: boolean }) {
   const rows: { fill: string; stroke?: string; dashed?: boolean; text: string }[] = [
     { fill: 'rgba(255, 176, 40, 0.6)', text: "Can't be walked on" },
-    { fill: 'rgba(255, 60, 70, 0.65)', text: "Can't be walked, jumped or teleported over" },
-    { fill: 'none', stroke: '#8a8f98', dashed: true, text: 'Walkable (no colour)' },
+    { fill: 'rgba(255, 60, 70, 0.65)', text: 'Jump / flight barrier (may also block walking)' },
+    { fill: 'none', stroke: '#8a8f98', dashed: true, text: 'No movement flags shown (other flags may remain)' },
     { fill: 'rgba(255, 176, 40, 0.28)', stroke: 'rgb(255, 176, 40)', text: 'Brush: will block' },
-    { fill: 'rgba(110, 230, 140, 0.28)', stroke: 'rgb(110, 230, 140)', text: 'Brush: will make walkable' },
+    { fill: 'rgba(110, 230, 140, 0.28)', stroke: 'rgb(110, 230, 140)', text: 'Brush: remove or replace flags' },
   ];
   return (
     <div className={floating ? 'walk-legend floating' : 'walk-legend'}>
@@ -48,8 +60,23 @@ export function WalkLegend({ floating = false }: { floating?: boolean }) {
 }
 
 /** The side panel while the walkability overlay is on: painting sub-tiles blocked or walkable, for this map only. */
-export function WalkPanel({ brush, onChange, busy, canWrite, libraryPath, last, onDone }: Props) {
+export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, onChange, busy, canWrite, libraryPath, last, onDone }: Props) {
   const set = (patch: Partial<WalkBrush>) => onChange({ ...brush, ...patch });
+  const [pick, setPick] = useState(false);
+  const remembered = useRef<{ ds1: Ds1; x: number; y: number; sub: number } | null>(null);
+  if (hover?.world) {
+    const [sx, sy] = worldToSubTile(...hover.world).map(Math.round);
+    const x = Math.floor(sx / 5), y = Math.floor(sy / 5);
+    if (x >= 0 && y >= 0 && x < ds1.width && y < ds1.height) remembered.current = { ds1, x, y, sub: (sy % 5) * 5 + sx % 5 };
+  }
+  const cell = remembered.current?.ds1 === ds1 ? remembered.current : null;
+  const flags = useMemo(() => walkability(ds1, scene, lib), [ds1, scene, lib, revision]);
+  const paintOne = (k: number) => {
+    if (!cell) return;
+    const i = cell.y * ds1.width + cell.x;
+    if (pick) { set({ bits: flags[i * 25 + k], mode: 'replace' }); setPick(false); }
+    else onPaint({ mode: brush.mode, bits: brush.bits, cells: new Map([[i, 1 << k]]) });
+  };
   return (
     <section className="panel">
       <div className="panel-header static">
@@ -58,24 +85,39 @@ export function WalkPanel({ brush, onChange, busy, canWrite, libraryPath, last, 
       </div>
       <div className="panel-body">
         <p className="small muted">
-          Click or drag on the map to paint sub-tiles. <b>Shift</b>+drag paints a rectangle; hold <b>Ctrl</b> to do the opposite.
+          Click or drag on the map to paint sub-tiles. <b>Shift</b>+drag paints a rectangle; hold <b>Ctrl</b> to swap add/remove (with Set exactly, Ctrl temporarily adds).
         </p>
-        <WalkLegend />
-        <div className="field-label">Paint</div>
-        <div className="segmented">
-          <button className={brush.mode === 'block' ? 'active' : ''} onClick={() => set({ mode: 'block' })} title="Block the chosen movement on the sub-tiles you paint">
-            Blocked
-          </button>
-          <button className={brush.mode === 'clear' ? 'active' : ''} onClick={() => set({ mode: 'clear' })} title="Allow the chosen movement on the sub-tiles you paint">
-            Walkable
-          </button>
+        <details className="small muted"><summary>Map colour legend</summary><WalkLegend /></details>
+        <fieldset className="collision-controls" disabled={busy || !canWrite}>
+        <div className="field-label">Quick brushes</div>
+        <div className="chips">
+          <button className="chip" onClick={() => set({ mode: 'clear', bits: 0x0D })} title="Remove walking, player-walking and jump/flight restrictions. Keep other flags.">Make walkable</button>
+          <button className="chip" onClick={() => set({ mode: 'block', bits: 0x07 })} title="Add walking, sight and jump/flight barriers together.">Solid barrier</button>
+          <button className="chip" onClick={() => set({ mode: 'replace', bits: 0 })} title="Remove all eight DT1 flags from the painted sub-tiles.">Clear all flags</button>
         </div>
-        <div className="field-label">What it blocks or allows</div>
-        {WALK_FLAGS.map((f) => (
-          <label key={f.bit} className="mini-check" title={f.help}>
-            <input type="checkbox" checked={(brush.bits & f.bit) !== 0} onChange={(e) => set({ bits: e.target.checked ? brush.bits | f.bit : brush.bits & ~f.bit })} /> {f.name}
-          </label>
-        ))}
+        <div className="field-label">How to apply the combination</div>
+        <div className="segmented">
+          {([['block', 'Add flags'], ['clear', 'Remove flags'], ['replace', 'Set exactly']] as const).map(([mode, label]) =>
+            <button key={mode} className={brush.mode === mode ? 'active' : ''} onClick={() => set({ mode })}>{label}</button>)}
+        </div>
+        <p className="small muted">{brush.mode === 'replace' ? 'Replace all eight bits on each painted sub-tile with this exact combination.' : brush.mode === 'clear' ? 'Remove only the checked flags. Unchecked flags stay as they are.' : 'Add the checked flags together. Existing flags stay as they are.'}</p>
+        <div className="field-label">Combined flags · {collisionHex(brush.bits)}</div>
+        {[false, true].map(advanced => {
+          const rows = WALK_FLAGS.filter(f => (f.bit >= 0x10) === advanced).map(f => (
+            <label key={f.bit} className="collision-flag" title={f.help}>
+              <input type="checkbox" checked={(brush.bits & f.bit) !== 0} onChange={(e) => set({ bits: e.target.checked ? brush.bits | f.bit : brush.bits & ~f.bit })} />
+              <span className="mono" style={{ color: f.color }}>{collisionHex(f.bit)}</span>
+              <span>{f.name}</span><HelpTip text={f.help} />
+            </label>
+          ));
+          return advanced ? <details key="advanced"><summary className="small">Advanced flags{brush.bits & 0xF0 ? ` · ${collisionHex(brush.bits & 0xF0)} selected` : ''}</summary>{rows}</details> : <div key="common">{rows}</div>;
+        })}
+        <label className="collision-hex">Exact combination (00–FF)
+          <input key={brush.bits} aria-label="Collision hex combination" className="small-input mono" defaultValue={collisionHex(brush.bits)} maxLength={2}
+            onBlur={e => { if (/^[\da-f]{1,2}$/i.test(e.target.value)) set({ bits: parseInt(e.target.value, 16) }); else e.target.value = collisionHex(brush.bits); }}
+            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+        </label>
+        <details className="small muted"><summary>How combinations work</summary><p>Each sub-tile stores eight independent bits. For example, 01 + 02 + 04 = 07. Flags from overlapping floors, walls and roofs combine. Shadows do not contribute. Removing a flag here removes its contributions from every affected layer, only in this map cell.</p><p>Advanced flags have context-dependent meanings in the classic engine. Test them in your mod. Teleport rules also depend on the level and skill.</p></details>
         <div className="field-label">Brush</div>
         <div className="segmented">
           {([1, 3, 5, 'cell'] as const).map((s) => (
@@ -84,13 +126,28 @@ export function WalkPanel({ brush, onChange, busy, canWrite, libraryPath, last, 
             </button>
           ))}
         </div>
+        <div className="field-label">Inspect a cell · {cell ? `${cell.x}, ${cell.y}` : 'hover over the map'}</div>
+        <p className="small muted">Hover over a map cell, then use this grid to change one sub-tile. Numbers show all combined flags, including flags that are not coloured on the map.</p>
+        <button className={`btn${pick ? ' active' : ''}`} onClick={() => setPick(!pick)}>{pick ? 'Choose a sub-tile below…' : 'Pick combination from grid'}</button>
+        <svg className="collision-grid" viewBox="0 0 260 150" role="group" aria-label="Cell collision grid">
+          {Array.from({ length: 25 }, (_, k) => {
+            const x = 130 + (k % 5 - Math.floor(k / 5)) * 24, y = 22 + (k % 5 + Math.floor(k / 5)) * 13;
+            const f = cell ? flags[(cell.y * ds1.width + cell.x) * 25 + k] : 0;
+            const color = f & 4 ? '#c84b56' : f & 9 ? '#aa782b' : f ? '#386975' : '#252b34';
+            return <g key={k} role="button" tabIndex={cell && !busy && canWrite ? 0 : -1} aria-label={`Sub-tile ${k % 5 + 1}, ${Math.floor(k / 5) + 1}: ${collisionHex(f)}`} onClick={() => { if (!busy && canWrite) paintOne(k); }} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !busy && canWrite) { e.preventDefault(); paintOne(k); } }}>
+              <title>{describeCollision(f)}</title><polygon points={`${x},${y - 12} ${x + 23},${y} ${x},${y + 12} ${x - 23},${y}`} fill={color} stroke={cell?.sub === k ? '#fff' : '#73777f'} />
+              <text x={x} y={y + 3} textAnchor="middle" fontSize="9" fill="white" pointerEvents="none">{cell ? collisionHex(f) : '—'}</text>
+            </g>;
+          })}
+        </svg>
+        </fieldset>
         {!canWrite && <p className="small warn-text">Needs a writable mod folder: the changes add a small tile library for this map.</p>}
         {busy && <p className="small muted">Applying…</p>}
         {last && !busy && <p className="small">{last}</p>}
-        <p className="small muted">
+        <details className="small muted"><summary>Saving and undo</summary><p>
           Blockers and tile copies go into <span className="mono">{libraryPath}</span>, which is added to the map&apos;s tile libraries and level type. Undo
           (Ctrl+Z) takes a stroke back; save the map to keep them.
-        </p>
+        </p></details>
         <div className="modal-actions">
           <button className="btn" onClick={onDone}>
             Done
