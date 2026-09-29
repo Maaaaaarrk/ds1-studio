@@ -181,16 +181,16 @@ describe('automap rules', () => {
     expect(b.doc.rows.length).toBe(doc.rows.length);
     expect(findRule(parseAutomap(b.doc), '1 Town', 0, 0, 9)!.cels.map((c) => c.cel)).toEqual([42]);
   });
-  it('clears a piece: a row in front that matches the tile and draws nothing, the others untouched', () => {
+  it('clears a piece by removing its rule, preserving the other sequences', () => {
     const c = setAutomapCel(doc, '1 Town', 1, 2, 1, -1, 'seq');
-    expect(c.summary).toMatch(/no piece/);
+    expect(c.summary).toMatch(/removed matching rules/);
     const t = parseAutomap(c.doc);
-    expect(findRule(t, '1 Town', 1, 2, 1)!.cels).toEqual([]);
+    expect(findRule(t, '1 Town', 1, 2, 1)).toBeNull();
     expect(findRule(t, '1 Town', 1, 2, 2)!.cels[0].cel).toBe(9);
-    // An exact row already there is emptied in place.
+    // Clearing a whole style removes its rule instead of leaving an invalid empty row.
     const d = setAutomapCel(doc, '1 Town', 0, 0, 7, -1, 'style');
-    expect(findRule(parseAutomap(d.doc), '1 Town', 0, 0, 7)!.cels).toEqual([]);
-    expect(d.doc.rows.length).toBe(doc.rows.length);
+    expect(findRule(parseAutomap(d.doc), '1 Town', 0, 0, 7)).toBeNull();
+    expect(d.doc.rows.length).toBe(doc.rows.length - 1);
   });
 });
 

@@ -1,3 +1,4 @@
+import { validateAutomapSave } from '../game/automapSafety';
 import { invoke } from '@tauri-apps/api/core';
 import type { RandomAccess } from '../util/RandomAccess';
 import type { SaveTarget } from './save';
@@ -110,6 +111,7 @@ export function tauriSaveTarget(config: DesktopConfig): SaveTarget | null {
   return {
     label: root,
     async save(path, bytes) {
+      validateAutomapSave(path, bytes);
       const r = await invoke<{ written: string; backup: string | null }>('save_file', bytes.slice(), { headers: { 'x-path': encodeURIComponent(path) } });
       return r.backup ? `Saved ${r.written} (original kept as ${r.backup})` : `Saved ${r.written}`;
     },

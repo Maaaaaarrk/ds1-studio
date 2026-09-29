@@ -147,6 +147,14 @@ export function explainCrash(c: Crash, levelsWithEntry?: (entry: string) => stri
       detail: "The automap keeps positions in 16 bits: a level whose Levels.txt OffsetX − OffsetY or OffsetX + OffsetY is too large makes the game stop as soon as a player, NPC or object is put on the automap (usually a few steps in). The compatibility check finds the level and moves it to a free spot inside the range.",
     };
   }
+  // Verified against PD2's D2Common: the AutoMap loader asserts when Cel1 is the -1 terminator.
+  if (c.kind === 'halt' && c.line === 1310 && c.address === 0x6fdbd027) {
+    return {
+      known: true,
+      title: 'AutoMap.txt has a rule without a valid picture',
+      detail: 'The game stops loading when an AutoMap.txt row starts with Cel1 = -1. Older DS1 Studio versions could write this when clearing a piece. Remove the empty matching rule (preserving other sequences), then rebuild AutoMap.bin from the corrected table. A tile with no matching rule stays off the automap safely. Back up both files before repairing them.',
+    };
+  }
   // D2Common building a preset level whose DS1 isn't the size Levels.txt gives the level (DrlgPreset, lines 2239/2240).
   const inCommon = (lo: number, hi: number) => c.address !== undefined && c.address >= lo && c.address <= hi;
   if (c.kind === 'halt' && (inCommon(0x6fd5c060, 0x6fd5c680) || ((c.line === 2239 || c.line === 2240) && (c.address === undefined || inCommon(0x6fd50000, 0x6fdf9000))))) {

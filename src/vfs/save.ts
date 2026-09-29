@@ -1,3 +1,4 @@
+import { validateAutomapSave } from '../game/automapSafety';
 /** Where edited files are written. Paths are game-relative, e.g. "data/global/tiles/ACT1/Town/townN1.ds1". */
 export interface SaveTarget {
   readonly label: string;
@@ -16,6 +17,7 @@ export async function devServerSaveTarget(): Promise<SaveTarget | null> {
     return {
       label: root,
       async save(path, bytes) {
+        validateAutomapSave(path, bytes);
         const r = await fetch(`/__d2/save/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', body: bytes.slice() });
         const body = await r.json();
         if (!r.ok) throw new Error(body.error ?? `save failed (${r.status})`);
@@ -62,6 +64,7 @@ export function directorySaveTarget(root: FileSystemDirectoryHandle): SaveTarget
   return {
     label: root.name,
     async save(path, bytes) {
+      validateAutomapSave(path, bytes);
       const perm = await (root as unknown as { requestPermission(o: object): Promise<PermissionState> }).requestPermission({ mode: 'readwrite' });
       if (perm !== 'granted') throw new Error('Write permission was not granted for the mod folder.');
       const parts = path.split('/');

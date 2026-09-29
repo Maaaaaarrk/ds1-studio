@@ -63,17 +63,18 @@ const key = (level: string, code: string, style: number) => `${level.toLowerCase
 export function parseAutomap(doc: TxtTableDoc): AutomapTable {
   const byKey = new Map<string, AutomapRule[]>();
   const levels: string[] = [];
-  // The header repeats "Type2" for the third type column, so go by position: Type1 Cel1 … Type4 Cel4 after EndSequence.
-  const end = doc.columns.findIndex((c) => c.toLowerCase() === 'endsequence');
+  const cols = celColumns(doc);
   doc.rows.forEach((r, row) => {
     const level = (r[0] ?? '').trim();
     const code = (r[1] ?? '').trim().toLowerCase();
     if (!level || !code) return;
     if (!levels.includes(level)) levels.push(level);
     const cels: AutomapRule['cels'] = [];
-    for (let i = 0; i < 4; i++) {
-      const cel = Number(r[end + 2 + i * 2]);
-      if (Number.isFinite(cel) && cel >= 0 && (r[end + 2 + i * 2] ?? '').trim() !== '') cels.push({ cel, label: (r[end + 1 + i * 2] ?? '').trim() });
+    for (const column of cols) {
+      const raw = (r[column.cel] ?? '').trim();
+      const cel = Number(raw);
+      if (cel === -1) break; // The engine stops at the first sentinel, not after all four columns.
+      if (Number.isFinite(cel) && cel >= 0 && raw !== '') cels.push({ cel, label: column.type >= 0 ? (r[column.type] ?? '').trim() : '' });
     }
     const rule: AutomapRule = { row, level, code, style: Number(r[2]) || 0, start: Number(r[3]), end: Number(r[4]), cels };
     const k = key(level, code, rule.style);
@@ -213,10 +214,41 @@ export function describeRule(r: AutomapRule): string {
   return `${r.level} · ${r.code} · style ${r.style} · seq ${seq}`;
 }
 
-/** Value helpers for editing: the cel columns by position. */
+/** Value helpers for editing: the cel columns by name; Type labels are optional. */
 export function celColumns(doc: TxtTableDoc): { type: number; cel: number }[] {
-  const end = doc.columns.findIndex((c) => c.toLowerCase() === 'endsequence');
-  return [0, 1, 2, 3].map((i) => ({ type: end + 1 + i * 2, cel: end + 2 + i * 2 }));
+  return [1, 2, 3, 4].map(n => {
+    const cel = doc.columns.findIndex(c => c.trim().toLowerCase() === `cel${n}`);
+    const type = cel > 0 && /^type\d+$/i.test(doc.columns[cel - 1].trim()) ? cel - 1 : -1;
+    return { type, cel };
+  }).filter(c => c.cel >= 0);
+}
+
+/** Supply missing cel columns without relying on optional or duplicate Type label columns. */
+function completeAutomapColumns(doc: TxtTableDoc): TxtTableDoc {
+  const columns = [...doc.columns], rows = doc.rows.map(r => r.slice());
+  for (let n = 1; n <= 4; n++) {
+    if (columns.some(c => c.trim().toLowerCase() === `cel${n}`)) continue;
+    const at = columns.length; columns.push(`Cel${n}`);
+    for (const r of rows) { while (r.length <= at) r.push(''); if ((r[1] ?? '').trim()) r[at] = '-1'; }
+  }
+  return { ...doc, columns, rows };
+}
+
+/** Hide by removing matches, never by emitting a row with no valid cels. */
+function removeAutomapMatches(doc: TxtTableDoc, level: string, code: string, style: number, sub: number, scope: 'seq' | 'style'): TxtTableDoc {
+  const rows: string[][] = [];
+  for (const row of doc.rows) {
+    if ((row[0] ?? '').trim().toLowerCase() !== level.toLowerCase() || (row[1] ?? '').trim().toLowerCase() !== code || ![style, -1].includes(Number(row[2]))) { rows.push(row); continue; }
+    const start = Number(row[3]), end = Number(row[4]) < 0 ? start : Number(row[4]);
+    if (scope === 'seq' && start >= 0 && (sub < start || sub > end)) { rows.push(row); continue; }
+    // Wildcards cannot always be split into signed-byte ranges losslessly. Local editing normally uses a fresh key.
+    if (Number(row[2]) === -1 || (scope === 'seq' && start < 0)) throw new Error('This automap wildcard cannot be safely split. Use a tile identity outside this wildcard, or edit the wildcard rule explicitly.');
+    if (scope === 'seq') {
+      if (start < sub) { const left = row.slice(); left[4] = String(sub - 1); rows.push(left); }
+      if (end > sub) { const right = row.slice(); right[3] = String(sub + 1); rows.push(right); }
+    }
+  }
+  return { ...doc, rows };
 }
 
 export function ruleText(doc: TxtTableDoc, row: number): string {
@@ -239,13 +271,15 @@ export function setAutomapCel(
 ): { doc: TxtTableDoc; summary: string } {
   const code = AUTOMAP_CODES[orientation];
   if (!code) throw new Error(`orientation ${orientation} has no automap code`);
+  if (cel < 0) return { doc: removeAutomapMatches(doc, level, code, style, sub, scope), summary: 'Cleared automap piece (removed matching rules).' };
+  if (!Number.isInteger(cel)) throw new Error('An automap piece must be an integer.');
+  doc = completeAutomapColumns(doc);
   const t = parseAutomap(doc);
   const rules = t.byKey.get(key(level, code, style)) ?? [];
   const [start, end] = scope === 'seq' ? [sub, sub] : [-1, -1];
   const cols = celColumns(doc);
   const exact = rules.find((r) => (scope === 'seq' ? r.start === sub && (r.end === sub || r.end < 0) : r.start < 0));
   const rows = doc.rows.map((r) => r.slice());
-  // cel -1: the row matches but draws nothing (Cel1 -1), so the tile is left off the automap.
   const what = `${level} ${code} style ${style} ${scope === 'seq' ? `seq ${sub}` : 'all sequences'} → ${cel < 0 ? 'no piece (off the automap)' : `cel ${cel}`}`;
   if (exact) {
     const r = rows[exact.row];
@@ -260,7 +294,7 @@ export function setAutomapCel(
   line[2] = String(style);
   line[3] = String(start);
   line[4] = String(end);
-  line[cols[0].type] = 'DS1 Studio';
+  if (cols[0].type >= 0) line[cols[0].type] = 'DS1 Studio';
   line[cols[0].cel] = String(cel);
   for (const c of cols.slice(1)) line[c.cel] = '-1';
   // In front of the rows it must win over; else after the level's last row; else at the end.
@@ -502,9 +536,11 @@ export function averageColor(pixels: Uint8Array, palette: Uint8Array): [number, 
 
 /** Applies suggestions to AutoMap.txt: one row per run of consecutive sequences, in front of the level's other rows. */
 export function applyAutomapSuggestions(doc: TxtTableDoc, level: string, suggestions: AutomapSuggestion[]): { doc: TxtTableDoc; rows: number } {
+  doc = completeAutomapColumns(doc);
   const cols = celColumns(doc);
   const lines: string[][] = [];
   for (const s of suggestions) {
+    if (!Number.isInteger(s.cel) || s.cel < 0) throw new Error('An automap suggestion needs a valid picture number.');
     for (let i = 0; i < s.seqs.length; ) {
       let j = i;
       while (j + 1 < s.seqs.length && s.seqs[j + 1] === s.seqs[j] + 1) j++;
@@ -514,7 +550,7 @@ export function applyAutomapSuggestions(doc: TxtTableDoc, level: string, suggest
       line[2] = String(s.style);
       line[3] = String(s.seqs[i]);
       line[4] = String(s.seqs[j]);
-      line[cols[0].type] = 'DS1 Studio';
+      if (cols[0].type >= 0) line[cols[0].type] = 'DS1 Studio';
       line[cols[0].cel] = String(s.cel);
       for (const c of cols.slice(1)) line[c.cel] = '-1';
       lines.push(line);
@@ -552,9 +588,17 @@ export function effectiveCels(t: AutomapTable, level: string, edits: Map<string,
  * one row, placed in front of the level's other rows so the game's first-match lookup uses them. Rows this editor
  * wrote before for the same sequences are replaced rather than piled up; everything else is left alone. A tile
  * with no pieces ("hidden") gets no row: that is how the game leaves tiles off the automap (neither the base game's
- * AutoMap.txt nor PD2's has a row without a piece), and its earlier DS1 Studio rows are removed.
+ * AutoMap.txt nor PD2's has a row without a piece), and all matching rules are removed or split to preserve neighbouring sequences.
  */
 export function applyAutomapEdits(doc: TxtTableDoc, level: string, edits: AutomapEdit[]): { doc: TxtTableDoc; rows: number } {
+  for (const e of edits) {
+    if (e.cels.length > 4 || e.cels.some(c => !Number.isInteger(c) || c < 0)) throw new Error('Choose up to four valid automap pictures, or clear the piece.');
+  }
+  for (const e of edits.filter(e => !e.cels.length)) {
+    const code = AUTOMAP_CODES[e.orientation];
+    if (code) doc = removeAutomapMatches(doc, level, code, e.style, e.sub, 'seq');
+  }
+  doc = completeAutomapColumns(doc);
   const cols = celColumns(doc);
   const byGroup = new Map<string, AutomapEdit[]>();
   for (const e of edits) {
@@ -585,7 +629,7 @@ export function applyAutomapEdits(doc: TxtTableDoc, level: string, edits: Automa
       line[4] = String(sorted[j].sub);
       cols.forEach((c, n) => {
         const cel = sorted[i].cels[n];
-        line[c.type] = cel !== undefined ? 'DS1 Studio' : '';
+        if (c.type >= 0) line[c.type] = cel !== undefined ? 'DS1 Studio' : '';
         line[c.cel] = cel !== undefined ? String(cel) : '-1';
       });
       lines.push(line);

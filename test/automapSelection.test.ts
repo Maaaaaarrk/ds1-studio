@@ -58,6 +58,10 @@ describe('cell-specific automap editing', () => {
     const plan=(await planAutomapClear(gd,lib,d,{x0:1,x1:1,y0:0,y1:0},pieces,table,'59'))!;
     expect(plan.edits).toHaveLength(1);
     expect(plan.edits[0].layer.index).toBe(0);
+    for (const e of plan.edits) d.floors[e.layer.index][e.y*d.width+e.x] = e.cell;
+    const actual = automapPieces(d,parseAutomap(parseTxtTable(serializeTxtTable(plan.table))),'59');
+    expect(actual.find(p => p.cellX === 1)?.cel).toBeNull();
+    expect(actual.filter(p => p.cellX !== 1).every(p => p.cel === 0)).toBe(true);
   });
   it('keeps both halves and every variant of a corner while changing only the requested wall layer', async () => {
     const {gd,lib,d,table}=await setup(3);

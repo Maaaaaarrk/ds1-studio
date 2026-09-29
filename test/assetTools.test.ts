@@ -147,7 +147,7 @@ describe('selection and mode regression checks', () => {
     expect(cell.mainIndex+'/'+cell.subIndex).not.toBe('1/0');
     expect(d.floors[0][1].mainIndex).toBe(1);
     expect(findRule(parseAutomap(plan!.table),'Town',0,1,0)?.cels.some(c=>c.cel===12)).toBe(true);
-    expect(findRule(parseAutomap(plan!.table),'Town',0,cell.mainIndex,cell.subIndex)?.cels).toEqual([]);
+    expect(findRule(parseAutomap(plan!.table),'Town',0,cell.mainIndex,cell.subIndex)).toBeNull();
     expect(parseDt1(plan!.bytes).tiles[0].subTileFlags).toEqual(parseDt1(bytes).tiles[0].subTileFlags);
     doc.undo(); expect(writeDs1(d)).toEqual(before);
   });

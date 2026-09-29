@@ -1,3 +1,4 @@
+import { validateAutomapSave } from '../game/automapSafety';
 import { errorMessage } from '../util/errorMessage';
 import {
   Box,
@@ -1395,6 +1396,7 @@ export function App() {
   const writeFiles = useCallback(
     async (files: { path: string; bytes: Uint8Array }[]) => {
       if (!gd || data.status !== 'ready' || !data.saveTarget) throw new Error('No writable mod folder is configured.');
+      for (const f of files) validateAutomapSave(f.path, f.bytes);
       for (const f of files) {
         await data.saveTarget.save(f.path, f.bytes);
         gd.fs.remember(f.path, f.bytes, data.saveTarget.label);
