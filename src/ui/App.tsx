@@ -124,6 +124,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
 import { arrivalProblem, arrivalText } from '../game/arrival';
+import { AREA_BANDS, areaColour, walkableArea } from '../game/walkArea';
 import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
@@ -2406,6 +2407,8 @@ export function App() {
       return { on: true, signal: g.signal + 1, center };
     });
   }, [selection]);
+  /** Walkable area in tiles² (updates with every edit). */
+  const walkArea = useMemo(() => (map && scene ? walkableArea(map.ds1, scene, map.lib) : null), [map, scene]);
   const actions = useMemo((): Partial<Record<ActionId, () => void>> => {
     const vis = (f: (v: Visibility) => Visibility) => () => setVisibility(f);
     const layerToggle = (key: 'floors' | 'walls', i: number) => vis((v) => ({ ...v, [key]: v[key].map((x, n) => (n === i ? !x : x)) }));
@@ -2967,6 +2970,22 @@ export function App() {
 
       <main className="stage">
         {map && scene && visibility.walkable && <WalkLegend floating />}
+        {map && scene && walkArea !== null && (() => {
+          const { rgb, band } = areaColour(walkArea);
+          const c = `rgb(${rgb.join(',')})`;
+          return (
+            <div
+              className={`walk-area-box ${band}`}
+              style={{ borderColor: c, boxShadow: `0 0 0 1px ${c}33, 0 4px 16px rgba(0,0,0,0.5)` }}
+              title={`Tiles a player can stand on (floor with no blocking flag), as the Walkability view (W) shows them. Grey below ${AREA_BANDS.min.toLocaleString()}; green ${AREA_BANDS.min.toLocaleString()}-${AREA_BANDS.green.toLocaleString()}; orange ${AREA_BANDS.green.toLocaleString()}-${AREA_BANDS.orange.toLocaleString()}; redder above ${AREA_BANDS.orange.toLocaleString()}.`}
+            >
+              <span className="walk-area-label">Walkable area</span>
+              <span className="walk-area-value" style={{ color: c }}>
+                {Math.round(walkArea).toLocaleString()} <span className="walk-area-unit">tiles²</span>
+              </span>
+            </div>
+          );
+        })()}
         {map && scene && viewMode === 'automap' && <AutomapLegend style={automapStyle} />}
         {map && !rightCollapsed && (
           <button className="stage-fold" onClick={() => setRightCollapsed(true)} title="Fold the side panels away (more room for the map)">
