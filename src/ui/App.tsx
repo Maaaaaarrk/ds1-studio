@@ -85,6 +85,8 @@ import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
 import { DEFAULT_AUTOMAP_STYLE, kindClassifier, normalizeAutomapStyle, type AutomapStyle } from '../game/automapStyle';
 import { ClipboardPanel } from './ClipboardPanel';
 import { SavePresetDialog } from './SavePresetDialog';
+import { PresetBuilder } from './PresetBuilder';
+import { preparePresetLibrary, resolvePresetSources } from '../game/presetLibrary';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
@@ -333,6 +335,10 @@ export function App() {
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
+  const [presetBuilder, setPresetBuilder] = useState(false);
+  const [presetImportBusy, setPresetImportBusy] = useState(false);
+  const [presetImportError, setPresetImportError] = useState('');
+  const presetImportCache = useRef(new Map<string, Clipboard>());
   const [suggested, setSuggested] = useState<Preset[] | null>(null);
   const [suggesting, setSuggesting] = useState<SuggestProgress | null>(null);
   const [checkResults, setCheckResults] = useState<CheckResult[] | null>(null);
@@ -1009,16 +1015,18 @@ export function App() {
           const [x, y] = cells[0];
           // Alt: stack onto the tiles already there (next free wall/floor layer) instead of replacing them.
           const overlap = mods?.alt ? overlapEdits(doc, clipboard, x, y) : null;
-          const edits = overlap ? overlap.edits : pasteEdits(doc, clipboard, x, y);
+          const edits = overlap ? overlap.edits : pasteEdits(doc, clipboard, x, y, true);
           const objects = pasteObjects(doc, clipboard, x, y);
-          const addsLayers = !!overlap && (overlap.walls > doc.ds1.walls.length || overlap.floors > doc.ds1.floors.length);
+          const walls = overlap?.walls ?? edits.reduce((n, e) => e.layer.kind === 'wall' ? Math.max(n, e.layer.index + 1) : n, doc.ds1.walls.length);
+          const floors = overlap?.floors ?? edits.reduce((n, e) => e.layer.kind === 'floor' ? Math.max(n, e.layer.index + 1) : n, doc.ds1.floors.length);
+          const addsLayers = walls > doc.ds1.walls.length || floors > doc.ds1.floors.length;
           if (overlap) notify(`Stacked onto existing tiles${addsLayers ? ` (now ${overlap.walls} wall / ${overlap.floors} floor layers)` : ''}${overlap.replaced ? ` · ${overlap.replaced} cells had no free layer and were replaced` : ''}`);
           if (objects.length || addsLayers) {
             // Cells, new layers and objects together, as one undo step.
             doc.mutate((d) => {
               const cellCount = d.width * d.height;
-              while (overlap && d.walls.length < overlap.walls) d.walls.push(Array.from({ length: cellCount }, () => ({ ...EMPTY_CELL, orientation: 0, orientationHigh: 0 })));
-              while (overlap && d.floors.length < overlap.floors) d.floors.push(Array.from({ length: cellCount }, () => EMPTY_CELL));
+              while (d.walls.length < walls) d.walls.push(Array.from({ length: cellCount }, () => ({ ...EMPTY_CELL, orientation: 0, orientationHigh: 0 })));
+              while (d.floors.length < floors) d.floors.push(Array.from({ length: cellCount }, () => EMPTY_CELL));
               for (const e of edits) {
                 const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
                 (layers[e.layer.index] as typeof e.cell[])[e.y * d.width + e.x] = e.cell;
@@ -1695,13 +1703,13 @@ export function App() {
    * is only final once the tables are synced: a shared type is split off first).
    */
   const createCustomDt1 = useCallback(
-    async ({ path, plan, bytes: dt1Bytes, actSafe }: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean }) => {
+    async ({ path, plan, bytes: dt1Bytes, actSafe, keepOpen }: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean; keepOpen?: boolean }) => {
       if (!gd || !map) return;
       if (gd.fs.locate(path)) throw new Error(`${path} already exists.`);
       if (!plan.records.length) throw new Error('No tiles to put in it.');
       await writeFiles([{ path, bytes: dt1Bytes }]);
       const libs = map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path);
-      await applyDt1s([...libs, path]);
+      await applyDt1s([...libs, path], { keepOpen, strict: true });
       let automapNote = '';
       try {
         const fresh = await GameData.load(gd.fs);
@@ -2300,16 +2308,16 @@ export function App() {
     if (gd) void loadPresets(gd).then(setPresets);
   }, [gd]);
   const savePreset = useCallback(
-    async (p: Preset) => {
-      if (!gd) return;
-      try {
+    async (p: Preset, files: { path: string; bytes: Uint8Array }[] = []) => {
+      if (!gd) throw new Error('No asset library is open.');
+      for (const f of files) {
+        const existing = await gd.fs.read(f.path);
+        if (existing && (existing.length !== f.bytes.length || existing.some((b, i) => b !== f.bytes[i]))) throw new Error(`A different library already exists at ${f.path}. Please reopen the builder.`);
+      }
         const stored = { ...p, id: Math.random().toString(36).slice(2, 10) };
-        await writeFiles([{ path: presetPath(stored), bytes: serializePreset(stored) }]);
+        await writeFiles([...files, { path: presetPath(stored), bytes: serializePreset(stored) }]);
         setPresets(await loadPresets(gd));
         notify(`Saved preset "${p.name}"`);
-      } catch (e) {
-        notify((e as Error).message, true);
-      }
     },
     [gd, writeFiles, notify],
   );
@@ -2331,7 +2339,37 @@ export function App() {
     if (visibility.specials) on.add('markers');
     return on;
   }, [visibility]);
-  const placePreset = useCallback((p: Preset) => beginPaste(presetToClipboard(p), `Placing "${p.name}"`), [beginPaste]);
+  const placePreset = useCallback(async (p: Preset) => {
+    if (!gd || presetImportBusy) return;
+    setPresetImportBusy(true); setPresetImportError('');
+    try {
+      const cached = presetImportCache.current.get(p.id);
+      const missing = cached && map ? missingForPaste(cached, map.lib) : null;
+      const clip = cached && missing && !missing.tiles && !missing.different ? cached : { ...await resolvePresetSources(presetToClipboard(p), path => gd.fs.read(path)), presetId: p.id };
+      if (currentContext.current.doc !== doc) return;
+      exitMode(); setTool('select');
+      beginPaste(clip, `Placing "${p.name}"`);
+    } catch (e) { notify(String(e), true); } finally { setPresetImportBusy(false); }
+  }, [gd, map, doc, presetImportBusy, beginPaste, notify, exitMode]);
+  const importPresetTiles = async () => {
+    if (!pasteOffer || !gd || !map || !doc || presetImportBusy) return;
+    setPresetImportBusy(true); setPresetImportError('');
+    try {
+      const path = `data/global/tiles/studio/p${Date.now().toString(36)}.dt1`;
+      if (gd.fs.locate(path)) throw new Error('That tile library already exists. Please retry.');
+      const result = await preparePresetLibrary(pasteOffer.clip, map.lib, path, p => gd.fs.read(p));
+      if (result.bytes) {
+        const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
+        // Validate the level's file-slot capacity before creating the DT1.
+        if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
+        await createCustomDt1({ path, plan: result.plan, bytes: result.bytes, actSafe: false, keepOpen: true });
+      }
+      if (currentContext.current.doc !== doc) throw new Error('The active map changed. Select the preset again.');
+      if (result.clip.presetId) presetImportCache.current.set(result.clip.presetId, result.clip);
+      beginPaste(result.clip, pasteOffer.label, true);
+      setPasteOffer(null);
+    } catch (e) { setPresetImportError(String(e)); } finally { setPresetImportBusy(false); }
+  };
   const suggest = useCallback(async () => {
     if (!gd || !map) return;
     setSuggesting({ phase: 'scan', done: 0, total: 1 });
@@ -2811,7 +2849,7 @@ export function App() {
     };
   }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView, toggleMode]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
-  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu || clearingAutomap };
+  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu || clearingAutomap || presetBuilder || !!presetSave || !!pasteOffer || presetImportBusy };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -3069,6 +3107,7 @@ export function App() {
           items: [
             { label: 'Presets', icon: <Stamp />, onClick: () => { exitMode(); setSidePanel((p) => (p === 'presets' && viewMode === 'tiles' ? 'tiles' : 'presets')); }, active: sidePanel === 'presets' && viewMode === 'tiles', disabled: noMap },
             { label: 'Save selection', icon: <Save />, onClick: () => void saveSelectionPreset(), disabled: !selection || !canWrite, size: 'sm' },
+            { label: 'Preset builder', icon: <Grid2x2Plus />, onClick: () => setPresetBuilder(true), disabled: noMap || !canWrite, size: 'sm', title: 'Build a reusable preset on a separate 20×20 grid' },
             { label: 'Suggest', icon: <Sparkles />, onClick: () => { exitMode(); setSidePanel('presets'); void suggest(); }, disabled: noMap || !!suggesting, size: 'sm' },
           ],
         },
@@ -3220,6 +3259,12 @@ export function App() {
       { label: 'Cut', onClick: () => copy(true), disabled: tool === 'object' ? selectedObject === null : !selection, shortcut: kb['edit.cut'] },
       { label: 'Paste', onClick: startPaste, disabled: tool === 'object' ? !objectClip : !clipboard, shortcut: kb['edit.paste'] },
       { label: 'Delete', onClick: () => clearSelection(false), disabled: !selection, shortcut: kb['edit.delete'] },
+      { label: 'Save as preset…', disabled: !canWrite || (!inside && !selection), onClick: () => {
+        if (!map) return;
+        const area = selection ?? { x0: x, y0: y, x1: x, y1: y };
+        setPresetSave({ clip: copyRect(doc, area), name: `${map.path.split('/').pop()!.replace(/\.ds1$/i, '')} preset` });
+      } },
+      { label: 'Preset builder…', disabled: !canWrite, onClick: () => setPresetBuilder(true) },
       ...(selection ? [{ label: 'Deselect', onClick: () => setSelection(null) }] : []),
       null,
       { label: 'Centre the view here', onClick: () => setCenterOn((c) => ({ x: m.world[0], y: m.world[1], signal: (c?.signal ?? 0) + 1 })) },
@@ -3582,6 +3627,12 @@ export function App() {
             )}
             {tool !== 'object' && sidePanel === 'presets' && (
               <PresetsPanel
+                gd={data.gd}
+                isPrepared={(p) => {
+                  const clip = presetImportCache.current.get(p.id);
+                  const missing = clip && missingForPaste(clip, map.lib);
+                  return !!missing && !missing.tiles && !missing.different;
+                }}
                 saved={presets}
                 suggested={suggested}
                 suggesting={suggesting}
@@ -3590,11 +3641,11 @@ export function App() {
                 dt1Paths={map.lib.loaded.filter((l) => l.found).map((l) => l.path)}
                 hasSelection={!!selection}
                 canSave={canWrite}
-                onPlace={placePreset}
+                onPlace={(p) => void placePreset(p)}
                 onSaveSelection={() => void saveSelectionPreset()}
-                onSavePreset={(p) => void savePreset(p)}
+                onSavePreset={(p) => void savePreset(p).catch(e => notify(String(e), true))}
+                onBuild={() => setPresetBuilder(true)}
                 onSuggest={() => void suggest()}
-                onAddDt1s={(paths) => void applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...paths])}
               />
             )}
             <section className="panel" hidden={tool === 'object' || sidePanel !== 'tiles'}>
@@ -3705,10 +3756,11 @@ export function App() {
           categories={[...new Set(presets.map((p) => p.category))].sort()}
           initial={presetParts}
           insideNote={visibility.popsInside}
-          onSave={savePreset}
+          onSave={(p) => savePreset({ ...p, sourceMap: map.path })}
           onClose={() => setPresetSave(null)}
         />
       )}
+      {presetBuilder && map && gd && <PresetBuilder source={map} gd={gd} onSave={savePreset} onClose={() => setPresetBuilder(false)} />}
       {commandsOpen && <CommandPalette commands={ribbonCommands(ribbonTabs)} onClose={() => setCommandsOpen(false)} />}
       {mapMenu && map && doc && scene && (
         <ContextMenu
@@ -3810,7 +3862,7 @@ export function App() {
       )}
       {dialog === 'update' && <UpdateDialog initial={pendingUpdate} onClose={() => setDialog(null)} />}
       {pasteOffer && map && (
-        <Modal title="These tiles need other tile libraries" onClose={() => setPasteOffer(null)}>
+        <Modal title="These tiles need other tile libraries" onClose={() => { if (!presetImportBusy) setPasteOffer(null); }}>
           {pasteOffer.tiles > 0 && (
             <p className="small">
               {pasteOffer.tiles} of the tiles you&apos;re pasting aren&apos;t in this map&apos;s tile libraries, so they would show as missing here and in game.
@@ -3836,11 +3888,12 @@ export function App() {
             <p className="muted small">The DT1s they came from aren&apos;t known (copied before this version, or built-in special tiles).</p>
           )}
           <div className="modal-actions">
-            <button className="btn" onClick={() => setPasteOffer(null)}>
+            <button className="btn" disabled={presetImportBusy} onClick={() => setPasteOffer(null)}>
               Cancel
             </button>
             <button
               className="btn"
+              disabled={presetImportBusy}
               onClick={() => {
                 const o = pasteOffer;
                 setPasteOffer(null);
@@ -3852,6 +3905,7 @@ export function App() {
             {pasteOffer.dt1s.length > 0 && (
               <button
                 className="btn primary"
+                disabled={presetImportBusy || !canWrite}
                 onClick={async () => {
                   const o = pasteOffer;
                   setPasteOffer(null);
@@ -3863,6 +3917,9 @@ export function App() {
               </button>
             )}
           </div>
+          <p className="muted small">Create a small DT1 containing only the required tiles. Conflicting tile numbers are changed so existing map tiles keep their appearance.</p>
+          {presetImportError && <p className="error-text" role="alert">{presetImportError}</p>}
+          <button className="btn primary" disabled={presetImportBusy || !canWrite} onClick={() => void importPresetTiles()}>{presetImportBusy ? 'Preparing tiles…' : 'Create DT1 from required tiles and place'}</button>
         </Modal>
       )}
            {dialog === 'automap' && map && scene && automapKindOf && (automapData && automapLevel ? (

@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { decodeCell, isEmptyCell } from '../formats/ds1';
 import { decodeTile, Orientation } from '../formats/dt1';
 import type { Palette } from '../formats/palette';
-import type { TileLibrary } from '../game/GameData';
+import { TileLibrary, type GameData } from '../game/GameData';
 import type { Preset, SuggestProgress } from '../game/presets';
 import { tilesAt } from '../render/scene';
 import { normalizePath } from '../vfs/vfs';
@@ -19,16 +19,15 @@ function thumbsFor(lib: TileLibrary, palette: Palette): Map<string, string | nul
 
 /** Renders a preset's tiles (floors, then walls back to front) into a small image. */
 function renderPreset(p: Preset, lib: TileLibrary, palette: Palette): string | null {
-  const draws: { tile: ReturnType<typeof tilesAt>[number]; depth: number; order: number }[] = [];
+  const draws: { tile: ReturnType<typeof tilesAt>[number]; depth: number; order: number; shadow: boolean }[] = [];
   for (const l of p.layers) {
-    if (l.kind === 'shadow') continue;
     l.cells.forEach((v, i) => {
       const c = decodeCell(v);
       if (isEmptyCell(c) || c.hidden) return;
-      const o = l.kind === 'wall' ? (l.orientations?.[i] ?? 0) : Orientation.Floor;
+      const o = l.kind === 'wall' ? (l.orientations?.[i] ?? 0) : l.kind === 'shadow' ? Orientation.Shadow : Orientation.Floor;
       const cx = i % p.width;
       const cy = Math.floor(i / p.width);
-      for (const t of tilesAt(lib, o, c.mainIndex, c.subIndex, cx, cy)) draws.push({ tile: t, depth: cx + cy, order: l.kind === 'floor' ? 0 : o === Orientation.Roof ? 2 : 1 });
+      for (const t of tilesAt(lib, o, c.mainIndex, c.subIndex, cx, cy)) draws.push({ tile: t, depth: cx + cy, order: l.kind === 'floor' ? 0 : l.kind === 'shadow' ? 1 : o === Orientation.Roof ? 3 : 2, shadow: l.kind === 'shadow' });
     });
   }
   draws.sort((a, b) => a.order - b.order || a.depth - b.depth);
@@ -60,7 +59,11 @@ function renderPreset(p: Preset, lib: TileLibrary, palette: Palette): string | n
         const idx = img!.pixels[y * img!.width + x];
         if (!idx) continue;
         const o = ((oy + y) * w + ox + x) * 4;
-        data.data.set(palette.subarray(idx * 4, idx * 4 + 4), o);
+        if (d.shadow) {
+          const previous = data.data[o + 3] / 255, alpha = 0.45 + previous * 0.55;
+          for (let ch = 0; ch < 3; ch++) data.data[o + ch] = data.data[o + ch] * previous * 0.55 / alpha;
+          data.data[o + 3] = alpha * 255;
+        } else data.data.set(palette.subarray(idx * 4, idx * 4 + 4), o);
       }
   }
   ctx.putImageData(data, 0, 0);
@@ -79,6 +82,8 @@ export const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: {
 });
 
 interface Props {
+  gd: GameData;
+  isPrepared: (p: Preset) => boolean;
   saved: Preset[];
   suggested: Preset[] | null;
   suggesting: SuggestProgress | null;
@@ -92,14 +97,24 @@ interface Props {
   onSaveSelection: () => void;
   onSavePreset: (p: Preset) => void;
   onSuggest: () => void;
-  onAddDt1s: (paths: string[]) => void;
+  onBuild: () => void;
 }
 
-function Card({ p, lib, palette, missing, onPlace, onSave, onAddDt1s }: { p: Preset; lib: TileLibrary; palette: Palette; missing: string[]; onPlace: () => void; onSave?: () => void; onAddDt1s: () => void }) {
+function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s }: { p: Preset; lib: TileLibrary; gd: GameData; palette: Palette; missing: string[]; onPlace: () => void; onSave?: () => void; onAddDt1s: () => void }) {
+  const [previewLib, setPreviewLib] = useState(lib);
+  useEffect(() => {
+    let live = true;
+    void Promise.all(p.dt1s.map(async path => ({ path, dt1: await gd.dt1(path) }))).then(sources => {
+      const own = new TileLibrary();
+      for (const { path, dt1 } of sources) own.add(path, dt1);
+      if (live) setPreviewLib(own);
+    }).catch(() => { if (live) setPreviewLib(lib); });
+    return () => { live = false; };
+  }, [p, gd, lib]);
   return (
     <div className={`preset-card${missing.length ? ' needs' : ''}`} title={`${p.name} · ${p.width}×${p.height} cells${p.objects.length ? ` · ${p.objects.length} objects` : ''}\nTiles from: ${p.dt1s.map((d) => d.replace('data/global/tiles/', '')).join(', ')}${p.foundIn ? `\nFound in ${p.foundIn}` : ''}`}>
-      <button className="preset-main" onClick={onPlace} disabled={missing.length > 0}>
-        <PresetThumb preset={p} lib={lib} palette={palette} />
+      <button className="preset-main" onClick={onPlace}>
+        <PresetThumb preset={p} lib={previewLib} palette={palette} />
         <span className="preset-name">{p.name}</span>
         <span className="preset-meta muted small">
           {p.category}
@@ -109,7 +124,7 @@ function Card({ p, lib, palette, missing, onPlace, onSave, onAddDt1s }: { p: Pre
       </button>
       {missing.length > 0 && (
         <button className="link small" onClick={onAddDt1s} title={missing.join('\n')}>
-          needs {missing.length} DT1 — add
+          needs tiles — review import
         </button>
       )}
       {onSave && (
@@ -123,10 +138,10 @@ function Card({ p, lib, palette, missing, onPlace, onSave, onAddDt1s }: { p: Pre
 
 /** Saved presets (mod folder) and suggestions; click one to place it like a paste. */
 export function PresetsPanel(props: Props) {
-  const { saved, suggested, suggesting, lib, palette, dt1Paths, hasSelection, canSave, onPlace, onSaveSelection, onSavePreset, onSuggest, onAddDt1s } = props;
+  const { saved, suggested, suggesting, lib, palette, dt1Paths, hasSelection, canSave, onPlace, onSaveSelection, onSavePreset, onSuggest, onBuild } = props;
   const [query, setQuery] = useState('');
   const have = useMemo(() => new Set(dt1Paths.map(normalizePath)), [dt1Paths]);
-  const missingOf = (p: Preset) => p.dt1s.filter((d) => !have.has(normalizePath(d)));
+  const missingOf = (p: Preset) => props.isPrepared(p) ? [] : p.dt1s.filter((d) => !have.has(normalizePath(d)));
   const match = (p: Preset) => !query.trim() || `${p.name} ${p.category}`.toLowerCase().includes(query.trim().toLowerCase());
   const groups = useMemo(() => {
     const m = new Map<string, Preset[]>();
@@ -142,6 +157,7 @@ export function PresetsPanel(props: Props) {
           <span className="muted small">{saved.length} saved</span>
         </div>
         <div className="button-grid">
+          <button className="btn" disabled={!canSave} onClick={onBuild}>Preset builder…</button>
           <button className="btn" disabled={!hasSelection || !canSave} onClick={onSaveSelection} title={canSave ? 'Save the selected cells as a preset (you choose what it keeps)' : 'No writable mod folder'}>
             Save selection…
           </button>
@@ -157,7 +173,7 @@ export function PresetsPanel(props: Props) {
             <div className="field-label">{cat}</div>
             <div className="preset-grid">
               {list.map((p) => (
-                <Card key={p.id} p={p} lib={lib} palette={palette} missing={missingOf(p)} onPlace={() => onPlace(p)} onAddDt1s={() => onAddDt1s(missingOf(p))} />
+                <Card key={p.id} p={p} lib={lib} gd={props.gd} palette={palette} missing={missingOf(p)} onPlace={() => onPlace(p)} onAddDt1s={() => onPlace(p)} />
               ))}
             </div>
           </div>
@@ -174,11 +190,12 @@ export function PresetsPanel(props: Props) {
                   key={`${p.id}`}
                   p={p}
                   lib={lib}
+                  gd={props.gd}
                   palette={palette}
                   missing={missingOf(p)}
                   onPlace={() => onPlace(p)}
                   onSave={canSave ? () => onSavePreset(p) : undefined}
-                  onAddDt1s={() => onAddDt1s(missingOf(p))}
+                  onAddDt1s={() => onPlace(p)}
                 />
               ))}
             </div>

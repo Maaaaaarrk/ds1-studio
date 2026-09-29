@@ -1,7 +1,7 @@
 import { decodeCell, encodeCell, isEmptyCell, parseDs1, type Ds1, type Ds1Object, type WallCell } from '../formats/ds1';
 import { Orientation } from '../formats/dt1';
 import { normalizePath } from '../vfs/vfs';
-import { type CellRect, type Clipboard } from './clipboard';
+import { clipboardSources, type CellRect, type Clipboard } from './clipboard';
 import type { GameData, TileLibrary } from './GameData';
 import type { LayerKind, LayerRef } from './MapDocument';
 import { isBuiltinPath } from './specialTiles';
@@ -20,6 +20,9 @@ export interface Preset {
   height: number;
   /** Tile libraries the preset's tiles come from (normalized game paths). */
   dt1s: string[];
+  /** Preserve provenance when another map uses the same tile numbers for different artwork. */
+  tileSources?: Record<string, string>;
+  sourceMap?: string;
   layers: { kind: LayerKind; index: number; cells: number[]; orientations?: number[] }[];
   /** Objects with sub-tile coordinates relative to the preset's top-left cell. */
   objects: Ds1Object[];
@@ -107,7 +110,7 @@ export function presetFromClipboard(clip: Clipboard, lib: TileLibrary, name: str
       ...(layer.kind === 'wall' ? { orientations: cells.map((c) => (c as WallCell).orientation ?? 0) } : {}),
     }))
     .filter((l) => l.cells.some((v) => v !== 0));
-  return { format: 'ds1studio-preset', version: 1, id: newId(), name, category, width: clip.width, height: clip.height, dt1s: dt1sOf(lib, layers), layers, objects: clip.objects ?? [] };
+  return { format: 'ds1studio-preset', version: 1, id: newId(), name, category, width: clip.width, height: clip.height, ...clipboardSources(clip, lib), layers, objects: clip.objects ?? [] };
 }
 
 /** A preset as a clipboard for the paste tool (cells + objects). */
@@ -124,6 +127,7 @@ export function presetToClipboard(p: Preset): Clipboard {
     })),
     objects: p.objects,
     dt1s: p.dt1s,
+    tileSources: p.tileSources,
   };
 }
 

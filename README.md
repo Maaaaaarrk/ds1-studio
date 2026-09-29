@@ -147,6 +147,13 @@ Save any selection as a reusable **preset** (stored in your mod folder, so it tr
 **suggest presets** by finding structures that recur across the maps sharing this map's tiles — buildings, wall runs,
 tree groups.
 
+Right-click the map and choose **Save as preset…** to keep the selection (or the clicked cell).
+**Map → Preset builder** opens a separate **20×20 grid** with painting, erasing, layer selection and Undo/Redo.
+Browse any DT1, build your combination, name it and save it to the shared preset library. Empty edges can be trimmed.
+Saved presets can be placed in any DS1 in the same asset library. If tiles are missing, choose **Create DT1 from
+required tiles and place** to copy only those tiles, including animation frames and corner partners. Conflicting
+tile numbers are remapped and any required wall/floor layers are added. Save the destination map to keep the placement.
+
 ![Presets](docs/media/presets.png)
 
 ### Tile libraries & the DT1 editor

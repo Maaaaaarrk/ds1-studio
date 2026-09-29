@@ -404,6 +404,10 @@ export function MapView(props: Props) {
   // Input.
   useEffect(() => {
     const el = overlay.current!;
+    const modalBlocked = () => {
+      const dialogs = document.querySelectorAll('.modal-backdrop');
+      return dialogs.length > 0 && !dialogs[dialogs.length - 1].contains(el);
+    };
     let pan: { x: number; y: number } | null = null;
     /** Where a right/middle button went down, to tell a click from a pan. */
     let panStart: { x: number; y: number } | null = null;
@@ -426,7 +430,7 @@ export function MapView(props: Props) {
       el.style.cursor = pan ? 'grabbing' : space ? 'grab' : t === 'pick' ? 'copy' : t === 'select' ? 'default' : 'crosshair';
     };
     const down = (ev: PointerEvent) => {
-      if (pointer !== null || document.querySelector('.modal-backdrop')) return;
+      if (pointer !== null || modalBlocked()) return;
       pointer = ev.pointerId;
       el.setPointerCapture(ev.pointerId);
       // Resize handles take precedence over tools.
@@ -526,7 +530,7 @@ export function MapView(props: Props) {
     };
     const wheel = (ev: WheelEvent) => {
       ev.preventDefault();
-      if (pointer !== null || document.querySelector('.modal-backdrop')) return;
+      if (pointer !== null || modalBlocked()) return;
       const cam = camera.current;
       const [wx, wy] = toWorld(ev);
       const s = latest.current;

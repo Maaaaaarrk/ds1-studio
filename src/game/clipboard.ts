@@ -23,6 +23,8 @@ export interface Clipboard {
   dt1s?: string[];
   /** Source DT1 of each copied tile, by "orientation|main|sub". */
   tileSources?: Record<string, string>;
+  /** Library entry being placed, for reusing a prepared import during this session. */
+  presetId?: string;
 }
 
 /**
@@ -131,11 +133,11 @@ export function fillEdits(doc: MapDocument, r: CellSelection, layer: LayerRef, b
  * Edits that paste `clip` with its top-left cell at (x, y). Empty cells are transparent, so pasting a wall block keeps
  * the floor underneath. Layers the target map lacks (e.g. Wall 3) are skipped; cells past the map edge are clipped.
  */
-export function pasteEdits(doc: MapDocument, clip: Clipboard, x: number, y: number): CellEdit[] {
+export function pasteEdits(doc: MapDocument, clip: Clipboard, x: number, y: number, includeNewLayers = false): CellEdit[] {
   const have = new Set(doc.layers().map(layerKey));
   const edits: CellEdit[] = [];
   for (const { layer, cells } of clip.layers) {
-    if (!have.has(layerKey(layer))) continue;
+    if (!have.has(layerKey(layer)) && !(includeNewLayers && layer.index >= 0 && layer.index < (layer.kind === 'wall' ? 4 : layer.kind === 'floor' ? 2 : 1))) continue;
     cells.forEach((cell, i) => {
       const cx = x + (i % clip.width);
       const cy = y + Math.floor(i / clip.width);
@@ -251,7 +253,7 @@ export function missingForPaste(clip: Clipboard, lib: TileLibrary): { tiles: num
       if (!variants.length) {
         missing.add(k);
         if (from) needed.add(from);
-      } else if (from && !loaded.has(from) && !variants.some((t) => normalizePath(lib.sourceOf(t)?.path ?? '') === from)) {
+      } else if (from && !variants.every((t) => normalizePath(lib.sourceOf(t)?.path ?? '') === normalizePath(from))) {
         different.add(k);
         needed.add(from);
       }
