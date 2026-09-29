@@ -50,6 +50,8 @@ export interface CatalogEntry {
   /** Objects: the string-table key of the name the game shows on hover (objects.txt Name), and whether it shows one. */
   nameKey?: string;
   selectable?: boolean;
+  /** Objects: the objects.txt row (record number). */
+  row?: number;
 }
 
 /** "RogueFountain" -> "Rogue Fountain", "Torch1 Tiki" -> "Torch 1 Tiki", "place_champion" -> "Place champion". */
@@ -117,7 +119,7 @@ export function buildCatalog(presets: Int32Array[] | null, t: CatalogTables): Ca
       const r = objById.get(row);
       if (!r) return void out.push({ act: a + 1, type: 2, id, name: `Object row ${row} (not in objects.txt)`, spec: null });
       const desc = r['description - not loaded'] || r['Name'] || `Object ${row}`;
-      out.push({ act: a + 1, type: 2, id, name: `${prettyName(desc)} (${row})`, spec: objectSpec(r), nameKey: r['Name'] ?? '', selectable: (r['Selectable0'] ?? '').trim() === '1' });
+      out.push({ act: a + 1, type: 2, id, name: `${prettyName(desc)} (${row})`, spec: objectSpec(r), nameKey: r['Name'] ?? '', selectable: (r['Selectable0'] ?? '').trim() === '1', row });
     }),
   );
 

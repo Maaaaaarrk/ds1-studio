@@ -2329,7 +2329,7 @@ export function App() {
       doc.markSaved();
       // A level reached by a map item: warn if portal arrivals would land on empty ground (the game stops there).
       if (map?.resolution.preset) {
-        const p = arrivalProblem(doc.ds1, (type, id) => /waypoint/i.test(gd.objectName(doc.ds1.act, type, id)));
+        const p = arrivalProblem(doc.ds1, (type, id) => gd.isWaypoint(doc.ds1.act, type, id));
         if (p) notify(`Saved ${name}, but a map item's portal into this level would crash the game: ${arrivalText(p)} Game → Compatibility check can crop it.`, true);
       }
       // A whole-level preset must be exactly the level's size (Levels SizeX/SizeY = DS1 size - 1) or the game stops
@@ -3687,14 +3687,25 @@ export function App() {
               : []),
           ]}
           popCount={popAreas.length}
-          arrival={arrivalProblem(doc.ds1, (type, id) => /waypoint/i.test(data.gd.objectName(doc.ds1.act, type, id)))}
+          arrival={arrivalProblem(doc.ds1, (type, id) => data.gd.isWaypoint(doc.ds1.act, type, id))}
           onCrop={() => {
-            const p = arrivalProblem(doc.ds1, (type, id) => /waypoint/i.test(data.gd.objectName(doc.ds1.act, type, id)));
+            const p = arrivalProblem(doc.ds1, (type, id) => data.gd.isWaypoint(doc.ds1.act, type, id));
             if (p?.crop) {
               resize(p.crop);
               notify(`Map cropped to ${doc.ds1.width}×${doc.ds1.height} (Ctrl+Z to undo): its centre is on the map's floor now.`);
             }
           }}
+          onPlaceWaypoint={(() => {
+            const wp = data.gd.waypointFor(doc.ds1.act);
+            return wp
+              ? () => {
+                  setDialog(null);
+                  setTool('object');
+                  setPlacing({ type: wp.type, id: wp.id });
+                  notify(`Click the map where players should arrive to place the waypoint (${wp.name}) · then Game → Add to game again`);
+                }
+              : null;
+          })()}
           onApply={applyTableWrites}
           onFix={async (writes) => {
             await writeFiles(writes);

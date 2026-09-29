@@ -40,4 +40,4 @@ export function arrivalProblem(ds1: Ds1, isWaypoint: (type: number, id: number) 
 }
 
 export const arrivalText = (p: ArrivalProblem) =>
-  `Players arriving by portal (a map item) are put in the room at the level's centre (cells ${p.room.x}-${p.room.x + 7} × ${p.room.y}-${p.room.y + 7}) when there is no waypoint or warp tile, and there is no floor there: using the map item would stop the game. The Map entry tile doesn't change this. Crop the map to what's painted${p.cropped ? ` (${p.cropped.w}×${p.cropped.h})` : ''}, or put floor at its centre.`;
+  `Players arriving by portal (a map item) are put in the room at the level's centre (cells ${p.room.x}-${p.room.x + 7} × ${p.room.y}-${p.room.y + 7}) when there is no waypoint or warp tile, and there is no floor there: using the map item would stop the game. The Map entry tile doesn't change this. Place a waypoint where players should arrive (the game uses it first, so the map can stay its size), or crop the map to what's painted${p.cropped ? ` (${p.cropped.w}×${p.cropped.h})` : ''}.`;

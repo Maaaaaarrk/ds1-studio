@@ -193,16 +193,31 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   }
 
   // --- Arrival: where the game puts players who come in without a warp (a map item's portal) ----------------------
+  // A waypoint anchors it (the game's first choice), wherever the map's tiles are; without one (and without warps) it
+  // is the room at the level's centre. The Map entry tile isn't used.
   {
-    const p = arrivalProblem(ds1, (type, id) => /waypoint/i.test(gd.objectName(ds1.act, type, id)));
+    const isWp = (type: number, id: number) => gd.isWaypoint(ds1.act, type, id);
+    const hasWaypoint = ds1.objects.some((o) => isWp(o.type, o.id));
+    const hasWarp = ds1.walls.some((l) => l.some((c) => (c.orientation === Orientation.SpecialTile1 || c.orientation === Orientation.SpecialTile2) && c.mainIndex <= 7));
+    const wp = gd.waypointFor(ds1.act);
+    const placeWp: Fix[] = wp ? [{ kind: 'place-object', label: 'Place a waypoint where players should arrive', type: 2, id: wp.id }] : [];
+    const p = arrivalProblem(ds1, isWp);
     if (p)
       out.push({
         severity: 'error',
         area: 'Level',
         title: 'Players arriving by portal (a map item) land in the empty middle of the map, and the game stops',
-        detail: `${arrivalText(p)} Save afterwards (the level's size in Levels.txt follows).`,
+        detail: `${arrivalText(p)} A waypoint fixes it without resizing: the game puts arrivals at the waypoint first, wherever it is. Save afterwards.`,
         cells: [{ x: p.room.x + 4, y: p.room.y + 4 }],
-        fixes: p.crop ? [{ kind: 'resize', label: `Crop the map to what's painted (${p.cropped!.w}×${p.cropped!.h}, 2 cells around)`, delta: p.crop }] : [],
+        fixes: [...placeWp, ...(p.crop ? [{ kind: 'resize' as const, label: `Or crop the map to what's painted (${p.cropped!.w}×${p.cropped!.h}, 2 cells around)`, delta: p.crop }] : [])],
+      });
+    else if (!hasWaypoint && !hasWarp)
+      out.push({
+        severity: 'warning',
+        area: 'Level',
+        title: 'No waypoint: players arriving by portal (a map item) are put at the centre of the level',
+        detail: "With no waypoint and no warp tile, the game puts players who arrive through a map item's portal in the room at the level's centre (it has floor, so this works). Place a waypoint where they should arrive: the game uses it first, so the map's tiles can be anywhere. The Map entry tile doesn't change this.",
+        fixes: placeWp,
       });
   }
 
@@ -315,8 +330,8 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
             columns: [{ table: 'Levels', col: 'Act' }],
             fixes: [{ kind: 'set-act', label: `Set the DS1 header to Act ${act + 1}`, act }],
           });
-        if (Number(level['Waypoint']) && Number(level['Waypoint']) !== 255 && !ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, 2, o.id)))) {
-          const wp = gd.objectList(ds1.act).find((o) => o.type === 2 && /waypoint/i.test(o.name));
+        if (Number(level['Waypoint']) && Number(level['Waypoint']) !== 255 && !ds1.objects.some((o) => gd.isWaypoint(ds1.act, o.type, o.id))) {
+          const wp = gd.waypointFor(ds1.act);
           out.push({
             severity: 'warning',
             area: 'Level',
@@ -327,7 +342,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
           });
         }
         // Ways out: warps that lead somewhere, or a waypoint.
-        const hasWaypoint = ds1.objects.some((o) => o.type === 2 && /waypoint/i.test(gd.objectName(ds1.act, 2, o.id)));
+        const hasWaypoint = ds1.objects.some((o) => gd.isWaypoint(ds1.act, o.type, o.id));
         const presets = prest?.rows.filter((r) => Number(r['LevelId']) === levelId).length ?? 0;
         const levelName = (id: number) => {
           const r = levels?.rows.find((x) => Number(x['Id']) === id);

@@ -44,13 +44,15 @@ interface RegisterProps {
   /** Where portal arrivals would land if that's empty ground (see game/arrival.ts), and how to crop the map. */
   arrival?: ArrivalProblem | null;
   onCrop?: () => void;
+  /** Closes the dialog and puts a waypoint on the cursor (null: no waypoint for this act). */
+  onPlaceWaypoint?: (() => void) | null;
 }
 
 /**
  * Add map to game: the Levels / LvlPrest / LvlTypes rows that make the game load this map (see game/addToGame.ts for
  * the rules). Shows every field it sets, old → new and why, before anything is written.
  */
-export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onFix, onClose, initial, arrival, onCrop }: RegisterProps) {
+export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onFix, onClose, initial, arrival, onCrop, onPlaceWaypoint }: RegisterProps) {
   const [tables, setTables] = useState<{ prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc } | null>(null);
   const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'new');
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
@@ -115,13 +117,18 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
       {arrival && (
         <div className="notice error arrival-warning">
           <b>Using a map item for this map would crash the game.</b> {arrivalText(arrival)}
-          {arrival.crop && onCrop && (
-            <div>
-              <button className="btn small primary" onClick={onCrop}>
+          <div className="arrival-actions">
+            {onPlaceWaypoint && (
+              <button className="btn small primary" onClick={onPlaceWaypoint} title="Click the map where players should arrive; then come back to Add to game">
+                Place a waypoint
+              </button>
+            )}
+            {arrival.crop && onCrop && (
+              <button className="btn small" onClick={onCrop}>
                 Crop the map to what&apos;s painted ({arrival.cropped!.w}×{arrival.cropped!.h})
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
       {initial?.note && <p className="small accent-text">{initial.note}</p>}

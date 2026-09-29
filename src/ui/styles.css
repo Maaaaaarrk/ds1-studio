@@ -941,4 +941,4 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 
 /* A problem that would crash the game, shown at the top of a dialog. */
 .arrival-warning { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; margin-bottom: 8px; border: 1px solid rgba(255, 90, 110, 0.6); border-radius: var(--radius); background: rgba(255, 90, 110, 0.1); font-size: 12.5px; }
-.arrival-warning .btn { align-self: flex-start; }
+.arrival-actions { display: flex; gap: 6px; flex-wrap: wrap; }

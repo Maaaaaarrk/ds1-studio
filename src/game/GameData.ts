@@ -43,7 +43,7 @@ export class GameData {
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
   /** "act:type:id" -> name and sprite recipe, from the game's own tables (acts 1-based; see objectCatalog). */
-  private objRows = new Map<string, { name: string; spec: SpriteSpec | null; nameKey?: string; selectable?: boolean }>();
+  private objRows = new Map<string, { name: string; spec: SpriteSpec | null; nameKey?: string; selectable?: boolean; row?: number }>();
   private sprites = new Map<string, Promise<Sprite | null>>();
   /** MonPreset.txt "Place" per act (1-based), indexed by NPC id. */
   private monPresets = new Map<number, string[]>();
@@ -83,7 +83,7 @@ export class GameData {
     gd.objectTable = !!presets;
     if (!presets) gd.warnings.push('The object table wasn’t found in D2Common.dll or Game.exe; objects are shown by number.');
     for (const e of buildCatalog(presets, { objects, monPreset, monStats, monStats2, superUniques })) {
-      gd.objRows.set(`${e.act}:${e.type}:${e.id}`, { name: e.name, spec: e.spec, nameKey: e.nameKey, selectable: e.selectable });
+      gd.objRows.set(`${e.act}:${e.type}:${e.id}`, { name: e.name, spec: e.spec, nameKey: e.nameKey, selectable: e.selectable, row: e.row });
     }
 
     for (const row of types?.rows ?? []) {
@@ -183,6 +183,21 @@ export class GameData {
   objectNameKey(act0: number, type: number, id: number): string | null {
     const r = this.objRow(act0, type, id);
     return r?.selectable && r.nameKey ? r.nameKey : null;
+  }
+
+  /**
+   * Whether a DS1 object is a waypoint as the game sees it: the objects.txt rows named "Waypoint" (the game's own
+   * compiled flag marks exactly these 16 rows), whatever their description says ("icecave", "temple"…).
+   */
+  isWaypoint(act0: number, type: number, id: number): boolean {
+    return type === 2 && (this.objRow(act0, type, id)?.nameKey ?? '').trim().toLowerCase() === 'waypoint';
+  }
+
+  /** A waypoint to place in a map of this act (one with a sprite first), or null. */
+  waypointFor(act0: number): { type: 2; id: number; name: string } | null {
+    const list = this.objectList(act0).filter((o) => this.isWaypoint(act0, o.type, o.id));
+    const pick = list.find((o) => o.hasSprite) ?? list[0];
+    return pick ? { type: 2, id: pick.id, name: pick.name } : null;
   }
 
   /** Sprite recipe of an object, if any. */
