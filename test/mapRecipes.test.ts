@@ -13,6 +13,15 @@ function tables(): RecipeTables {
   };
 }
 describe('map recipe lookup', () => {
+  it('resolves the inventory sprite for each exact item code', () => {
+    const t = tables();
+    t.misc.columns.push('invfile');
+    t.misc.rows.forEach((r, i) => r.push(['invmap', 'invother', 'invkey'][i]));
+    const [recipe] = findMapRecipes(t, 'guild/test.ds1');
+    expect(recipe.inputs[0].invfile).toBe('invkey');
+    expect(recipe.inputs[1].invfile).toBeUndefined();
+    expect(recipe.outputs[0].invfile).toBe('invmap');
+  });
   it('finds enabled recipes by full path and output item, including secondary outputs', () => {
     const recipes = findMapRecipes(tables(), 'DATA/GLOBAL/TILES/GUILD/TEST.DS1');
     expect(recipes.map((r) => r.description)).toEqual(['Guild', 'Second']);

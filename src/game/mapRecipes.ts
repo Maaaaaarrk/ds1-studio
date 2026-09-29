@@ -2,7 +2,7 @@ import { getCell, parseTxtTable, type TxtTableDoc } from '../formats/txtTable';
 import { mapItemLevel } from './cubeRecipe';
 import { normalizePath, type LayeredFs } from '../vfs/vfs';
 
-export interface RecipeSlot { name: string; code: string; quantity: number; modifiers: string[] }
+export interface RecipeSlot { name: string; code: string; quantity: number; modifiers: string[]; invfile?: string }
 export interface MapRecipe {
   row: number;
   description: string;
@@ -41,17 +41,21 @@ export function findMapRecipes(t: RecipeTables, mapPath: string): MapRecipe[] {
     if (id !== null && ids.has(id)) codes.add(clean(getCell(t.misc, r, 'code')).toLowerCase());
   });
   const names = new Map<string, string>();
+  const icons = new Map<string, string>();
   for (const doc of [t.types, t.weapons, t.armor, t.misc]) {
     doc?.rows.forEach((_, r) => {
       const code = clean(getCell(doc, r, 'code')).toLowerCase();
       const name = clean(getCell(doc, r, 'name') || getCell(doc, r, 'ItemType'));
       if (code && name) names.set(code, name);
+      const invfile = clean(getCell(doc, r, 'invfile'));
+      if (code && invfile) icons.set(code, invfile);
     });
   }
   const slot = (raw: string): RecipeSlot => {
     const [code, ...params] = clean(raw).split(',').map((s) => s.trim());
     const qty = params.find((p) => /^qty=\d+$/i.test(p));
-    return { code, name: names.get(code.toLowerCase()) ?? code, quantity: qty ? Number(qty.slice(4)) : 1, modifiers: params.filter((p) => p && p !== qty) };
+    const invfile = icons.get(code.toLowerCase());
+    return { code, name: names.get(code.toLowerCase()) ?? code, quantity: qty ? Number(qty.slice(4)) : 1, modifiers: params.filter((p) => p && p !== qty), ...(invfile ? { invfile } : {}) };
   };
   const recipes: MapRecipe[] = [];
   t.cube.rows.forEach((_, r) => {

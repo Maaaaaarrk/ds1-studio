@@ -175,6 +175,57 @@ export interface SuggestProgress {
   total: number;
 }
 
+/** Wall structures plus their shadow cells. Shadows never join two separate structures. */
+export function suggestionGroups(ds1: Ds1, lib: TileLibrary): number[][] {
+  const { width: w, height: h } = ds1;
+  const owners = new Int32Array(w * h).fill(-1);
+  const solid = ds1.walls.reduce((out, layer) => {
+    layer.forEach((c, i) => { if (!isEmptyCell(c) && c.orientation !== 10 && c.orientation !== 11) out[i] = 1; });
+    return out;
+  }, new Uint8Array(w * h));
+  const groups: number[][] = [];
+  for (let start = 0; start < solid.length; start++) {
+    if (!solid[start] || owners[start] !== -1) continue;
+    const group: number[] = [], todo = [start], id = groups.length;
+    owners[start] = id;
+    while (todo.length) {
+      const i = todo.pop()!; group.push(i);
+      const x = i % w, y = Math.floor(i / w);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy, n = ny * w + nx;
+        if (nx >= 0 && ny >= 0 && nx < w && ny < h && solid[n] && owners[n] === -1) { owners[n] = id; todo.push(n); }
+      }
+    }
+    groups.push(group);
+  }
+  for (let i = 0; i < w * h; i++) {
+    if (owners[i] !== -1) continue; // capturePreset already keeps every layer of these cells.
+    const shadows = ds1.shadows.map((l) => l[i]).filter((c) => !isEmptyCell(c));
+    if (!shadows.length) continue;
+    const candidates = new Map<number, number>();
+    const x = i % w, y = Math.floor(i / w);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const nx = x + dx, ny = y + dy, n = ny * w + nx;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h || !solid[n]) continue;
+      const match = ds1.walls.some((l) => {
+        const wall = l[n];
+        if (isEmptyCell(wall)) return false;
+        const tile = lib.pick(wall.orientation, wall.mainIndex, wall.subIndex, 0);
+        const source = tile && lib.sourceOf(tile)?.path;
+        return !!source && shadows.some((s) => {
+          if (s.mainIndex !== wall.mainIndex || s.subIndex !== wall.subIndex) return false;
+          const shadow = lib.pick(Orientation.Shadow, s.mainIndex, s.subIndex, 0);
+          return shadow && lib.sourceOf(shadow)?.path === source;
+        });
+      });
+      if (match) candidates.set(owners[n], Math.min(candidates.get(owners[n]) ?? Infinity, dx * dx + dy * dy));
+    }
+    const sorted = [...candidates].sort((a, b) => a[1] - b[1]);
+    if (sorted.length && (sorted.length === 1 || sorted[0][1] < sorted[1][1])) groups[sorted[0][0]].push(i);
+  }
+  return groups;
+}
+
 /**
  * Finds structures worth reusing: connected groups of wall-layer tiles (walls, objects, trees, roofs...) in every map
  * whose tile libraries overlap this one's, keeping those that are fully drawable with the current libraries.
@@ -201,7 +252,7 @@ export async function suggestPresets(
     }
     const paths = gd.resolveDt1s(p, ds1).paths.map(normalizePath);
     const shared = paths.filter((x) => have.has(x)).length;
-    if (shared && shared >= Math.min(2, paths.length)) candidates.push(p);
+    if (shared) candidates.push(p);
   }
 
   const found = new Map<string, Preset>();
@@ -209,47 +260,25 @@ export async function suggestPresets(
   for (const path of candidates) {
     onProgress?.({ phase: 'analyse', done: done++, total: candidates.length });
     const ds1 = parseDs1((await gd.fs.read(path))!);
-    const { width: w, height: h } = ds1;
-    // Structure cells: any drawable wall-layer tile (special tiles are markers, not structure).
-    const solid = new Uint8Array(w * h);
-    for (const layer of ds1.walls)
-      layer.forEach((c, i) => {
-        if (!isEmptyCell(c) && c.orientation !== Orientation.SpecialTile1 && c.orientation !== Orientation.SpecialTile2) solid[i] = 1;
-      });
-    const seen = new Uint8Array(w * h);
-    for (let start = 0; start < w * h; start++) {
-      if (!solid[start] || seen[start]) continue;
-      // Flood fill (8-connected) one structure.
-      const cells: number[] = [];
-      const stack = [start];
-      seen[start] = 1;
-      while (stack.length) {
-        const i = stack.pop()!;
-        cells.push(i);
-        const x = i % w;
-        const y = (i / w) | 0;
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-            const n = ny * w + nx;
-            if (solid[n] && !seen[n]) {
-              seen[n] = 1;
-              stack.push(n);
-            }
-          }
-      }
+    const { width: w } = ds1;
+    for (const cells of suggestionGroups(ds1, current.lib)) {
+      if (cells.length > 16 * 16) continue;
       const xs = cells.map((i) => i % w);
       const ys = cells.map((i) => (i / w) | 0);
       const r = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
       const pw = r.x1 - r.x0 + 1;
       const ph = r.y1 - r.y0 + 1;
-      // Skip single tiles (the Tiles panel has those) and map-spanning borders.
-      if (cells.length < 2 || pw > 16 || ph > 16) continue;
+      // A one-cell tree + shadow is a useful combined preset too.
+      const parts = cells.reduce((n, i) => n + [...ds1.walls, ...ds1.shadows].filter((l) => !isEmptyCell(l[i])).length, 0);
+      if (parts < 2 || pw > 16 || ph > 16) continue;
       const mask = new Array<boolean>(pw * ph).fill(false);
       for (const i of cells) mask[(((i / w) | 0) - r.y0) * pw + ((i % w) - r.x0)] = true;
       const preset = capturePreset(ds1, current.lib, r, '', '', mask);
+      const orientations = new Set(preset.layers.flatMap((l) => l.orientations ?? []).filter((o) => o > 0));
+      if ([...orientations].every((o) => o === Orientation.Tree || o === Orientation.PillarsColumnsAndStandaloneObjects)) {
+        preset.layers = preset.layers.filter((l) => l.kind !== 'floor');
+        preset.dt1s = dt1sOf(current.lib, preset.layers);
+      }
       // Only keep structures every tile of which the current map can draw.
       const drawable = preset.layers.every((l) =>
         l.cells.every((v, i) => {
@@ -261,11 +290,10 @@ export async function suggestPresets(
       );
       if (!drawable) continue;
       // Identity ignores prop1 flags and objects (so the same building with other NPCs merges).
-      const key = JSON.stringify([pw, ph, preset.layers.filter((l) => l.kind === 'wall').map((l) => l.cells.map((v, i) => `${(v >>> 8) & 0xffffff}:${l.orientations?.[i]}`))]);
+      const key = JSON.stringify([pw, ph, preset.layers.filter((l) => l.kind !== 'floor').map((l) => [l.kind, l.index, l.cells.map((v, i) => `${(v >>> 8) & 0xffffff}:${l.orientations?.[i] ?? 0}`)])]);
       const prev = found.get(key);
       if (prev) prev.occurrences = (prev.occurrences ?? 1) + 1;
       else {
-        const orientations = new Set(preset.layers.flatMap((l) => l.orientations ?? []).filter((o) => o > 0));
         const { name, category } = describe(preset, orientations);
         found.set(key, { ...preset, name, category, occurrences: 1, foundIn: path });
       }

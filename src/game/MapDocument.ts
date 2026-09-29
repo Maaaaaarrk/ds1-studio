@@ -32,6 +32,9 @@ interface CellChange {
 }
 
 /** One undoable step: cell changes and/or a before/after snapshot of the object list. */
+export interface FileHistoryChange { path: string; before: Uint8Array; after: Uint8Array }
+export type HistoryFileWriter = (path: string, bytes: Uint8Array, expected: Uint8Array) => Promise<void>;
+
 interface HistoryStep {
   /** What the step did, for the History panel. */
   label: string;
@@ -41,6 +44,7 @@ interface HistoryStep {
   objects?: { before: Ds1Object[]; after: Ds1Object[] };
   /** Whole-map snapshots, for structural edits (resize, tags, groups). */
   map?: { before: Ds1; after: Ds1 };
+  file?: FileHistoryChange;
 }
 
 const cloneObjects = (objs: Ds1Object[]): Ds1Object[] => objs.map((o) => ({ ...o, path: o.path.map((p) => ({ ...p })) }));
@@ -168,13 +172,13 @@ export class MapDocument {
    * A structural edit (resize, tag layer, substitution groups) as one undoable step. `fn` either mutates the map in
    * place or returns a replacement map.
    */
-  mutate(fn: (ds1: Ds1) => Ds1 | void, label = 'Change map'): void {
+  mutate(fn: (ds1: Ds1) => Ds1 | void, label = 'Change map', file?: FileHistoryChange): void {
     this.endStroke();
     this.endObjectEdit();
     const before = structuredClone(this.ds1);
     const result = fn(this.ds1);
     if (result) this.restore(result);
-    this.pushHistory({ label, time: Date.now(), cells: [], map: { before, after: structuredClone(this.ds1) } });
+    this.pushHistory({ label, time: Date.now(), cells: [], map: { before, after: structuredClone(this.ds1) }, file });
     this.revision++;
   }
 
@@ -215,6 +219,27 @@ export class MapDocument {
     this.redoStack = [];
   }
 
+  /** Record a table edit only after the file has been written successfully. */
+  recordFileChange(file: FileHistoryChange, label: string): void {
+    this.endStroke(); this.endObjectEdit();
+    this.pushHistory({ label, time: Date.now(), cells: [], file: { ...file, before: file.before.slice(), after: file.after.slice() } });
+    this.revision++;
+  }
+
+  /** Persist external changes before moving history. A failed write leaves history untouched. */
+  async undoWithFiles(write: HistoryFileWriter): Promise<boolean> {
+    this.endStroke(); this.endObjectEdit();
+    const step = this.undoStack[this.undoStack.length - 1];
+    if (step?.file) await write(step.file.path, step.file.before, step.file.after);
+    return this.undo(true);
+  }
+
+  async redoWithFiles(write: HistoryFileWriter): Promise<boolean> {
+    const step = this.redoStack[this.redoStack.length - 1];
+    if (step?.file) await write(step.file.path, step.file.after, step.file.before);
+    return this.redo(true);
+  }
+
   /** Undo steps (oldest first) and redo steps (next first), for the History panel. */
   history(): { done: { label: string; time: number }[]; undone: { label: string; time: number }[] } {
     const info = (s: HistoryStep) => ({ label: s.label, time: s.time });
@@ -227,9 +252,10 @@ export class MapDocument {
     while (this.undoStack.length < count && this.redo());
   }
 
-  undo(): boolean {
+  undo(fileWritten = false): boolean {
     this.endStroke();
     this.endObjectEdit();
+    if (this.undoStack[this.undoStack.length - 1]?.file && !fileWritten) return false;
     const step = this.undoStack.pop();
     if (!step) return false;
     for (const c of [...step.cells].reverse()) this.cells(c.layer)[c.index] = c.before;
@@ -240,7 +266,8 @@ export class MapDocument {
     return true;
   }
 
-  redo(): boolean {
+  redo(fileWritten = false): boolean {
+    if (this.redoStack[this.redoStack.length - 1]?.file && !fileWritten) return false;
     const step = this.redoStack.pop();
     if (!step) return false;
     for (const c of step.cells) this.cells(c.layer)[c.index] = c.after;

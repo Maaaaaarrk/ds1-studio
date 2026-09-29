@@ -69,7 +69,7 @@ import { cellKey, addToSelection, clampRect, fillEdits, clearEdits, clipboardSou
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
-import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
+import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef, type FileHistoryChange } from '../game/MapDocument';
 import { guessDrawnAct, openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
@@ -108,7 +108,7 @@ import { buildDt1, dt1Records } from '../formats/dt1Write';
 import { renameInLvlTypes } from '../game/dt1Review';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
-import { MapRecipesDialog } from './MapRecipes';
+import { MapRecipeRibbon } from './MapRecipeRibbon';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
@@ -202,6 +202,8 @@ export function App() {
   const [map, setMap] = useState<OpenMap | null>(null);
   const [doc, setDoc] = useState<MapDocument | null>(null);
   const [revision, setRevision] = useState(0);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const historyBusyRef = useRef(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   // The view mode used last comes back next time (per browser/app).
@@ -326,7 +328,7 @@ export function App() {
   /** The Copied panel: from a copy or cut until Esc. */
   const [clipPane, setClipPane] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'mapRecipes' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -1467,7 +1469,7 @@ export function App() {
 
   const libraryDocuments = useRef(new WeakSet<MapDocument>());
   const applyDt1s = useCallback(
-    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean } = {}) => {
+    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; edits?: CellEdit[]; file?: FileHistoryChange } = {}) => {
       if (!gd || !map || !doc) return;
       let note = '';
       if (map.resolution.preset) {
@@ -1481,7 +1483,14 @@ export function App() {
       }
       if (currentContext.current.doc !== doc) return;
       libraryDocuments.current.add(doc);
-      mutate(d => { d.files = [...paths.map(embeddedFileName), ...d.files.filter(f => !/data[\\/]/i.test(f))]; });
+      doc.mutate(d => {
+        d.files = [...paths.map(embeddedFileName), ...d.files.filter(f => !/data[\\/]/i.test(f))];
+        for (const e of opts.edits ?? []) {
+          const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
+          layers[e.layer.index][e.y * d.width + e.x] = e.cell;
+        }
+      }, opts.edits ? 'Clear selected automap pieces' : 'Change tile libraries', opts.file);
+      bump();
       const next = await GameData.load(gd.fs);
       const auto = next.resolveDt1s(map.path, doc.ds1);
       const matches = auto.paths.map(normalizePath).join('|') === paths.map(normalizePath).join('|');
@@ -1769,16 +1778,17 @@ export function App() {
   const [automapLevelOverride, setAutomapLevelOverride] = useState<{ path: string; level: string } | null>(null);
   useEffect(() => {
     if ((!visibility.automap && dialog !== 'automap') || !gd || automapData?.gd === gd) return;
+    let live = true;
     void (async () => {
       try {
         const [txt, dc6] = await Promise.all([gd.fs.read(AUTOMAP_TXT), gd.fs.read(AUTOMAP_DC6)]);
         if (!txt || !dc6) throw new Error('AutoMap.txt or MaxiMap.dc6 not found');
-        setAutomapData({ gd, table: parseAutomap(parseTxtTable(txt)), cels: parseAutomapCels(dc6) });
+        if (live) setAutomapData({ gd, table: parseAutomap(parseTxtTable(txt)), cels: parseAutomapCels(dc6) });
       } catch (e) {
-        notify(`Automap: ${(e as Error).message}`, true);
-        setVisibility((v) => ({ ...v, automap: false }));
+        if (live) { notify(`Automap: ${(e as Error).message}`, true); setVisibility((v) => ({ ...v, automap: false })); }
       }
     })();
+    return () => { live = false; };
   }, [visibility.automap, dialog, gd, automapData, notify]);
   const automapLevel = useMemo(() => {
     if (!automapData || !map) return null;
@@ -1820,15 +1830,19 @@ export function App() {
   const openAutomapEditor = useCallback(() => setDialog('automap'), []);
   const saveAutomapEdits = useCallback(
     async (edits: AutomapEdit[]) => {
-      if (!gd || !automapLevel) return;
+      if (!gd || !automapLevel || historyBusyRef.current) return;
+      historyBusyRef.current = true; setHistoryBusy(true);
+      try {
       const bytes = await gd.fs.read(AUTOMAP_TXT);
       if (!bytes) throw new Error('AutoMap.txt not found');
       const { doc: next, rows } = applyAutomapEdits(parseTxtTable(bytes), automapLevel, edits);
       await writeFiles([{ path: AUTOMAP_TXT, bytes: serializeTxtTable(next) }]);
+      doc?.recordFileChange({ path: AUTOMAP_TXT, before: bytes, after: serializeTxtTable(next) }, 'Edit automap pieces'); bump();
       setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
       notify(`AutoMap.txt: ${edits.length} tile kinds saved as ${rows} rows for ${automapLevel}`);
+      } finally { historyBusyRef.current = false; setHistoryBusy(false); }
     },
-    [gd, automapLevel, writeFiles, notify],
+    [gd, doc, automapLevel, writeFiles, notify],
   );
   const automapLevelLabel = useCallback(
     (l: string) => {
@@ -1860,41 +1874,49 @@ export function App() {
   }, [gd, map, automapData, automapLevel]);
 
   const applyAutomapSuggestionsNow = useCallback(async () => {
-    if (!gd || !automapLevel || !automapSuggestions) return;
+    if (!gd || !automapLevel || !automapSuggestions || historyBusyRef.current) return;
+    historyBusyRef.current = true; setHistoryBusy(true);
     try {
       const bytes = await gd.fs.read(AUTOMAP_TXT);
       if (!bytes) throw new Error('AutoMap.txt not found');
       const { doc: next, rows } = applyAutomapSuggestions(parseTxtTable(bytes), automapLevel, automapSuggestions);
       await writeFiles([{ path: AUTOMAP_TXT, bytes: serializeTxtTable(next) }]);
+      doc?.recordFileChange({ path: AUTOMAP_TXT, before: bytes, after: serializeTxtTable(next) }, 'Apply automap suggestions'); bump();
       setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
       setAutomapSuggestions(null);
       notify(`AutoMap.txt: added ${rows} rows for ${automapLevel}`);
     } catch (e) {
       notify((e as Error).message, true);
     }
-  }, [gd, automapLevel, automapSuggestions, writeFiles, notify]);
+    finally { historyBusyRef.current = false; setHistoryBusy(false); }
+  }, [gd, doc, automapLevel, automapSuggestions, writeFiles, notify]);
   const setAutomapPiece = useCallback(
     async (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => {
-      if (!gd || !automapLevel) return;
+      if (!gd || !automapLevel || historyBusyRef.current) return;
+      historyBusyRef.current = true; setHistoryBusy(true);
       try {
         const bytes = await gd.fs.read(AUTOMAP_TXT);
         if (!bytes) throw new Error('AutoMap.txt not found');
         const { doc: next, summary } = setAutomapCel(parseTxtTable(bytes), automapLevel, piece.orientation, piece.main, piece.sub, cel, scope);
         const out = serializeTxtTable(next);
         await writeFiles([{ path: AUTOMAP_TXT, bytes: out }]);
+        doc?.recordFileChange({ path: AUTOMAP_TXT, before: bytes, after: out }, cel < 0 ? 'Clear automap piece' : 'Change automap piece'); bump();
         setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
         notify(summary);
       } catch (e) {
         notify((e as Error).message, true);
+      } finally {
+        historyBusyRef.current = false; setHistoryBusy(false);
       }
     },
-    [gd, automapLevel, writeFiles, notify],
+    [gd, doc, automapLevel, writeFiles, notify],
   );
 
   /** DT1 editor: write the edited DT1, optionally swap it in for the original, then reload so every cache sees it. */
   const [clearingAutomap, setClearingAutomap] = useState(false);
   const clearAutomapSelection = async () => {
-    if (!gd || !doc || !map || !selection || !automapLevel || clearingAutomap) return;
+    if (!gd || !doc || !map || !selection || !automapLevel || clearingAutomap || historyBusyRef.current) return;
+    historyBusyRef.current = true; setHistoryBusy(true);
     const expectedRevision = doc.revision;
     setClearingAutomap(true);
     try {
@@ -1908,12 +1930,12 @@ export function App() {
       if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
       if (currentContext.current.doc !== doc) return;
       await writeFiles([{ path, bytes: plan.bytes }, { path: AUTOMAP_TXT, bytes: serializeTxtTable(plan.table) }]);
-      await applyDt1s(paths, { keepOpen: true, strict: true });
+      await applyDt1s(paths, { keepOpen: true, strict: true, edits: plan.edits, file: { path: AUTOMAP_TXT, before: serializeTxtTable(table), after: serializeTxtTable(plan.table) } });
       if (currentContext.current.doc !== doc) return;
-      doc.apply(plan.edits, 'Clear selected automap pieces'); bump(); setAutomapSuggestions(null);
+      setAutomapSuggestions(null);
       notify('Cleared selected automap pieces. Other cells keep their pieces. Save the map to keep the changes.');
     } catch (e) { notify(String(e), true); }
-    finally { setClearingAutomap(false); }
+    finally { setClearingAutomap(false); historyBusyRef.current = false; setHistoryBusy(false); }
   };
   const saveEditedDt1 = useCallback(
     async (r: Dt1EditResult) => {
@@ -2557,12 +2579,26 @@ export function App() {
     [importState, writeFiles, reloadTables, notify, open],
   );
 
-  const undo = useCallback(() => {
-    if (doc?.undo()) { setSelection(null); setStack(null); setHover(null); bump(); }
-  }, [doc]);
-  const redo = useCallback(() => {
-    if (doc?.redo()) { setSelection(null); setStack(null); setHover(null); bump(); }
-  }, [doc]);
+  const replayHistory = useCallback(async (direction: 'undo' | 'redo', count = 1) => {
+    if (!doc || !gd || historyBusyRef.current) return;
+    historyBusyRef.current = true; setHistoryBusy(true);
+    try {
+      const write = async (path: string, bytes: Uint8Array, expected: Uint8Array) => {
+        const current = await gd.fs.read(path);
+        if (!current || current.length !== expected.length || current.some((v, i) => v !== expected[i])) throw new Error('The automap table changed since this edit. Undo was stopped to preserve those changes.');
+        await writeFiles([{ path, bytes }]);
+        setAutomapData((d) => d ? { ...d, table: parseAutomap(parseTxtTable(bytes)) } : d);
+        setAutomapSuggestions(null);
+      };
+      for (let i = 0; i < count; i++) {
+        if (!(await (direction === 'undo' ? doc.undoWithFiles(write) : doc.redoWithFiles(write)))) break;
+      }
+      setSelection(null); setStack(null); setHover(null); bump();
+    } catch (e) { notify(String(e), true); }
+    finally { historyBusyRef.current = false; setHistoryBusy(false); }
+  }, [doc, gd, writeFiles, notify]);
+  const undo = useCallback(() => { void replayHistory('undo'); }, [replayHistory]);
+  const redo = useCallback(() => { void replayHistory('redo'); }, [replayHistory]);
 
   const savingMap = useRef(false);
   const save = useCallback(async () => {
@@ -2943,6 +2979,10 @@ export function App() {
       label: 'View',
       groups: [
         {
+          label: 'Cube recipe',
+          items: [{ custom: <MapRecipeRibbon key={doc?.path ?? ''} fs={data.gd.fs} mapPath={doc?.path} refresh={data.gd} /> }],
+        },
+        {
           label: 'Navigate',
           items: [
             { label: 'Fit', icon: <Maximize />, onClick: () => setFitSignal((n) => n + 1), disabled: noMap, shortcut: kb['view.fit'] },
@@ -2998,10 +3038,6 @@ export function App() {
             { label: 'Copy view', icon: <Camera />, onClick: () => void copyView(), disabled: noMap, shortcut: kb['view.snapshot'], title: 'Copy the map pane exactly as shown, as a picture: paste it anywhere with Ctrl+V' },
             { label: 'Export picture…', icon: <ImageDown />, onClick: () => setDialog('image'), disabled: noMap, size: 'sm', title: 'Save the whole map (or the selection) as a PNG' },
           ],
-        },
-        {
-          label: 'Map access',
-          items: [{ label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('mapRecipes'), disabled: noMap, title: 'View existing cube recipes for the open map' }],
         },
       ],
     },
@@ -3642,9 +3678,8 @@ export function App() {
               doc={doc}
               revision={revision}
               onGoTo={(n) => {
-                doc.goTo(n);
-                setSelection(null); setStack(null); setHover(null);
-                bump();
+                const delta = n - doc.history().done.length;
+                void replayHistory(delta < 0 ? 'undo' : 'redo', Math.abs(delta));
               }}
             />
             <GroupsPanel ds1={map.ds1} selection={selection} onMutate={mutate} onShowGroups={() => setVisibility((v) => ({ ...v, groups: true }))} />
@@ -4062,7 +4097,7 @@ export function App() {
           initial={registerInitial}
         />
       )}
-      {dialog === 'mapRecipes' && doc && <MapRecipesDialog fs={data.gd.fs} mapPath={doc.path} onClose={() => setDialog(null)} />}
+      {historyBusy && <div className="modal-backdrop" role="status" style={{ zIndex: 1000 }}><div className="modal">Updating history…</div></div>}
       {dialog === 'cube' && doc && (
         <CubeRecipeDialog
           fs={data.gd.fs}
