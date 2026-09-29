@@ -26,8 +26,11 @@ export const MAX_LEVEL_STRING = 39;
 
 const num = (s: string) => Number(s) || 0;
 
-/** Levels.txt Layer (automap layer): the game's own levels use 0-99; 101 and above crashed the game on entry. */
-export const MAX_LAYER = 99;
+/**
+ * Levels.txt Layer (automap layer): 100 is the highest the game takes (a level with 101 or 102 crashes it as players
+ * arrive, checked in PD2; 100 loads). The game's own levels use 0-99; PD2's maps all share 98.
+ */
+export const MAX_LAYER = 100;
 /** A layer for a new level: the one most mod-added preset levels share (PD2's maps: 98), else 98. */
 export function safeLayer(levels: TxtTableDoc): number {
   const count = new Map<number, number>();
@@ -306,8 +309,8 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     set('Levels.txt', row, label, 'QuestFlag', '', 'no quest needed to enter');
     set('Levels.txt', row, label, 'QuestFlagEx', '', 'no quest needed to enter');
     set('Levels.txt', row, label, 'Quest', '');
-    // Layer (the automap layer) stays the template's, as PD2's own maps all share one (98): the game's levels never go
-    // above 99, and new levels numbered 101 and 102 by counting up crashed the game on entry (100 didn't).
+    // Layer (the automap layer) stays the template's, as PD2's own maps all share one (98): counting up past 100
+    // crashes the game as players arrive (confirmed in PD2: 101 and 102 crashed, set back to 98 they load).
     if (num(getCell(levels, row, 'Layer')) > MAX_LAYER) set('Levels.txt', row, label, 'Layer', String(safeLayer(levels)), `the game's levels use 0-${MAX_LAYER}`);
     for (const s of ['', '(N)', '(H)']) {
       set('Levels.txt', row, label, `SizeX${s}`, sizeX, 'the map is one cell bigger than the level');
@@ -663,8 +666,8 @@ export function verifyInGame(
       const to = safeLayer(levels);
       out.push({
         severity: 'error',
-        title: `Level ${levelId} "${lName}" has automap Layer ${layer}: the game can crash on entering it`,
-        detail: `Levels.txt Layer is the level's automap layer. The game's own levels use 0-${MAX_LAYER} (PD2's maps all share 98); new levels numbered 101 and 102 crashed the game as players arrived, while 100 didn't. Use the layer the other added levels share.`,
+        title: `Level ${levelId} "${lName}" has automap Layer ${layer}: the game crashes as players arrive`,
+        detail: `Levels.txt Layer is the level's automap layer; the game takes 0-${MAX_LAYER} (its own levels use 0-99, PD2's maps all share 98). A higher one crashes the game the moment a player enters the level. Use the layer the other added levels share.`,
         columns: [{ table: 'Levels', col: 'Layer' }],
         fix: cellFix('Levels.txt', levels, `Set Layer to ${to} (as the other added levels)`, [{ row: lRow, col: 'Layer', value: String(to) }]),
       });

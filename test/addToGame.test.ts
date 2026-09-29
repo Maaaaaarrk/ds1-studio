@@ -181,9 +181,9 @@ describe.runIf(hasD2)('Add to game, checked against the vanilla tables', async (
     expect([0, 1, 2, 3, 4, 5, 6, 7].map((i) => cell(`Warp${i}`))).toEqual(Array(8).fill('-1'));
     expect(cell('QuestFlag')).toBe('');
     expect(cell('Depend')).toBe('0');
-    // The automap layer stays the template's (level 109), within the game's 0-99: counting up past 100 crashed the game.
+    // The automap layer stays the template's (level 109), within the game's 0-100: counting up past 100 crashes the game.
     expect(cell('Layer')).toBe(getCell(tables.levels, rowOfRecord(tables.levels, 109), 'Layer'));
-    expect(Number(cell('Layer'))).toBeLessThanOrEqual(99);
+    expect(Number(cell('Layer'))).toBeLessThanOrEqual(100);
     expect([cell('LevelName'), cell('LevelWarp'), cell('EntryFile')]).toEqual(['My Town', 'My Town', 'A5L1']); // EntryFile is an image: Harrogath's, kept
     const P = rowOfRecord(next.prest, prestCount);
     const pc = (c: string) => getCell(next.prest, P, c);

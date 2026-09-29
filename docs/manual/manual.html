@@ -596,6 +596,7 @@
     <li><b>A new level</b>, with settings (monsters, lighting, sound, tile set) copied from a level you choose. A <code>Levels.txt</code> row is added as the next record, and its <code>LvlPrest.txt</code> row points at the map.</li>
     <li><b>Replace the map of an existing preset level</b>. The level's own <code>LvlPrest</code> row is pointed at the map. Only preset levels can do this: levels the game builds at random don't load a single map.</li>
   </ul>
+  <div class="note"><b>Automap layer</b> A new level keeps the <code>Layer</code> of the level it copies (PD2's maps all share 98). The game takes layers up to 100: a level with a higher one crashes the game the moment a player enters it (earlier versions of DS1 Studio counted up past it). The <a href="#s-check">Compatibility check</a> reports such a level and sets it back.</div>
   <p>Either way, the tile libraries the map uses go into free <code>File</code> slots of the level type (<code>LvlTypes.txt</code>), and the preset's <code>Dt1Mask</code> selects them. The rules it follows come from the game's own code and tables:</p>
   <table>
     <tr><th>Rule</th><th>Why</th></tr>
