@@ -70,7 +70,7 @@ import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
-import { openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
+import { guessDrawnAct, openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, hitTestAll, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
@@ -1881,7 +1881,16 @@ export function App() {
       const converted: string[] = [];
       const out = [];
       for (const f of files) {
-        const c = act0Convert(f.bytes, await gd.palette(dt1Act(f.path) ?? Math.min(4, map?.ds1.act ?? 0)), a0.usable);
+        // Judged in the act it was drawn for: its folder's, else the one its art fits, only then this map's.
+        let act = dt1Act(f.path);
+        if (act === null) {
+          try {
+            act = guessDrawnAct(parseDt1(f.bytes).tiles, await Promise.all([0, 1, 2, 3, 4].map((a) => gd.palette(a))));
+          } catch {
+            act = null;
+          }
+        }
+        const c = act0Convert(f.bytes, await gd.palette(act ?? Math.min(4, map?.ds1.act ?? 0)), a0.usable);
         if (c) converted.push(f.path);
         out.push(c ? { path: f.path, bytes: c.bytes } : f);
       }

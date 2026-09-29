@@ -156,6 +156,18 @@ async function choosePaletteAct(gd: GameData, ds1: Ds1, r: Dt1Resolution, lib: T
   return clear ? [best, 'tiles'] : [ds1.act, 'ds1'];
 }
 
+/**
+ * The act a tile library's art was drawn for, from the art itself (see speckScores): the act palette under which its
+ * act-specific pixels blend in with their neighbours best. null when it has too few of them to tell. `palettes` are
+ * the five act palettes, Act 1 first.
+ */
+export function guessDrawnAct(tiles: Dt1Tile[], palettes: Palette[]): number | null {
+  const step = Math.max(1, Math.floor(tiles.length / 48));
+  const { scores, samples } = speckScores(tiles.filter((_, i) => i % step === 0), palettes);
+  if (samples < 100) return null;
+  return scores.indexOf(Math.min(...scores));
+}
+
 /** Redraws an open map with another act's palette. */
 export async function withPalette(gd: GameData, map: OpenMap, act: number): Promise<OpenMap> {
   rememberPalette(map.path, act);

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { decodeTile, type Dt1, type TileImage } from '../formats/dt1';
 import { recolorDt1 } from '../formats/dt1Edit';
 import { ACT0_PALETTE, OLD_ACT5_PALETTE, PALETTE_NAMES, type Palette } from '../formats/palette';
-import { act0Remap, loadAct0Palette, type Act0Palette } from '../game/act0Palette';
+import { act0Remap, dt1Act, loadAct0Palette, type Act0Palette } from '../game/act0Palette';
+import { guessDrawnAct } from '../game/openMap';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { isBuiltinPath } from '../game/specialTiles';
@@ -15,8 +16,7 @@ const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
 /** The act a DT1 was drawn for, guessed from its folder (act1..act5, expansion = Act 5); null when the folder doesn't say. */
 export function actFromPath(path: string): number | null {
-  const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(path);
-  return m ? (m[1] ? Number(m[1]) - 1 : 4) : null;
+  return dt1Act(path);
 }
 
 interface Row {
@@ -97,7 +97,8 @@ export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onClose }: 
       setRows(out);
       // Drawn for: the act its folder names, else Act 1. Converted by default: DT1s in a folder (a mod's own, or
       // imported) drawn for another act and using act-specific colours. Game archives are shared by the game's maps.
-      setFrom(Object.fromEntries(out.map((r) => [r.path, actFromPath(r.path) ?? 0])));
+      // Drawn for: the act its folder names, else the one its art fits (never simply this map's act).
+      setFrom(Object.fromEntries(out.map((r) => [r.path, actFromPath(r.path) ?? guessDrawnAct(r.dt1.tiles, pals) ?? mapAct])));
       // A DT1 with an act-safe copy loaded too: the map mixes the two, and removing this one is the fix, not converting it.
       const safeCopy = new Set(
         duplicateDt1s(map.lib).flatMap((d) => [

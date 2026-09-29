@@ -19,3 +19,13 @@ describe('Act 0 conversion', () => {
     expect([r[1], r[2], r[4], r[5]]).toEqual([1, 2, 4, 5]);
   });
 });
+
+describe('the act a tile library was drawn for', () => {
+  it('comes from its folder: ACT1-4, expansion, and Guild (Act 1 art)', async () => {
+    const { dt1Act } = await import('../src/game/act0Palette');
+    expect(dt1Act('data/global/tiles/ACT3/Kurast/huts.dt1')).toBe(2);
+    expect(dt1Act('data/global/tiles/expansion/Siege/snow.dt1')).toBe(4);
+    expect(dt1Act('data/global/tiles/Guild/outdoors/cliff.dt1')).toBe(0);
+    expect(dt1Act('data/global/tiles/PD2assets/cust/int.dt1')).toBeNull();
+  });
+});

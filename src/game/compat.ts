@@ -14,6 +14,8 @@ import { loadTable } from './levelTables';
 import { arrivalProblem, arrivalText } from './arrival';
 import { dt1Act, loadAct0Palette } from './act0Palette';
 import { neededDt1s } from './importMatch';
+import { guessDrawnAct } from './openMap';
+import type { Palette } from '../formats/palette';
 import { blankObjectNames, nameStringsWrite, readStringTables } from './objectStrings';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
@@ -308,13 +310,16 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
           const pal = Number(level['Pal']);
           const palAct = pal === 5 ? 4 : Math.min(4, Math.max(0, pal));
           const a0 = await loadAct0Palette(gd.fs).catch(() => null);
+          let pals: Palette[] | null = null;
+          const actPalettes = async () => (pals ??= await Promise.all([0, 1, 2, 3, 4].map((a) => gd.palette(a))));
           if (a0) {
             const unsafe: { path: string; share: number }[] = [];
             for (const l of lib.loaded) {
               if (!l.found || isBuiltinPath(l.path)) continue;
-              if (dt1Act(l.path) === palAct) continue; // drawn for this level's act: its colours are right here
               const dt1 = await gd.dt1(l.path).catch(() => null);
               if (!dt1) continue;
+              // Drawn for this level's act (by its folder, else by its art): its colours are right here.
+              if ((dt1Act(l.path) ?? guessDrawnAct(dt1.tiles, await actPalettes())) === palAct) continue;
               let bad = 0, all = 0;
               for (const t of dt1.tiles) {
                 const img = decodeTile(t);
