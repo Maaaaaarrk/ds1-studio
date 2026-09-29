@@ -1,7 +1,24 @@
 import { hitTest, sameItem, stackAt, type DrawItem, type Scene } from '../render/scene';
 import type { LayerRef } from './MapDocument';
+import { inSelection, type CellSelection } from './clipboard';
 
 export interface TileStack { items: DrawItem[]; index: number; anchor?: [number, number] }
+
+export function combinedCellAt(scene: Scene, world: [number, number], grid: [number, number], visible: (item: DrawItem) => boolean): [number, number] {
+  const hit = hitTest(scene, ...world, visible);
+  return hit && hit.kind !== 'floor' && hit.kind !== 'shadow' ? [hit.cellX, hit.cellY] : grid;
+}
+
+/** Selected artwork stays gold; a separate hover preview shows every visible layer of the next cell. */
+export function tileEmphasis(item: DrawItem, selection: CellSelection | null, focus: DrawItem | null, hover: [number, number] | null): 'selected' | 'hover' | null {
+  if (focus ? sameItem(item, focus) : selection && inSelection(selection, item.cellX, item.cellY)) return 'selected';
+  return hover && item.cellX === hover[0] && item.cellY === hover[1] ? 'hover' : null;
+}
+
+/** A selected cell owns the wheel until the pointer leaves it; Ctrl+wheel always offers explicit zoom. */
+export function cycleWithWheel(shift: boolean, trackedShift: boolean, ctrl: boolean, selectTool: boolean, selectedCell: boolean, horizontal: boolean): boolean {
+  return !ctrl && (shift || trackedShift || (selectTool && (selectedCell || horizontal)));
+}
 
 export function stackMatchesLayer(stack: TileStack, layer: LayerRef): boolean {
   const item = stack.items[stack.index];

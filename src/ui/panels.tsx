@@ -66,6 +66,7 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
         ))}
         <Toggle label="Shadows" hotkey={keys['layer.shadows']} checked={v.shadows} onChange={(x) => set({ shadows: x })} count={count('shadow')} />
         <Toggle label="Roofs" hotkey={keys['layer.roofs']} checked={v.roofs} onChange={(x) => set({ roofs: x })} count={count('roof')} />
+        <Toggle label="Upper walls" checked={v.upperWalls} onChange={(x) => set({ upperWalls: x })} count={count('wall')} />
         <Toggle label="Lower walls" hotkey={keys['layer.lowerWalls']} checked={v.lowerWalls} onChange={(x) => set({ lowerWalls: x })} count={count('lowerWall')} />
       </div>
       <div className="toggle-group">
@@ -83,7 +84,7 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
       </div>
       <p className="muted small">
         Objects (blue) share the monster toggle. Walkability: amber blocks walking, red also blocks jumping/teleport. Space/right-drag to pan,
-        scroll to zoom, F to fit.
+        scroll to zoom (or cycle a selected cell), Ctrl+scroll to zoom explicitly, F to fit.
       </p>
     </Panel>
   );

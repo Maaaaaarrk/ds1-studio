@@ -14,6 +14,7 @@ export const enum InstanceFlag {
   Ghost = 8,
   /** Floor tile: solid-edged when zoomed out (see the fragment shader). */
   Floor = 256,
+  Preview = 512,
 }
 
 /** Instance flag bits for a sprite layer's blend (a COF draw effect, or -1 for solid). */
@@ -130,8 +131,12 @@ void main() {
   }
   rgb *= light;
   // Output is premultiplied (blendFunc ONE, ONE_MINUS_SRC_ALPHA), so alpha 0 with colour means "add".
-  if ((vFlags & 1) != 0) { outColor = vec4(0.0, 0.0, 0.0, 0.45 * coverage); return; }
+  if ((vFlags & 1) != 0) {
+    vec3 tint = (vFlags & 2) != 0 ? vec3(1.0, 0.78, 0.3) : (vFlags & 512) != 0 ? vec3(0.3, 0.8, 1.0) : vec3(0.0);
+    outColor = vec4(tint, 0.45 * coverage); return;
+  }
   if ((vFlags & 2) != 0) rgb = mix(rgb, vec3(1.0, 0.78, 0.3), 0.35);
+  else if ((vFlags & 512) != 0) rgb = mix(rgb, vec3(0.3, 0.8, 1.0), 0.40);
   if ((vFlags & 4) != 0) rgb *= 0.35;
   float a = ((vFlags & 8) != 0 ? 0.6 : 1.0) * coverage;
   // Sprite layer blend (bits 4-7): 0 solid, else Diablo II's draw effect + 1.

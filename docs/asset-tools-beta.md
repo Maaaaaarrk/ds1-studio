@@ -33,6 +33,10 @@ Deleting a DS1 removes its loose file only. If an archive or lower-priority sour
 
 ## Selection and map references
 
+In 0.2.18, a blue hover preview shows the combined visible artwork of a cell, including after scrolling through layers. Selected artwork remains gold; dragged selections highlight all visible layers in every selected cell. The Show bar stays directly above the map with floor layers, wall layers, upper walls, lower walls, roofs, shadows and special tiles. Wall-layer buttons control the upper walls, lower walls and roofs stored in that layer; category buttons filter those kinds across enabled layers.
+
+Scroll over a selected cell to keep cycling its tiles, or use Shift+scroll elsewhere to start a cycle. Ctrl+scroll explicitly zooms; ordinary scrolling away from the selected cell zooms as before.
+
 As of 0.2.17, clicking visible wall artwork selects the wall's owning cell and layer, even when it overlaps another grid cell. Clicking floor or empty space selects the grid cell under the pointer. Drag selections start at the pointer's grid cell and follow the grid. Shift+click adds a wall's owning cell or a grid cell; Shift+drag adds a grid area. Shift+wheel cycles overlapping visible tiles in either direction and keeps the chosen layer active. Esc removes the single-layer restriction. Pick/Alt-click still samples visible artwork. Pointer projection accounts for display scaling, canvas size and renderer rounding, and interrupted drags release their selection state.
 
 In the Tiles sidebar, a normal click replaces the paint choice. Ctrl/Command-click explicitly adds to the random mix. Frames/variants with a shared ID appear as one paint choice. In the DT1 editor, an ordinary click replaces the thumbnail selection, Ctrl-click toggles it, and Shift-click selects a range; changing libraries clears the selection. A map selection's holes are preserved when choosing its DT1 tiles.

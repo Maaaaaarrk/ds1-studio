@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { stackMatchesLayer, stepTileStack, wallClickStack } from '../src/game/mapSelection';
+import { combinedCellAt, cycleWithWheel, tileEmphasis, stackMatchesLayer, stepTileStack, wallClickStack } from '../src/game/mapSelection';
+import { cellKey } from '../src/game/clipboard';
 import { worldToCell, type DrawItem, type Scene } from '../src/render/scene';
 import { parseDt1 } from '../src/formats/dt1';
 import { blockerRecord, buildDt1 } from '../src/formats/dt1Write';
@@ -12,6 +13,31 @@ const scene = (items = [floor, wall1, wall2]): Scene => ({ items, missing: [], s
 const shown = () => true;
 
 describe('wall click and Shift+wheel selection', () => {
+  it('previews every layer of the visible wall cell while keeping the scrolled layer distinct', () => {
+    const cell = combinedCellAt(scene(), [8,8], [0,0], shown);
+    expect(cell).toEqual([2,1]);
+    expect(tileEmphasis(wall2, null, wall2, cell)).toBe('selected');
+    expect(tileEmphasis(wall1, null, wall2, cell)).toBe('hover');
+    expect(tileEmphasis(floor, null, wall2, cell)).toBe('hover');
+    expect(tileEmphasis({...wall1,cellX:3}, null, wall2, [3,1])).toBe('hover');
+    expect(combinedCellAt(scene(), [8,8], [0,0], it => it.kind === 'floor')).toEqual([0,0]);
+  });
+  it('highlights combined artwork throughout a dragged selection while preserving irregular holes', () => {
+    const selection = {x0:1,y0:1,x1:3,y1:2,cells:new Set([cellKey(2,1),cellKey(3,2)])};
+    for (const kind of ['floor','wall','lowerWall','roof','shadow'] as const) {
+      expect(tileEmphasis(item(kind,0), selection, null, null)).toBe('selected');
+      expect(tileEmphasis({...item(kind,0),cellX:1}, selection, null, null)).toBeNull();
+    }
+  });
+  it('keeps wheel selection after clicking or losing wheel modifier flags, with explicit Ctrl zoom', () => {
+    expect(cycleWithWheel(false,false,false,true,true,false)).toBe(true);
+    expect(cycleWithWheel(false,true,false,true,false,false)).toBe(true);
+    expect(cycleWithWheel(false,false,false,true,false,true)).toBe(true);
+    expect(cycleWithWheel(true,false,false,false,false,false)).toBe(true);
+    expect(cycleWithWheel(true,true,true,true,true,true)).toBe(false);
+    expect(cycleWithWheel(false,false,false,true,false,false)).toBe(false);
+    expect(cycleWithWheel(false,false,false,false,true,false)).toBe(false);
+  });
   it('selects visible wall artwork at its owning cell, not the floor grid behind it', () => {
     expect(worldToCell(8,8).map(Math.floor)).toEqual([0,0]);
     const stack = wallClickStack(scene(), [8,8], shown)!;

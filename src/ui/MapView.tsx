@@ -11,17 +11,19 @@ import type { SpriteAnimation } from '../game/spriteAnim';
 import { AUTOMAP_CODES, AUTOMAP_SCALE, type AutomapPiece } from '../game/automap';
 import { automapCanvas, type AutomapKind, type AutomapStyle, type DrawPiece } from '../game/automapStyle';
 import type { SpriteFrame } from '../formats/dc6';
-import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, worldToSubTile, sameItem, type DrawItem, type Scene } from '../render/scene';
+import { cellToWorld, SubTileFlag, subTileToWorld, walkability, worldToCell, worldToSubTile, type DrawItem, type Scene } from '../render/scene';
 import type { Tool, Visibility } from './state';
 import { specialTileInfo } from '../game/specialTiles';
 import { Minimap } from './Minimap';
 import { hideRect, popTargets, triggerRect, type PopArea } from '../game/pops';
 import type { Ds1 } from '../formats/ds1';
 import { canvasToWorld } from '../render/inputProjection';
+import { combinedCellAt, cycleWithWheel, tileEmphasis } from '../game/mapSelection';
 
 export interface HoverInfo {
   cellX: number;
   cellY: number;
+  world?: [number, number];
 }
 
 /** A tile drawn translucently as a brush preview. */
@@ -77,7 +79,8 @@ interface Props {
    */
   gameView?: { on: boolean; signal: number; center?: [number, number] | null; width: number; height: number };
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
-  focus: { item: DrawItem; index: number; count: number; label: string } | null;
+  focus: { item: DrawItem; index: number; count: number; label: string; anchor?: [number, number] } | null;
+  hittable: (item: DrawItem) => boolean;
   /** The in-game automap drawn over the map (dimmed underneath). */
   automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array; style: AutomapStyle; kindOf: (orientation: number, main: number, sub: number) => AutomapKind } | null;
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
@@ -120,7 +123,7 @@ export function isVisible(it: DrawItem, v: Visibility): boolean {
     case 'lowerWall':
       return v.lowerWalls && (v.walls[it.layer] ?? true);
     case 'wall':
-      return v.walls[it.layer] ?? true;
+      return v.upperWalls && (v.walls[it.layer] ?? true);
     case 'roof':
       return v.roofs && (v.walls[it.layer] ?? true);
     case 'special':
@@ -172,6 +175,9 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
 export function MapView(props: Props) {
   const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, sprites, fitSignal, focus } = props;
   const popsInside = props.pops?.inside ? props.pops.hidden : null;
+  const previewCell = useMemo(() => hover ? (tool === 'select' && hover.world
+    ? combinedCellAt(scene, hover.world, [hover.cellX, hover.cellY], props.hittable)
+    : [hover.cellX, hover.cellY] as [number, number]) : null, [scene, hover, tool, props.hittable]);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
@@ -375,9 +381,11 @@ export function MapView(props: Props) {
       if (!isVisible(it, visibility)) continue;
       if (popsInside && (it.kind === 'wall' || it.kind === 'roof' || it.kind === 'lowerWall') && popsInside.has(`${it.layer}:${it.cellX}:${it.cellY}`)) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
-      if (focus) {
-        if (sameItem(it, focus.item)) flags |= InstanceFlag.Highlight;
-      } else if (hover && tool !== 'object' && !props.walkBrush && it.cellX === hover.cellX && it.cellY === hover.cellY && it.kind !== 'shadow' && !ghost.length) flags |= InstanceFlag.Highlight;
+      if (tool !== 'object' && !props.walkBrush && !ghost.length) {
+        const emphasis = tileEmphasis(it, tool === 'select' ? selection : null, tool === 'select' ? focus?.item ?? null : null, previewCell);
+        if (emphasis === 'selected') flags |= InstanceFlag.Highlight;
+        else if (emphasis === 'hover') flags |= InstanceFlag.Preview;
+      }
       const tile = it.frames && visibility.animate ? it.frames[floorFrame % it.frames.length] : it.tile;
       push(tile, it.x, it.y, flags);
     }
@@ -386,7 +394,7 @@ export function MapView(props: Props) {
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, hover, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus, popsInside, !!props.walkBrush]);
+  }, [scene, visibility, previewCell, selection, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus, popsInside, !!props.walkBrush]);
 
   useEffect(() => {
     dirty.current = true;
@@ -401,6 +409,7 @@ export function MapView(props: Props) {
     let stroke: [number, number] | null = null;
     let pointer: number | null = null;
     let space = false;
+    let shiftHeld = false;
     const dpr = () => window.devicePixelRatio || 1;
     const toWorld = (ev: MouseEvent): [number, number] => {
       const r = el.getBoundingClientRect();
@@ -479,11 +488,13 @@ export function MapView(props: Props) {
         stroke = [cx, cy];
       }
       const { map: m, hover: h, onHover: hov } = latest.current;
+      const hoverCell = latest.current.tool === 'select' ? combinedCellAt(latest.current.scene, cursorWorld.current, [cx, cy], latest.current.hittable) : [cx, cy];
+      const oldCell = h?.world && latest.current.tool === 'select' ? combinedCellAt(latest.current.scene, h.world, [h.cellX, h.cellY], latest.current.hittable) : h ? [h.cellX, h.cellY] : null;
       const inside = cx >= 0 && cy >= 0 && cx < m.ds1.width && cy < m.ds1.height;
       if (!inside) {
         if (h) hov(null);
-      } else if (!h || h.cellX !== cx || h.cellY !== cy) {
-        hov({ cellX: cx, cellY: cy });
+      } else if (!h || h.cellX !== cx || h.cellY !== cy || !oldCell || oldCell[0] !== hoverCell[0] || oldCell[1] !== hoverCell[1]) {
+        hov({ cellX: cx, cellY: cy, world: cursorWorld.current });
       }
     };
     const up = (ev: PointerEvent) => {
@@ -517,7 +528,11 @@ export function MapView(props: Props) {
       if (pointer !== null || document.querySelector('.modal-backdrop')) return;
       const cam = camera.current;
       const [wx, wy] = toWorld(ev);
-      if (ev.shiftKey) {
+      const s = latest.current;
+      const cell = combinedCellAt(s.scene, [wx, wy], toCell(ev), s.hittable);
+      const selectedCell = !!s.selection && s.selection.x0 === s.selection.x1 && s.selection.y0 === s.selection.y1 && s.selection.x0 === cell[0] && s.selection.y0 === cell[1];
+      const nearFocus = !!s.focus?.anchor && Math.hypot(wx - s.focus.anchor[0], wy - s.focus.anchor[1]) * cam.zoom / dpr() < 24;
+      if (cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey, s.tool === 'select', selectedCell || nearFocus, !!ev.deltaX && !ev.deltaY)) {
         // Shift+wheel picks one tile out of a stack instead of zooming (Windows turns it into a horizontal scroll).
         const d = ev.deltaY || ev.deltaX;
         if (d) latest.current.onCycle(d > 0 ? 1 : -1, [wx, wy]);
@@ -542,6 +557,7 @@ export function MapView(props: Props) {
     const typing = (t: EventTarget | null) =>
       t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
     const keydown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Shift') shiftHeld = true;
       if (ev.key.startsWith('Arrow') && !typing(ev.target) && !document.querySelector('.modal-backdrop') && !ev.ctrlKey && !ev.altKey) {
         arrows.current.add(ev.key);
         if (ev.shiftKey) arrows.current.add('Shift');
@@ -555,6 +571,7 @@ export function MapView(props: Props) {
       }
     };
     const keyup = (ev: KeyboardEvent) => {
+      if (ev.key === 'Shift') shiftHeld = false;
       arrows.current.delete(ev.key);
       if (ev.key === 'Shift') arrows.current.delete('Shift');
       if (![...arrows.current].some((a) => a.startsWith('Arrow'))) arrows.current.clear();
@@ -580,7 +597,7 @@ export function MapView(props: Props) {
     el.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keydown);
     window.addEventListener('keyup', keyup);
-    const blur = cancel;
+    const blur = () => { shiftHeld = false; cancel(); };
     window.addEventListener('blur', blur);
     return () => {
       el.removeEventListener('pointerdown', down);
@@ -1198,9 +1215,10 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     }
   } else if (hover && tool !== 'object') {
     ctx.beginPath();
-    diamond(ctx, hover.cellX, hover.cellY);
+    const cell = tool === 'select' && hover.world ? combinedCellAt(scene, hover.world, [hover.cellX, hover.cellY], s.hittable) : [hover.cellX, hover.cellY];
+    diamond(ctx, cell[0], cell[1]);
     ctx.lineWidth = 2 * px;
-    ctx.strokeStyle = tool === 'erase' ? 'rgba(255, 90, 110, 0.95)' : 'rgba(255, 205, 110, 0.95)';
+    ctx.strokeStyle = tool === 'erase' ? 'rgba(255, 90, 110, 0.95)' : 'rgba(100, 210, 255, 0.95)';
     ctx.stroke();
   }
 

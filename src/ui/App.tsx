@@ -76,6 +76,7 @@ import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
+import { MapLayerBar } from './MapLayerBar';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, modeOf, nextView, oneMode, TOOLS, VIEW_NAMES, withMode, type Tool, type ViewMode, type Visibility } from './state';
@@ -720,13 +721,14 @@ export function App() {
   // The wall-layer tiles hide areas fade ("layer:x:y"; roofs, usually), and per area which layers they are on.
   const { popTargetCells, popAreaTargets } = useMemo(() => {
     const cells = new Set<string>();
-    const perArea: { layer: number; roof: boolean }[][] = [];
+    const perArea: { layer: number; roof: boolean; lower: boolean }[][] = [];
     if (map)
       for (const a of popAreas) {
-        const list: { layer: number; roof: boolean }[] = [];
+        const list: { layer: number; roof: boolean; lower: boolean }[] = [];
         for (const t of popTargets(map.ds1, a)) {
           cells.add(`${t.layer}:${t.x}:${t.y}`);
-          list.push({ layer: t.layer, roof: map.ds1.walls[t.layer]?.[t.y * map.ds1.width + t.x]?.orientation === Orientation.Roof });
+          const orientation = map.ds1.walls[t.layer]?.[t.y * map.ds1.width + t.x]?.orientation;
+          list.push({ layer: t.layer, roof: orientation === Orientation.Roof, lower: orientation >= Orientation.LowerWallsEquivalentToLeftWall });
         }
         perArea.push(list);
       }
@@ -745,6 +747,7 @@ export function App() {
       if (o === Orientation.Roof && !visibility.roofs) return false;
       if (o >= Orientation.LowerWallsEquivalentToLeftWall && !visibility.lowerWalls) return false;
       if ((o === Orientation.SpecialTile1 || o === Orientation.SpecialTile2) && !visibility.specials) return false;
+      if (o !== Orientation.Roof && o < Orientation.LowerWallsEquivalentToLeftWall && o !== Orientation.SpecialTile1 && o !== Orientation.SpecialTile2 && !visibility.upperWalls) return false;
       return !(visibility.popsInside && popTargetCells.has(`${layer.index}:${x}:${y}`));
     },
     [visibility, popTargetCells],
@@ -763,7 +766,7 @@ export function App() {
       // Covered: inside an area whose fading tiles are drawn (not switched off in Layers).
       return popAreas.some(
         (a, i) =>
-          x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && popAreaTargets[i].some((t) => (visibility.walls[t.layer] ?? true) && (!t.roof || visibility.roofs)),
+          x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && popAreaTargets[i].some((t) => (visibility.walls[t.layer] ?? true) && (t.roof ? visibility.roofs : t.lower ? visibility.lowerWalls : visibility.upperWalls)),
       );
     },
     [popAreas, popTargetCells, popAreaTargets, visibility],
@@ -805,7 +808,7 @@ export function App() {
     const want = stack.items[stack.index];
     const item = scene.items.find((it) => sameItem(it, want) && hittable(it));
     if (!item) return null;
-    return { item, index: stack.index, count: stack.items.length, label: `${layerLabel(layerOfItem(item))} ${item.tile.mainIndex}/${item.tile.subIndex}` };
+    return { item, index: stack.index, count: stack.items.length, anchor: stack.anchor, label: `${layerLabel(layerOfItem(item))} ${item.tile.mainIndex}/${item.tile.subIndex}` };
   }, [stack, scene, hittable]);
   const onlyLayer = focus ? layerOfItem(focus.item) : null;
   const cycleStack = useCallback(
@@ -3224,6 +3227,8 @@ export function App() {
       </aside>
 
       <main className="stage">
+        {map && <MapLayerBar ds1={map.ds1} visibility={visibility} onChange={setVisibility} />}
+        <div className="stage-map">
         {modeAlert && <div className="mode-alert" role="status" aria-live="polite">{modeAlert}</div>}
         {map && scene && visibility.walkable && <WalkLegend floating />}
         {map && scene && walkArea !== null && (() => {
@@ -3283,6 +3288,7 @@ export function App() {
             onContextMenu={(at, cell, world) => setMapMenu({ at, cell, world })}
             gameView={{ ...gameView, width: gameSize[0], height: gameSize[1] }}
             focus={focus}
+            hittable={hittable}
             onCycle={cycleStack}
             automap={automapView}
             centerOn={centerOn}
@@ -3342,6 +3348,7 @@ export function App() {
         )}
         </ErrorBoundary>
         {loadingPath && <div className="toast">Loading {loadingPath.split('/').pop()}…</div>}
+        </div>
       </main>
 
       {!rightCollapsed && <Splitter axis="x" direction={-1} size={rightW} onResize={setRightW} className="edge-left" title="Drag to widen or narrow the side panel" />}
