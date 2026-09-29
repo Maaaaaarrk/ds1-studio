@@ -71,7 +71,7 @@ import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, read
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef } from '../game/MapDocument';
 import { guessDrawnAct, openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, cellToWorld, hitTest, sameItem, stackAt, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
@@ -100,6 +100,7 @@ import { archiveAsset, findManagedAsset, managedAssets } from '../vfs/assetFiles
 import { splitUnusedTiles, tileIdentity, usesOfLibrary } from '../game/assetUsage';
 import { smartFloorReroll, type FloorChoice, type RerollOptions } from '../game/floorReroll';
 import { prepareFloorLibrary } from '../game/floorLibrary';
+import { stackMatchesLayer, stepTileStack, wallClickStack, type TileStack } from '../game/mapSelection';
 import { planAutomapClear } from '../game/automapClear';
 import { buildDt1, dt1Records } from '../formats/dt1Write';
 import { renameInLvlTypes } from '../game/dt1Review';
@@ -263,7 +264,7 @@ export function App() {
     const fits = (b: Brush) => activeLayer.kind === 'floor' ? b.orientation === 0 : activeLayer.kind === 'shadow' ? b.orientation === 13 : b.orientation !== 0 && b.orientation !== 13;
     setMix(m => m.filter(fits));
     setBrush(b => b && fits(b) ? b : null);
-    setStack(null);
+    setStack(s => s && stackMatchesLayer(s, activeLayer) ? s : null);
   }, [activeLayer.kind, activeLayer.index]);
   const [paintMode, setPaintMode] = useState<'brush' | 'rect' | 'fill'>('brush');
   /** The rectangle being dragged in rectangle mode (previewed as an outline). */
@@ -312,7 +313,9 @@ export function App() {
    * Tiles stacked under the last Shift+wheel / click point, frontmost first, and which one is chosen (-1 = none:
    * the selection covers every layer). While one is chosen, copy/cut/delete only touch its layer.
    */
-  const [stack, setStack] = useState<{ items: DrawItem[]; index: number; anchor?: [number, number] } | null>(null);
+  const [stack, setStack] = useState<TileStack | null>(null);
+  const stackRef = useRef(stack);
+  stackRef.current = stack;
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [pasting, setPasting] = useState(false);
   /** The Copied panel: from a copy or cut until Esc. */
@@ -800,27 +803,26 @@ export function App() {
   const focus = useMemo(() => {
     if (!stack || stack.index < 0 || !scene) return null;
     const want = stack.items[stack.index];
-    const item = scene.items.find((it) => sameItem(it, want));
+    const item = scene.items.find((it) => sameItem(it, want) && hittable(it));
     if (!item) return null;
     return { item, index: stack.index, count: stack.items.length, label: `${layerLabel(layerOfItem(item))} ${item.tile.mainIndex}/${item.tile.subIndex}` };
-  }, [stack, scene]);
+  }, [stack, scene, hittable]);
   const onlyLayer = focus ? layerOfItem(focus.item) : null;
   const cycleStack = useCallback(
     (dir: 1 | -1, world: [number, number]) => {
       if (!doc || !scene || tool === 'object' || pasting) return;
       // Keep stepping through the same stack while the cursor stays near where it started (a pixel of mouse drift
       // would otherwise land on a different set of tiles and start over); farther away, stack up the new spot.
-      const near = stack?.anchor && Math.hypot(world[0] - stack.anchor[0], world[1] - stack.anchor[1]) * zoom < 24;
-      const items = near ? stack!.items : stackAt(scene, world[0], world[1], hittable);
-      if (!items.length) return;
-      const index = near && stack!.index >= 0 ? (stack!.index + dir + items.length) % items.length : dir > 0 ? 0 : items.length - 1;
-      const item = items[index];
-      setStack({ items, index, anchor: near ? stack!.anchor : world });
+      const next = stepTileStack(scene, stackRef.current, dir, world, zoom, hittable);
+      stackRef.current = next;
+      setStack(next);
+      if (!next) return;
+      const item = next.items[next.index];
       setSelection({ x0: item.cellX, y0: item.cellY, x1: item.cellX, y1: item.cellY });
       focusTile(item.tile, layerOfItem(item));
-      if (tool !== 'select' && tool !== 'paint') setTool('select');
+      setTool('select');
     },
-    [doc, scene, tool, pasting, hittable, stack, focusTile, zoom],
+    [doc, scene, tool, pasting, hittable, focusTile, zoom],
   );
 
   const pickAt = useCallback(
@@ -1015,18 +1017,24 @@ export function App() {
         const cell = cells[cells.length - 1];
         if (phase === 'start' && cell) {
           selectAnchor.current = cell;
-          // Selection follows the grid; Alt+click and the Pick tool target visible tile pixels.
-          setStack(null);
+          // Click visible walls, but keep the grid anchor for a subsequent rectangle drag.
+          const clicked = scene ? wallClickStack(scene, world, hittable) : null;
+          setStack(mods?.shift ? null : clicked);
+          stackRef.current = mods?.shift ? null : clicked;
           // Shift adds to the selection: a cell per click, a rectangle per drag (irregular shapes).
           selectBase.current = mods?.shift && selection ? selection : null;
-          const r = clampRect(rectFrom(selectAnchor.current, selectAnchor.current), doc.ds1.width, doc.ds1.height);
+          const item = clicked?.items[clicked.index];
+          const start: [number, number] = item ? [item.cellX, item.cellY] : cell;
+          if (item) focusTile(item.tile, layerOfItem(item));
+          const r = clampRect(rectFrom(start, start), doc.ds1.width, doc.ds1.height);
           if (selectBase.current) setStack(null);
           setSelection(selectBase.current && r ? addToSelection(selectBase.current, r) : r);
           return;
         }
         if (cell && selectAnchor.current) {
           const r = clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height);
-          if (!r || !isSingleCell(r) || selectBase.current) setStack(null);
+          setStack(null);
+          stackRef.current = null;
           setSelection(selectBase.current ? (r ? addToSelection(selectBase.current, r) : selectBase.current) : r);
         }
         if (phase === 'end') {

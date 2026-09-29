@@ -1,7 +1,7 @@
 export type Tool = 'select' | 'paint' | 'erase' | 'pick' | 'object';
 
 export const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
-  { id: 'select', label: 'Select', key: 'v', hint: 'Click a cell or drag an area to select it; Shift+click adds a cell, Shift+drag adds an area (any shape)' },
+  { id: 'select', label: 'Select', key: 'v', hint: 'Click a wall or grid cell; drag to select a grid area. Shift+wheel cycles overlapping tiles; Shift+click/drag adds to the selection' },
   { id: 'paint', label: 'Paint', key: 'b', hint: 'Paint the chosen tile on the active layer' },
   { id: 'erase', label: 'Erase', key: 'e', hint: 'Clear cells on the active layer' },
   { id: 'pick', label: 'Pick', key: 'i', hint: 'Copy a tile from the map into the brush' },

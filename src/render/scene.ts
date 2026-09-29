@@ -316,7 +316,9 @@ export function stackAt(scene: Scene, wx: number, wy: number, visible: (it: Draw
   };
   for (let i = scene.items.length - 1; i >= 0; i--) {
     const it = scene.items[i];
-    if (it.kind === 'shadow' || !visible(it)) continue;
+    // Transparent corners of a floor's rectangular bitmap belong to neighbouring grid cells.
+    // Include floors through opaque hits and the owning cell below, not rectangular padding.
+    if (it.kind === 'floor' || it.kind === 'shadow' || !visible(it)) continue;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const b of it.tile.blocks) {
       minX = Math.min(minX, b.x);

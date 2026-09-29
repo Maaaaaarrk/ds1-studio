@@ -33,7 +33,7 @@ Deleting a DS1 removes its loose file only. If an archive or lower-priority sour
 
 ## Selection and map references
 
-Ordinary map selection follows the grid cell under the pointer. Pick/Alt-click still targets visible artwork, including tall overlapping walls. Pointer projection accounts for display scaling, canvas size and renderer rounding, and interrupted drags release their selection state.
+As of 0.2.17, clicking visible wall artwork selects the wall's owning cell and layer, even when it overlaps another grid cell. Clicking floor or empty space selects the grid cell under the pointer. Drag selections start at the pointer's grid cell and follow the grid. Shift+click adds a wall's owning cell or a grid cell; Shift+drag adds a grid area. Shift+wheel cycles overlapping visible tiles in either direction and keeps the chosen layer active. Esc removes the single-layer restriction. Pick/Alt-click still samples visible artwork. Pointer projection accounts for display scaling, canvas size and renderer rounding, and interrupted drags release their selection state.
 
 In the Tiles sidebar, a normal click replaces the paint choice. Ctrl/Command-click explicitly adds to the random mix. Frames/variants with a shared ID appear as one paint choice. In the DT1 editor, an ordinary click replaces the thumbnail selection, Ctrl-click toggles it, and Shift-click selects a range; changing libraries clears the selection. A map selection's holes are preserved when choosing its DT1 tiles.
 

@@ -514,6 +514,7 @@ export function MapView(props: Props) {
     };
     const wheel = (ev: WheelEvent) => {
       ev.preventDefault();
+      if (pointer !== null || document.querySelector('.modal-backdrop')) return;
       const cam = camera.current;
       const [wx, wy] = toWorld(ev);
       if (ev.shiftKey) {
