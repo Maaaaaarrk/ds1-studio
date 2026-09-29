@@ -196,7 +196,8 @@ export class GameData {
   /** A waypoint to place in a map of this act (one with a sprite first), or null. */
   waypointFor(act0: number): { type: 2; id: number; name: string } | null {
     const list = this.objectList(act0).filter((o) => this.isWaypoint(act0, o.type, o.id));
-    const pick = list.find((o) => o.hasSprite) ?? list[0];
+    // The one PD2's own maps use (the wilderness waypoint), else one with a sprite.
+    const pick = list.find((o) => /wilderness/i.test(o.name) && o.hasSprite) ?? list.find((o) => o.hasSprite) ?? list[0];
     return pick ? { type: 2, id: pick.id, name: pick.name } : null;
   }
 

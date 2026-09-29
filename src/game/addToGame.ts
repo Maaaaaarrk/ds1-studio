@@ -25,6 +25,18 @@ export const MAX_TILE_PATH = 41;
 export const MAX_LEVEL_STRING = 39;
 
 const num = (s: string) => Number(s) || 0;
+
+/** Levels.txt Layer (automap layer): the game's own levels use 0-99; 101 and above crashed the game on entry. */
+export const MAX_LAYER = 99;
+/** A layer for a new level: the one most mod-added preset levels share (PD2's maps: 98), else 98. */
+export function safeLayer(levels: TxtTableDoc): number {
+  const count = new Map<number, number>();
+  for (const r of dataRows(levels)) {
+    const l = num(getCell(levels, r, 'Layer'));
+    if (num(getCell(levels, r, 'Id')) >= 137 && num(getCell(levels, r, 'DrlgType')) === 2 && l <= MAX_LAYER) count.set(l, (count.get(l) ?? 0) + 1);
+  }
+  return [...count].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 98;
+}
 const has = (doc: TxtTableDoc, col: string) => colIndex(doc, col) >= 0;
 
 /** Rows the game compiles into records: not blank and not the "Expansion" separator. */
@@ -285,7 +297,6 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     const tilesAct = typeAct(types, typeId) ?? levelAct(input.levelId);
     const pal = input.palAct ?? tilesAct;
     const off = freeOffset(levels, 4, { w: input.width - 1, h: input.height - 1 }, row);
-    const layers = dataRows(levels).map((r) => num(getCell(levels, r, 'Layer')));
     const shorten = (s: string) => s.slice(0, MAX_LEVEL_STRING);
     if (name.length > MAX_LEVEL_STRING) warnings.push(`The name is cut to ${MAX_LEVEL_STRING} characters in LevelName/LevelWarp (the game's limit).`);
     set('Levels.txt', row, label, 'Name', name);
@@ -295,7 +306,9 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     set('Levels.txt', row, label, 'QuestFlag', '', 'no quest needed to enter');
     set('Levels.txt', row, label, 'QuestFlagEx', '', 'no quest needed to enter');
     set('Levels.txt', row, label, 'Quest', '');
-    set('Levels.txt', row, label, 'Layer', String(Math.max(0, ...layers) + 1), 'its own automap');
+    // Layer (the automap layer) stays the template's, as PD2's own maps all share one (98): the game's levels never go
+    // above 99, and new levels numbered 101 and 102 by counting up crashed the game on entry (100 didn't).
+    if (num(getCell(levels, row, 'Layer')) > MAX_LAYER) set('Levels.txt', row, label, 'Layer', String(safeLayer(levels)), `the game's levels use 0-${MAX_LAYER}`);
     for (const s of ['', '(N)', '(H)']) {
       set('Levels.txt', row, label, `SizeX${s}`, sizeX, 'the map is one cell bigger than the level');
       set('Levels.txt', row, label, `SizeY${s}`, sizeY, 'the map is one cell bigger than the level');
@@ -645,6 +658,17 @@ export function verifyInGame(
       continue;
     }
     const lName = getCell(levels, lRow, 'Name');
+    const layer = num(getCell(levels, lRow, 'Layer'));
+    if (layer > MAX_LAYER) {
+      const to = safeLayer(levels);
+      out.push({
+        severity: 'error',
+        title: `Level ${levelId} "${lName}" has automap Layer ${layer}: the game can crash on entering it`,
+        detail: `Levels.txt Layer is the level's automap layer. The game's own levels use 0-${MAX_LAYER} (PD2's maps all share 98); new levels numbered 101 and 102 crashed the game as players arrived, while 100 didn't. Use the layer the other added levels share.`,
+        columns: [{ table: 'Levels', col: 'Layer' }],
+        fix: cellFix('Levels.txt', levels, `Set Layer to ${to} (as the other added levels)`, [{ row: lRow, col: 'Layer', value: String(to) }]),
+      });
+    }
     const drlg = num(getCell(levels, lRow, 'DrlgType'));
     if (drlg !== 2) {
       out.push({
