@@ -39,4 +39,15 @@ describe('importing a map with its tile libraries', () => {
     expect(importedDt1Path('guild_test', 'guild/outdoors/floor.dt1')).toBe('data/global/tiles/PD2assets/guild_test/guild/outdoors/floor.dt1');
     expect(importedDt1Path('guild_test', 'my stuff/x.dt1')).toBe('data/global/tiles/PD2assets/guild_test/my_stuff/x.dt1');
   });
+
+  it('prefers the file itself over a spare copy with the same name (a picked house1 folder with og/int.dt1)', () => {
+    const needs = [{ path: 'data/global/tiles/guild/house1/int.dt1', rel: 'guild/house1/int.dt1', found: false }];
+    // The picked folder is house1 itself: og/int.dt1 is listed first, as Windows lists it.
+    const picked = [
+      { name: 'int.dt1', folder: 'og', ok: true },
+      { name: 'int.dt1', folder: '', ok: true },
+    ];
+    expect(matchDt1s(needs, picked)).toEqual([1]);
+    expect(matchDt1s(needs, [{ name: 'int.dt1', folder: 'old', ok: true }])).toEqual([0]);
+  });
 });

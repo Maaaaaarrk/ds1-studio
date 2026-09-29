@@ -322,9 +322,11 @@ const safeSegment = (s: string) => s.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^
  * Import DT1s (picked files, or whole folders with their subfolders) into data/global/tiles/PD2assets/<folder>/…,
  * optionally adding them to the open map's level type.
  */
-export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImport, onClose }: {
+export function ImportDt1Dialog({ files, exists, usedBy, mapOpen, freeSlots, busy, onImport, onClose }: {
   files: ImportDt1File[];
   exists: (path: string) => boolean;
+  /** Level types (by name) that load a path now: replacing it changes their levels too. */
+  usedBy?: (path: string) => string[];
   mapOpen: string | null;
   /** Free File slots in the open map's level type (LvlTypes.txt), when known. */
   freeSlots: number | null;
@@ -358,6 +360,8 @@ export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImp
     });
   }, [files, folder, keepFolders]);
   const picked = files.map((_, i) => i).filter((i) => chosen.has(i));
+  // Picked files that would replace a library other levels load: named, so it isn't done by accident.
+  const replacing = picked.filter((i) => exists(targets[i]) && (usedBy?.(targets[i]).length ?? 0) > 0);
   const tooMany = addToMap && !!mapOpen && freeSlots !== null && picked.length > freeSlots;
   const toggle = (i: number) =>
     setChosen((c) => {
@@ -398,7 +402,12 @@ export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImp
               <span className="small muted">{bad ? <span className="error-text">unreadable</span> : `${(f.info as { tiles: number }).tiles} tiles`}</span>
               <span className="imp-target mono small">
                 {targets[i].replace(/^data\/global\/tiles\//, '')}
-                {!bad && exists(targets[i]) && <span className="warn-text"> (replaces)</span>}
+                {!bad && exists(targets[i]) && (
+                  <span className="warn-text">
+                    {' '}
+                    (replaces{usedBy?.(targets[i]).length ? `, used by ${usedBy(targets[i]).join(', ')}` : ''})
+                  </span>
+                )}
               </span>
             </label>
           );
@@ -413,6 +422,13 @@ export function ImportDt1Dialog({ files, exists, mapOpen, freeSlots, busy, onImp
         </label>
       ) : (
         <p className="muted small">Open a map first to add them to that map&apos;s tile libraries right away; otherwise add them later with Map → Tile libraries.</p>
+      )}
+      {replacing.length > 0 && (
+        <p className="error-text small">
+          {replacing.length === 1 ? 'This file replaces a tile library' : `${replacing.length} files replace tile libraries`} that other levels load (
+          {[...new Set(replacing.flatMap((i) => usedBy?.(targets[i]) ?? []))].join(', ')}): their maps would show the new tiles, and tiles they use that
+          the new file doesn&apos;t have would disappear. Pick another folder name above to keep both.
+        </p>
       )}
       {tooMany && (
         <p className="error-text small">

@@ -124,6 +124,8 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
 import { arrivalProblem, arrivalText } from '../game/arrival';
+import { readAutomapRows, type AutomapSource } from '../game/automapImport';
+import { AutomapImportDialog } from './AutomapImport';
 import { AREA_BANDS, areaColour, walkableArea } from '../game/walkArea';
 import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
@@ -1816,6 +1818,20 @@ export function App() {
     },
     [gd, notify],
   );
+  /** Import → AutoMap rows: another mod's rows, with their level types mapped to this mod's. */
+  const [automapImport, setAutomapImport] = useState<{ fileName: string; source: AutomapSource; target: Uint8Array } | null>(null);
+  const [automapImportBusy, setAutomapImportBusy] = useState(false);
+  const pickAutomapRows = useCallback(async () => {
+    if (!gd) return;
+    const f = await importNamed('txt');
+    if (!f) return;
+    const source = readAutomapRows(f.bytes);
+    if (!source) return notify(`${f.name} has no LevelName and TileName columns: it isn't AutoMap.txt data.`, true);
+    const target = await gd.fs.read(AUTOMAP_TXT);
+    if (!target) return notify('Your AutoMap.txt could not be read.', true);
+    setAutomapImport({ fileName: f.name, source, target });
+  }, [gd, notify]);
+
   const pickImport = useCallback(
     async (kind: 'dt1' | 'ds1', mode: 'file' | 'files' | 'folders' = 'file') => {
       if (!gd) return;
@@ -2158,6 +2174,18 @@ export function App() {
           case 'add-dt1s':
             await applyDt1s([...libs, ...fix.paths]);
             return recheck();
+          case 'act0-dt1s': {
+            const read = (await Promise.all(fix.paths.map(async (p) => ({ path: gd.fs.exactPath(p) ?? p, bytes: await gd.fs.read(p) })))).filter((f): f is { path: string; bytes: Uint8Array } => !!f.bytes);
+            const r = await toAct0(read);
+            const writes = r.files.filter((f) => r.converted.includes(f.path));
+            if (writes.length) {
+              await writeFiles(writes);
+              for (const w of writes) gd.forgetDt1(w.path);
+              await reloadTables();
+            }
+            notify(`Converted ${writes.length} tile ${writes.length === 1 ? 'library' : 'libraries'} to Act 0 colours: ${writes.map((w) => w.path.split('/').pop()).join(', ')} (originals kept as .bak)`);
+            return recheck();
+          }
           case 'remove-dt1s': {
             const drop = new Set(fix.paths.map(normalizePath));
             await applyDt1s(libs.filter((p) => !drop.has(normalizePath(p))));
@@ -2240,7 +2268,7 @@ export function App() {
         notify((e as Error).message, true);
       }
     },
-    [gd, map, doc, applyDt1s, writeFiles, reloadTables, setObjects, mutate, notify, resize],
+    [gd, map, doc, applyDt1s, writeFiles, reloadTables, setObjects, mutate, notify, resize, toAct0],
   );
 
   const exportPackage = useCallback(
@@ -2608,6 +2636,7 @@ export function App() {
               title: canWrite ? 'Bring maps and tile libraries into your mod' : 'No writable mod folder',
               menu: [
                 { label: 'Map…', hint: '.ds1, or a map package (.zip)', title: 'A map package brings its tables too; a .ds1 on its own then needs Add to game', onClick: () => void pickImport('ds1') },
+                { label: 'AutoMap rows…', hint: "another mod's AutoMap.txt rows, renumbered to your level types", title: "Rows from someone else's AutoMap.txt: their LevelName numbers are that mod's level types, so you choose which of yours each is for", onClick: () => void pickAutomapRows() },
                 { label: 'DT1s…', hint: 'the tile library: browse, add your own, build a custom DT1', title: 'Every tile library the game and your mod have; add DT1 files or folders from your computer to it there', onClick: () => (noMap ? notify('Open a map first: the libraries are added to it.', true) : setDialog('dt1lib')) },
               ],
             },
@@ -3648,11 +3677,38 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
+      {automapImport && data.status === 'ready' && (
+        <AutomapImportDialog
+          fileName={automapImport.fileName}
+          source={automapImport.source}
+          target={automapImport.target}
+          types={data.gd.lvlTypes}
+          mapType={map?.resolution.lvlType ?? null}
+          busy={automapImportBusy}
+          onImport={(bytes, summary) =>
+            void (async () => {
+              setAutomapImportBusy(true);
+              try {
+                await writeFiles([{ path: data.gd.fs.exactPath(AUTOMAP_TXT) ?? AUTOMAP_TXT, bytes }]);
+                await reloadTables();
+                setAutomapImport(null);
+                notify(`${summary} (the old file is kept as .bak)`);
+              } catch (e) {
+                notify((e as Error).message, true);
+              } finally {
+                setAutomapImportBusy(false);
+              }
+            })()
+          }
+          onClose={() => setAutomapImport(null)}
+        />
+      )}
       {/* After the library window, which it opens from, so it shows on top. */}
       {importing?.kind === 'dt1' && (
         <ImportDt1Dialog
           files={importing.files}
           exists={(p) => !!data.gd.fs.locate(normalizePath(p))}
+          usedBy={(p) => data.gd.lvlTypes.filter((t) => t.files.some((f) => f && normalizePath(`data/global/tiles/${f}`) === normalizePath(p))).map((t) => `${t.id} ${t.name}`)}
           mapOpen={map?.path ?? null}
           freeSlots={map?.resolution.lvlType ? map.resolution.lvlType.files.filter((f) => !f).length : null}
           busy={importBusy}

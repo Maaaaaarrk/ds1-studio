@@ -956,3 +956,8 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .cr-confirm { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255, 90, 110, 0.6); border-radius: var(--radius); background: rgba(255, 90, 110, 0.08); display: flex; flex-direction: column; gap: 4px; }
 .cr-confirm ul { margin: 2px 0 2px 16px; padding: 0; max-height: 140px; overflow-y: auto; }
 .cr-confirm-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* Import AutoMap rows: one line per LevelName of the file. */
+.am-import { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 6px 0; }
+.am-import th, .am-import td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.am-import select { max-width: 280px; }

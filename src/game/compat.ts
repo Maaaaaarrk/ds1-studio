@@ -1,5 +1,5 @@
 import { automapLevelFor, GAME_AUTOMAP_LEVELS, parseAutomap, unknownAutomapLevels, type AutomapPiece } from './automap';
-import { Orientation } from '../formats/dt1';
+import { decodeTile, Orientation } from '../formats/dt1';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { SubTileFlag, walkability, type Scene } from '../render/scene';
 import { normalizePath } from '../vfs/vfs';
@@ -12,6 +12,8 @@ import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
 import { ACT_TOWNS, exitProblems } from './exits';
 import { loadTable } from './levelTables';
 import { arrivalProblem, arrivalText } from './arrival';
+import { dt1Act, loadAct0Palette } from './act0Palette';
+import { neededDt1s } from './importMatch';
 import { blankObjectNames, nameStringsWrite, readStringTables } from './objectStrings';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
@@ -34,6 +36,8 @@ export type Fix = { label: string } & (
   | { kind: 'open-table'; table: string; key?: string }
   | { kind: 'add-dt1s'; paths: string[] }
   | { kind: 'remove-dt1s'; paths: string[] }
+  /** Convert these libraries to the Act 0 colours in the mod. */
+  | { kind: 'act0-dt1s'; paths: string[] }
   | { kind: 'table-write'; writes: { table: string; path: string; bytes: Uint8Array; summary: string[] }[] }
   | { kind: 'clear-cells'; cells: { layer: 'floor' | 'wall' | 'shadow'; index: number; x: number; y: number }[] }
   /** Changes wall-layer special tiles (orientation 10/11) to another main/sub number, in place. */
@@ -158,6 +162,8 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     });
   }
   if (scene.missing.length) {
+    // The libraries the map itself names (its embedded list, written by WinDS1 and DS1 Studio).
+    const named = neededDt1s(ds1, (p) => !!gd.fs.locate(p));
     const keys = new Set(scene.missing.map((m) => `${m.orientation}|${m.main}|${m.sub}`));
     const loadedSet = new Set(lib.loaded.map((l) => normalizePath(l.path)));
     const found = await dt1sContaining(gd, keys, loadedSet, lib.loaded.map((l) => l.path));
@@ -165,19 +171,27 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     if (found.paths.length)
       fixes.push({
         kind: 'add-dt1s',
-        label: `Add ${found.paths.map(short).join(', ')} (${found.covered === keys.size ? 'has all' : `has ${found.covered} of ${keys.size}`} of the missing tiles)`,
+        label: `Add ${found.paths.map(short).join(', ')} (${found.covered === keys.size ? 'has all' : `has ${found.covered} of ${keys.size}`} of the missing tile numbers; the graphics may not be the ones meant)`,
         paths: found.paths,
       });
     fixes.push({
       kind: 'clear-cells',
-      label: `Clear those ${scene.missing.length} tile${scene.missing.length === 1 ? '' : 's'}`,
+      label: `Clear those ${scene.missing.length} tile${scene.missing.length === 1 ? '' : 's'} (they are gone from the map)`,
       cells: scene.missing.map((m) => ({ layer: m.kind === 'floor' ? 'floor' : m.kind === 'shadow' ? 'shadow' : 'wall', index: m.layer, x: m.cellX, y: m.cellY })),
     });
     out.push({
       severity: 'error',
       area: 'Tiles',
       title: `${scene.missing.length} placed tiles have no graphic`,
-      detail: `These cells use tiles (orientation/main/sub) that no loaded DT1 contains. In game they are invisible and may break walkability.${found.paths.length ? '' : ' No DT1 in the game or your mod has them.'}`,
+      detail: `These cells use tiles (orientation/main/sub) that no loaded DT1 contains. In game they are invisible and may break walkability.${found.paths.length ? '' : ' No DT1 in the game or your mod has them.'}${
+        named.length
+          ? ` The map names the tile libraries it was made with: ${named.map((n) => `${n.rel}${n.found ? '' : ' (not in your game or mod)'}`).join(', ')}.${
+              named.every((n) => n.found)
+                ? " You have all of them, so your copies differ from the ones it was made with (edited versions, or an Act 0 pack): the tiles it needs are in the maker's copies. Ask them for those files before adding other libraries with the same tile numbers or clearing the cells."
+                : " Ask the map's maker for the ones you don't have."
+            }`
+          : ''
+      }`,
       cells: scene.missing.map((m) => ({ x: m.cellX, y: m.cellY })),
       fixes,
     });
@@ -288,6 +302,36 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
         const typeId = Number(level['LevelType']);
         const typeRow = types?.rows.find((r) => Number(r['Id']) === typeId);
         out.push({ severity: 'ok', area: 'Level', title: `Level ${levelId} "${level['LevelName'] || level['Name']}" (Act ${Number(level['Act']) + 1})` });
+        // Colours: tiles drawn for another act show that act's act-specific colours wrong in this level's palette
+        // (red, purple, cyan patches). Act 0 libraries use only the colours every act shares.
+        {
+          const pal = Number(level['Pal']);
+          const palAct = pal === 5 ? 4 : Math.min(4, Math.max(0, pal));
+          const a0 = await loadAct0Palette(gd.fs).catch(() => null);
+          if (a0) {
+            const unsafe: { path: string; share: number }[] = [];
+            for (const l of lib.loaded) {
+              if (!l.found || isBuiltinPath(l.path)) continue;
+              if (dt1Act(l.path) === palAct) continue; // drawn for this level's act: its colours are right here
+              const dt1 = await gd.dt1(l.path).catch(() => null);
+              if (!dt1) continue;
+              let bad = 0, all = 0;
+              for (const t of dt1.tiles) {
+                const img = decodeTile(t);
+                if (img) for (const px of img.pixels) if (px) { all++; if (!a0.usable[px]) bad++; }
+              }
+              if (bad) unsafe.push({ path: l.path, share: all ? bad / all : 0 });
+            }
+            if (unsafe.length)
+              out.push({
+                severity: 'warning',
+                area: 'Tiles',
+                title: `${unsafe.length} tile ${unsafe.length === 1 ? 'library uses' : 'libraries use'} colours that change between acts: wrong colours (often red) in this Act ${palAct + 1} level`,
+                detail: `${unsafe.map((u) => `${short(u.path)} ${Math.round(u.share * 100)}%`).join(', ')} of their pixels. Converted to Act 0 (the colours every act shares) they look right in any act. If the map came from someone who works with an Act 0 tile pack (such as Gimli's), their copies of these files are the exact match: ask for them, or use the same pack.`,
+                fixes: [{ kind: 'act0-dt1s', label: `Convert ${unsafe.length === 1 ? 'it' : 'them'} to Act 0 colours (in your mod; originals kept as .bak)`, paths: unsafe.map((u) => u.path) }],
+              });
+          }
+        }
         if (!typeRow) out.push({ severity: 'error', area: 'Level', title: `LvlTypes.txt has no type ${typeId}`, fixes: [{ kind: 'open-table', label: 'Open LvlTypes.txt', table: 'LvlTypes.txt' }] });
         else {
           // Libraries the game loads for this level vs the ones the map's tiles need.
