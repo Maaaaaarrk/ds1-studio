@@ -156,6 +156,8 @@ export interface AutomapPiece {
   rule: AutomapRule | null;
   cel: number | null;
   layer: 'floor' | 'wall';
+  /** Concrete DS1 layer, for editing one piece without changing overlapping layers. */
+  layerIndex?: number;
   /** Set when the cel comes from an unsaved suggestion. */
   suggested?: boolean;
 }
@@ -173,21 +175,21 @@ export function withSuggestions(pieces: AutomapPiece[], suggestions: AutomapSugg
 /** Every floor and wall tile of the map with its automap rule and chosen cel (random among Cel1..4, stable per cell). */
 export function automapPieces(ds1: Ds1, t: AutomapTable, level: string): AutomapPiece[] {
   const out: AutomapPiece[] = [];
-  const add = (c: TileCell, orientation: number, x: number, y: number, layer: 'floor' | 'wall') => {
+  const add = (c: TileCell, orientation: number, x: number, y: number, layer: 'floor' | 'wall', layerIndex: number) => {
     if (isEmptyCell(c) || c.hidden) return;
     const rule = findRule(t, level, orientation, c.mainIndex, c.subIndex);
     const pick = rule?.cels.length ? rule.cels[(x * 7 + y * 13) % rule.cels.length].cel : null;
-    out.push({ cellX: x, cellY: y, orientation, main: c.mainIndex, sub: c.subIndex, rule, cel: pick, layer });
+    out.push({ cellX: x, cellY: y, orientation, main: c.mainIndex, sub: c.subIndex, rule, cel: pick, layer, layerIndex });
   };
   for (let y = 0; y < ds1.height; y++)
     for (let x = 0; x < ds1.width; x++) {
       const i = y * ds1.width + x;
-      for (const f of ds1.floors) add(f[i], 0, x, y, 'floor');
-      for (const w of ds1.walls) {
+      ds1.floors.forEach((f, index) => add(f[i], 0, x, y, 'floor', index));
+      for (const [index, w] of ds1.walls.entries()) {
         const c = w[i] as WallCell;
         // Specials (10/11) are markers, not scenery; orientation 0 in a wall layer is a floor-like tile.
         if (c.orientation === 10 || c.orientation === 11) continue;
-        add(c, c.orientation, x, y, 'wall');
+        add(c, c.orientation, x, y, 'wall', index);
       }
     }
   return out;

@@ -67,7 +67,7 @@ interface Props {
   canSave: boolean;
   hasSelection: boolean;
   onClearSelection: () => void;
-  onSet: (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => void;
+  onSet: (piece: AutomapPiece, cel: number, scope: 'cell' | 'seq' | 'style') => void;
   /** Friendlier label for numeric level names (their LvlTypes name). */
   levelLabel?: (level: string) => string;
   /** Pending suggestions for tiles without an entry (previewed on the map), or null. */
@@ -143,7 +143,7 @@ export function AutomapPanel(props: Props) {
         <button className="btn ame-open" disabled={!canSave || !level || !props.hasSelection} onClick={props.onClearSelection}>
           Clear selected automap pieces…
         </button>
-        <p className="muted small">Select cells on the map to clear just their pieces. A small tile library preserves their graphics while other cells keep their automap pieces. Undo restores the selected pieces.</p>
+        <p className="muted small">Change or clear a piece at just the selected cell. Select several cells to clear their pieces together. Undo restores your changes.</p>
         <p className="muted small">
           What the map looks like on the in-game automap (Tab in game). Outlined walls have no AutoMap.txt entry and won&apos;t show. Select a cell to
           see and change its pieces.
@@ -230,8 +230,8 @@ export function AutomapPanel(props: Props) {
                       <button
                         className="btn small"
                         disabled={!canSave || !level || p.cel === null}
-                        onClick={() => onSet(p, -1, 'seq')}
-                        title={p.cel === null ? 'Not on the automap already' : `Show nothing on the automap for this kind of tile (${AUTOMAP_CODES[p.orientation]} style ${p.main} seq ${p.sub}), wherever it is on the level`}
+                        onClick={() => onSet(p, -1, 'cell')}
+                        title={p.cel === null ? 'Not on the automap already' : 'Clear only this piece at the selected cell'}
                       >
                         Clear piece
                       </button>
@@ -286,7 +286,7 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
   palette: Palette;
   level: string;
   piece: AutomapPiece;
-  onPick: (cel: number, scope: 'seq' | 'style') => void;
+  onPick: (cel: number, scope: 'cell' | 'seq' | 'style') => void;
   onClose: () => void;
 }) {
   const code = AUTOMAP_CODES[piece.orientation];
@@ -304,7 +304,7 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
     return { sameKind, sameLevel, labels };
   }, [table, level, code]);
   const [which, setWhich] = useState<'kind' | 'level' | 'all'>('kind');
-  const [scope, setScope] = useState<'seq' | 'style'>('seq');
+  const [scope, setScope] = useState<'cell' | 'seq' | 'style'>('cell');
   const [filter, setFilter] = useState('');
   const list = (which === 'kind' ? [...sameKind] : which === 'level' ? [...new Set([...sameKind, ...sameLevel])] : cels.map((_, i) => i))
     .sort((a, b) => a - b)
@@ -323,10 +323,13 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
         {!hideScope && (
           <>
             <label>
-              <input type="radio" checked={scope === 'seq'} onChange={() => setScope('seq')} /> this sequence ({piece.sub}) only
+              <input type="radio" checked={scope === 'cell'} onChange={() => setScope('cell')} /> Only this cell
             </label>
             <label>
-              <input type="radio" checked={scope === 'style'} onChange={() => setScope('style')} /> every sequence of style {piece.main}
+              <input type="radio" checked={scope === 'seq'} onChange={() => setScope('seq')} /> All matching tiles (sequence {piece.sub})
+            </label>
+            <label>
+              <input type="radio" checked={scope === 'style'} onChange={() => setScope('style')} /> All tiles of style {piece.main}
             </label>
           </>
         )}
@@ -346,7 +349,7 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
         ))}
         {!list.length && <p className="muted small">No pieces match.</p>}
       </div>
-      <p className="muted small">Picking writes AutoMap.txt in your mod folder (original kept as .bak). The game reads the compiled automap.bin, so delete it or let your tools rebuild it.</p>
+      <p className="muted small">{!hideScope && (scope === 'cell' ? 'Only this cell and layer will change. Save the map afterward. ' : 'This changes every matching tile on maps using this automap level. ')}Picking writes AutoMap.txt in your mod folder (original kept as .bak). The game reads the compiled automap.bin, so delete it or let your tools rebuild it.</p>
     </Modal>
   );
 }

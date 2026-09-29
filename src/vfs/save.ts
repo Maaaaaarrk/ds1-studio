@@ -120,7 +120,7 @@ export async function importMany(extension: string, mode: 'file' | 'files' | 'fo
   }
   const files = await pickFiles(extension, mode);
   return files
-    .filter((f) => f.name.toLowerCase().endsWith(`.${extension}`))
+    .filter((f) => extension.split(',').some(ext => f.name.toLowerCase().endsWith(`.${ext.trim().toLowerCase()}`)))
     .map((f) => {
       const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? '';
       return { name: f.name, folder: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', read: async () => new Uint8Array(await f.arrayBuffer()) };

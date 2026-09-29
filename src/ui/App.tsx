@@ -1,3 +1,4 @@
+import { errorMessage } from '../util/errorMessage';
 import {
   Box,
   Camera,
@@ -105,7 +106,7 @@ import { splitUnusedTiles, tileIdentity, usesOfLibrary } from '../game/assetUsag
 import { smartFloorReroll, type FloorChoice, type RerollOptions } from '../game/floorReroll';
 import { prepareFloorLibrary } from '../game/floorLibrary';
 import { stackMatchesLayer, stepTileStack, wallClickStack, type TileStack } from '../game/mapSelection';
-import { planAutomapClear } from '../game/automapClear';
+import { planAutomapClear, planAutomapEdit } from '../game/automapClear';
 import { buildDt1, dt1Records } from '../formats/dt1Write';
 import { renameInLvlTypes } from '../game/dt1Review';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
@@ -567,7 +568,7 @@ export function App() {
         setMarks(undefined);
         setTool((t) => (t === 'paint' ? 'select' : t));
       } catch (e) {
-        notify(`${path}: ${(e as Error).message}`, true);
+        notify(`${path}: ${errorMessage(e)}`, true);
       } finally {
         if (request === mapRequest.current) setLoadingPath(null);
       }
@@ -582,7 +583,7 @@ export function App() {
       try {
         setMap(await openMap(gd, map.path, override, map.ds1));
       } catch (e) {
-        notify((e as Error).message, true);
+        notify(errorMessage(e), true);
       }
     },
     [gd, map, notify],
@@ -669,7 +670,7 @@ export function App() {
       setDoc(d);
       notify(`Restored the changes autosaved ${new Date(r.time).toLocaleString()}. Save to keep them.`);
     } catch (e) {
-      notify(`Couldn't restore: ${(e as Error).message}`, true);
+      notify(`Couldn't restore: ${errorMessage(e)}`, true);
     }
     setRecoveryOffer(null);
   }, [recoveryOffer, gd, map, notify]);
@@ -1266,7 +1267,7 @@ export function App() {
         if (where) notify(`Exported ${where}`);
         setDialog(null);
       } catch (e) {
-        notify(`Export failed: ${(e as Error).message}`, true);
+        notify(`Export failed: ${errorMessage(e)}`, true);
       } finally {
         setExportingImage(false);
       }
@@ -1366,7 +1367,7 @@ export function App() {
         setDialog('dt1lib');
         notify(`New ${c.width}×${c.height} map, in the Act 0 colours. Choose its tile libraries in the DT1 library, then paint (B); Save writes ${c.path}.`);
       } catch (e) {
-        notify((e as Error).message, true);
+        notify(errorMessage(e), true);
       }
     },
     [gd, confirmDiscard, notify],
@@ -1441,7 +1442,7 @@ export function App() {
         setDialog(null);
         notify(`Updated ${writes.map((w) => w.table).join(', ')}`);
       } catch (e) {
-        notify((e as Error).message, true);
+        notify(errorMessage(e), true);
       }
     },
     [writeFiles, reloadTables, notify],
@@ -1477,7 +1478,7 @@ export function App() {
 
   const libraryDocuments = useRef(new WeakSet<MapDocument>());
   const applyDt1s = useCallback(
-    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; edits?: CellEdit[]; file?: FileHistoryChange } = {}) => {
+    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; edits?: CellEdit[]; file?: FileHistoryChange; label?: string } = {}) => {
       if (!gd || !map || !doc) return;
       let note = '';
       if (map.resolution.preset) {
@@ -1497,7 +1498,7 @@ export function App() {
           const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
           layers[e.layer.index][e.y * d.width + e.x] = e.cell;
         }
-      }, opts.edits ? 'Clear selected automap pieces' : 'Change tile libraries', opts.file);
+      }, opts.label ?? (opts.edits ? 'Clear selected automap pieces' : 'Change tile libraries'), opts.file);
       bump();
       const next = await GameData.load(gd.fs);
       const auto = next.resolveDt1s(map.path, doc.ds1);
@@ -1733,7 +1734,7 @@ export function App() {
           } else automapNote = level ? '; no automap pieces to copy (the automap editor can add them)' : '; the level has no automap entry yet (see the Compatibility check)';
         }
       } catch (e) {
-        automapNote = `; AutoMap.txt not updated (${(e as Error).message})`;
+        automapNote = `; AutoMap.txt not updated (${errorMessage(e)})`;
       }
       const renumbered = plan.renumbered.length ? `, ${plan.renumbered.length} renumbered` : '';
       notify(`Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}${actSafe ? ', act-safe colours' : ''}) and added it to the map${automapNote}. Find it in the Tiles panel.`);
@@ -1775,7 +1776,7 @@ export function App() {
       setWalkLast(`${msg}${plan.skipped.length ? ` Skipped ${plan.skipped.length} cell${plan.skipped.length === 1 ? '' : 's'}: ${plan.skipped.slice(0, 3).join('; ')}` : ''}`);
       if (plan.skipped.length) notify(`Walkability: ${plan.skipped[0]}${plan.skipped.length > 1 ? ` (+${plan.skipped.length - 1} more)` : ''}`, true);
     } catch (e) {
-      notify(`Walkability: ${(e as Error).message}`, true);
+      notify(`Walkability: ${errorMessage(e)}`, true);
     } finally {
       setWalkBusy(false);
     }
@@ -1793,7 +1794,7 @@ export function App() {
         if (!txt || !dc6) throw new Error('AutoMap.txt or MaxiMap.dc6 not found');
         if (live) setAutomapData({ gd, table: parseAutomap(parseTxtTable(txt)), cels: parseAutomapCels(dc6) });
       } catch (e) {
-        if (live) { notify(`Automap: ${(e as Error).message}`, true); setVisibility((v) => ({ ...v, automap: false })); }
+        if (live) { notify(`Automap: ${errorMessage(e)}`, true); setVisibility((v) => ({ ...v, automap: false })); }
       }
     })();
     return () => { live = false; };
@@ -1894,43 +1895,42 @@ export function App() {
       setAutomapSuggestions(null);
       notify(`AutoMap.txt: added ${rows} rows for ${automapLevel}`);
     } catch (e) {
-      notify((e as Error).message, true);
+      notify(errorMessage(e), true);
     }
     finally { historyBusyRef.current = false; setHistoryBusy(false); }
   }, [gd, doc, automapLevel, automapSuggestions, writeFiles, notify]);
-  const setAutomapPiece = useCallback(
-    async (piece: AutomapPiece, cel: number, scope: 'seq' | 'style') => {
-      if (!gd || !automapLevel || historyBusyRef.current) return;
-      historyBusyRef.current = true; setHistoryBusy(true);
-      try {
-        const bytes = await gd.fs.read(AUTOMAP_TXT);
-        if (!bytes) throw new Error('AutoMap.txt not found');
-        const { doc: next, summary } = setAutomapCel(parseTxtTable(bytes), automapLevel, piece.orientation, piece.main, piece.sub, cel, scope);
-        const out = serializeTxtTable(next);
-        await writeFiles([{ path: AUTOMAP_TXT, bytes: out }]);
-        doc?.recordFileChange({ path: AUTOMAP_TXT, before: bytes, after: out }, cel < 0 ? 'Clear automap piece' : 'Change automap piece'); bump();
-        setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
-        notify(summary);
-      } catch (e) {
-        notify((e as Error).message, true);
-      } finally {
-        historyBusyRef.current = false; setHistoryBusy(false);
-      }
-    },
-    [gd, doc, automapLevel, writeFiles, notify],
-  );
+  const setAutomapPiece = async (piece: AutomapPiece, cel: number, scope: 'cell' | 'seq' | 'style') => {
+    if (scope === 'cell') { await editAutomapSelection(piece, cel); return; }
+    if (!gd || !automapLevel || historyBusyRef.current) return;
+    historyBusyRef.current = true; setHistoryBusy(true);
+    try {
+      const bytes = await gd.fs.read(AUTOMAP_TXT);
+      if (!bytes) throw new Error('AutoMap.txt not found');
+      const { doc: next, summary } = setAutomapCel(parseTxtTable(bytes), automapLevel, piece.orientation, piece.main, piece.sub, cel, scope);
+      const out = serializeTxtTable(next);
+      await writeFiles([{ path: AUTOMAP_TXT, bytes: out }]);
+      doc?.recordFileChange({ path: AUTOMAP_TXT, before: bytes, after: out }, cel < 0 ? 'Clear automap piece' : 'Change automap piece'); bump();
+      setAutomapData((d) => (d ? { ...d, table: parseAutomap(next) } : d));
+      notify(summary);
+    } catch (e) {
+      notify(errorMessage(e), true);
+    } finally {
+      historyBusyRef.current = false; setHistoryBusy(false);
+    }
+  };
 
-  /** DT1 editor: write the edited DT1, optionally swap it in for the original, then reload so every cache sees it. */
   const [clearingAutomap, setClearingAutomap] = useState(false);
-  const clearAutomapSelection = async () => {
-    if (!gd || !doc || !map || !selection || !automapLevel || clearingAutomap || historyBusyRef.current) return;
+  const editAutomapSelection = async (piece?: AutomapPiece, cel = -1) => {
+    if (!gd || !doc || !map || (!piece && !selection) || !automapLevel || clearingAutomap || historyBusyRef.current) return;
     historyBusyRef.current = true; setHistoryBusy(true);
     const expectedRevision = doc.revision;
     setClearingAutomap(true);
     try {
       const table = await loadTable(gd.fs, 'AutoMap.txt');
       if (!table) throw new Error('AutoMap.txt was not found.');
-      const plan = await planAutomapClear(gd, map.lib, doc.ds1, selection, automapPiecesNow ?? [], table, automapLevel);
+      const plan = piece
+        ? await planAutomapEdit(gd, map.lib, doc.ds1, [piece], table, automapLevel, cel)
+        : await planAutomapClear(gd, map.lib, doc.ds1, selection!, automapPiecesNow ?? [], table, automapLevel);
       if (currentContext.current.doc !== doc || doc.revision !== expectedRevision) throw new Error('The map changed while preparing the automap edit. Select the cells again.');
       if (!plan?.edits.length) { notify('No visible automap pieces in the selection.'); return; }
       const path = 'data/global/tiles/studio/a' + Date.now().toString(36) + '.dt1';
@@ -1938,13 +1938,14 @@ export function App() {
       if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
       if (currentContext.current.doc !== doc) return;
       await writeFiles([{ path, bytes: plan.bytes }, { path: AUTOMAP_TXT, bytes: serializeTxtTable(plan.table) }]);
-      await applyDt1s(paths, { keepOpen: true, strict: true, edits: plan.edits, file: { path: AUTOMAP_TXT, before: serializeTxtTable(table), after: serializeTxtTable(plan.table) } });
+      await applyDt1s(paths, { keepOpen: true, strict: true, edits: plan.edits, label: cel < 0 ? 'Clear selected automap pieces' : 'Change selected automap piece', file: { path: AUTOMAP_TXT, before: serializeTxtTable(table), after: serializeTxtTable(plan.table) } });
       if (currentContext.current.doc !== doc) return;
       setAutomapSuggestions(null);
-      notify('Cleared selected automap pieces. Other cells keep their pieces. Save the map to keep the changes.');
+      notify(`${cel < 0 ? 'Cleared' : 'Changed'} selected automap ${piece ? 'piece' : 'pieces'}. Other cells keep their pieces. Save the map to keep the changes.`);
     } catch (e) { notify(String(e), true); }
     finally { setClearingAutomap(false); historyBusyRef.current = false; setHistoryBusy(false); }
   };
+  /** Write an edited DT1 and refresh the map graphics. */
   const saveEditedDt1 = useCallback(
     async (r: Dt1EditResult) => {
       if (!gd || !map || !doc) return;
@@ -1963,7 +1964,7 @@ export function App() {
           if (writes.length) await writeFiles(writes);
           notes.push(writes.length ? 'LvlTypes/Dt1Mask updated' : 'map now uses it');
         } catch (e) {
-          notes.push(`game tables not updated: ${(e as Error).message}`);
+          notes.push(`game tables not updated: ${errorMessage(e)}`);
         }
       }
       await reloadTables();
@@ -1996,7 +1997,7 @@ export function App() {
       await reloadTables();
       notify(`Saved sub-tile flags of ${n} tile${n === 1 ? '' : 's'} into ${writes.map((w) => w.path.split('/').pop()).join(', ')}`);
     } catch (e) {
-      notify(`Couldn't save the DT1: ${(e as Error).message}`, true);
+      notify(`Couldn't save the DT1: ${errorMessage(e)}`, true);
     } finally {
       setSavingFlags(false);
     }
@@ -2027,7 +2028,7 @@ export function App() {
         if (warpInit?.place && vis !== null) armWarpTile(vis);
         setWarpInit(null);
       } catch (e) {
-        notify(`Couldn't save Levels.txt: ${(e as Error).message}`, true);
+        notify(`Couldn't save Levels.txt: ${errorMessage(e)}`, true);
       } finally {
         setWarpBusy(false);
       }
@@ -2045,7 +2046,7 @@ export function App() {
       const walls = d.tiles.length - floors - shadows;
       return { tiles: d.tiles.length, kinds: [floors && `${floors} floors`, walls && `${walls} walls/objects`, shadows && `${shadows} shadows`].filter(Boolean).join(', ') };
     } catch (e) {
-      return `This isn't a DT1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
+      return `This isn't a DT1 DS1 Studio can read (${errorMessage(e)}), so the game couldn't either.`;
     }
   };
 
@@ -2055,10 +2056,12 @@ export function App() {
       if (!gd) return;
       try {
         const pkg = readMapPackage(bytes);
-        setImportState({ pkg, plan: await planImport(pkg, gd.fs) });
+        // Files may have been moved or replaced since startup. Compare with a fresh disk index.
+        const importFs = isTauri ? await loadFromTauri(await getConfig()) : gd.fs;
+        setImportState({ pkg, plan: await planImport(pkg, importFs) });
         setDialog('import');
       } catch (e) {
-        notify(`Import failed: ${(e as Error).message}`, true);
+        notify(`Import failed: ${errorMessage(e)}`, true);
       }
     },
     [gd, notify],
@@ -2095,7 +2098,9 @@ export function App() {
         setImporting({ kind, files });
         return;
       }
-      const f = await importNamed('ds1,zip');
+      let f;
+      try { f = await importNamed('ds1,zip'); }
+      catch (e) { notify(`Import failed: ${errorMessage(e)}`, true); return; }
       if (!f) return;
       // A map package (Export map) brings its tile libraries and table rows along.
       if (f.bytes[0] === 0x50 && f.bytes[1] === 0x4b) return void openPackage(f.bytes);
@@ -2106,7 +2111,7 @@ export function App() {
         needs = neededDt1s(d, (p) => !!gd.fs.locate(p));
         info = { width: d.width, height: d.height, act: d.act };
       } catch (e) {
-        info = `This isn't a DS1 DS1 Studio can read (${(e as Error).message}), so the game couldn't either.`;
+        info = `This isn't a DS1 DS1 Studio can read (${errorMessage(e)}), so the game couldn't either.`;
       }
       setImporting({ kind, name: f.name, bytes: f.bytes, info, needs });
     },
@@ -2159,7 +2164,7 @@ export function App() {
           }
           converted = r.converted;
         } catch (e) {
-          notify(`Couldn't convert to Act 0 colours: ${(e as Error).message}`, true);
+          notify(`Couldn't convert to Act 0 colours: ${errorMessage(e)}`, true);
         }
       }
       await applyDt1s(paths);
@@ -2195,7 +2200,7 @@ export function App() {
           notify(`Imported ${what} into ${c.files[0].path.split('/').slice(3, 5).join('/')}. Add ${n === 1 ? 'it' : 'them'} to a map with Map → Tile libraries.`);
         }
       } catch (e) {
-        notify(`Import failed: ${(e as Error).message}`, true);
+        notify(`Import failed: ${errorMessage(e)}`, true);
       } finally {
         setImportBusy(false);
       }
@@ -2266,7 +2271,7 @@ export function App() {
           setDialog('register');
         } else notify(`Imported ${c.path}. Use Game → Add to game when you want the game to load it.`);
       } catch (e) {
-        notify(`Import failed: ${(e as Error).message}`, true);
+        notify(`Import failed: ${errorMessage(e)}`, true);
       } finally {
         setImportBusy(false);
       }
@@ -2549,7 +2554,7 @@ export function App() {
             return recheck();
         }
       } catch (e) {
-        notify((e as Error).message, true);
+        notify(errorMessage(e), true);
       }
     },
     [gd, map, doc, applyDt1s, writeFiles, reloadTables, setObjects, mutate, notify, resize, toAct0],
@@ -2579,7 +2584,7 @@ export function App() {
         if (where) notify(`Exported ${where}`);
       } catch (e) {
         setExportState({ building: false, result: null });
-        notify(`Export failed: ${(e as Error).message}`, true);
+        notify(`Export failed: ${errorMessage(e)}`, true);
       }
     },
     [gd, map, doc, notify],
@@ -2611,7 +2616,7 @@ export function App() {
           setDialog('cube');
         }
       } catch (e) {
-        notify((e as Error).message, true);
+        notify(errorMessage(e), true);
       }
     },
     [importState, writeFiles, reloadTables, notify, open],
@@ -2680,7 +2685,7 @@ export function App() {
             await reloadTables();
             notify(`Saved ${name}. The map's size changed, so Levels.txt was updated to match: ${fix.writes[0].summary.join('; ')} (the old file is kept as .bak)`);
           } catch (e) {
-            notify(`Saved ${name}, but couldn't update the level's size in Levels.txt (${(e as Error).message}). The game will stop building this level until SizeX/SizeY are ${doc.ds1.width - 1}×${doc.ds1.height - 1}: run the compatibility check.`, true);
+            notify(`Saved ${name}, but couldn't update the level's size in Levels.txt (${errorMessage(e)}). The game will stop building this level until SizeX/SizeY are ${doc.ds1.width - 1}×${doc.ds1.height - 1}: run the compatibility check.`, true);
           }
         }
       }
@@ -2688,7 +2693,7 @@ export function App() {
       if (doc.revision === savedRevision && doc.path === savedPath) void deleteRecovery(savedPath).then(() => listRecoveries().then(setRecoveries));
       bump();
     } catch (e) {
-      notify(`Save failed: ${(e as Error).message}`, true);
+      notify(`Save failed: ${errorMessage(e)}`, true);
     } finally { savingMap.current = false; }
   }, [doc, gd, data, notify, writeFiles, reloadTables, map]);
 
@@ -2721,7 +2726,7 @@ export function App() {
       // No clipboard (a browser that refuses it): save the picture instead.
       const name = `${(map?.path.split('/').pop() ?? 'map').replace(/\.ds1$/i, '')}-view.png`;
       downloadFile(name, new Uint8Array(await blob.arrayBuffer()));
-      notify(`Couldn't use the clipboard (${(e as Error).message}): saved the picture as ${name} instead.`, true);
+      notify(`Couldn't use the clipboard (${errorMessage(e)}): saved the picture as ${name} instead.`, true);
     }
   }, [map, notify]);
 
@@ -3495,7 +3500,7 @@ export function App() {
                   canSave={canWrite}
                   onSet={(p, cel, scope) => void setAutomapPiece(p, cel, scope)}
                   hasSelection={!!selection && !clearingAutomap}
-                  onClearSelection={() => void clearAutomapSelection()}
+                  onClearSelection={() => void editAutomapSelection()}
                   suggestions={automapSuggestions}
                   onSuggest={(floors) => {
                     if (!automapLevel) return;
@@ -4010,7 +4015,7 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
-      {clearingAutomap && <div className="modal-backdrop"><div className="modal" role="dialog" aria-label="Clearing automap pieces"><p role="status">Clearing selected automap pieces…</p></div></div>}
+      {clearingAutomap && <div className="modal-backdrop"><div className="modal" role="dialog" aria-label="Updating automap pieces"><p role="status">Updating selected automap pieces…</p></div></div>}
       {dialog === 'dt1edit' && map && (
         <Dt1Editor
           map={map}
@@ -4050,7 +4055,7 @@ export function App() {
                 setAutomapImport(null);
                 notify(`${summary} (the old file is kept as .bak)`);
               } catch (e) {
-                notify((e as Error).message, true);
+                notify(errorMessage(e), true);
               } finally {
                 setAutomapImportBusy(false);
               }
@@ -4168,7 +4173,7 @@ export function App() {
               await reloadTables();
               notify(`${writes.flatMap((w) => w.summary).join('; ')} (the old file is kept as .bak)`);
             } catch (e) {
-              notify((e as Error).message, true);
+              notify(errorMessage(e), true);
             }
           }}
           onAddToGame={() => setDialog('register')}

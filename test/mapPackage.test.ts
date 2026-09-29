@@ -352,3 +352,15 @@ describe.runIf(hasD2)('map packages over the real game data', async () => {
     expect(row['File1']).toBe(town['File1']);
   });
 });
+
+
+describe('desktop import diagnostics', () => {
+  it('keeps native string rejections and the affected path in the error', async () => {
+    const pkg = { manifest: {} as PackageManifest, files: [{path: 'data/global/tiles/map.ds1',bytes:new Uint8Array([1])}] };
+    const fs = new LayeredFs([{
+      label:'desktop',list:()=>[],has:()=>true,
+      read:async()=>{throw 'The system cannot find the file specified (os error 2)';},
+    }]);
+    await expect(planImport(pkg,fs)).rejects.toThrow('Could not read the existing data/global/tiles/map.ds1: The system cannot find the file specified (os error 2)');
+  });
+});

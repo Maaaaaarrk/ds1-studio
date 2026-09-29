@@ -190,6 +190,11 @@ tile numbers are remapped and any required wall/floor layers are added. Save the
 Toggle the in-game automap over your map (**A**) to see what players will see. Walls outlined in **pink** have no
 AutoMap.txt entry, so the automap draws nothing there.
 
+Select a cell and use **Change piece** or **Clear piece** in the side panel to edit only that cell and layer.
+**Only this cell** is the default; the picker also offers clearly labeled options for all matching tiles or a whole
+style. Local edits preserve matching tiles elsewhere, including their graphics, and support Undo/Redo. Save the
+map after editing. **Clear selected automap pieces** clears just the selected area.
+
 The **Automap editor** (Game → Automap editor) lists every kind of tile the map uses, grouped (floors, walls, corners,
 doors, columns, trees…), with the real tile image next to the automap piece it gets — or a **missing** / **hidden**
 badge. Select kinds in the list (Shift/Ctrl for several) or click spots on the live automap preview, then pick pieces

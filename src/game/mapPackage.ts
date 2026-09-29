@@ -1,3 +1,4 @@
+import { errorMessage } from '../util/errorMessage';
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 import type { Ds1 } from '../formats/ds1';
 import { COMPONENTS, parseCof } from '../formats/cof';
@@ -434,7 +435,9 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<ImportPlan> {
   const writes: ImportPlan['writes'] = [];
   for (const f of pkg.files) {
-    const current = await fs.read(f.path);
+    let current: Uint8Array | null;
+    try { current = await fs.read(f.path); }
+    catch (e) { throw new Error(`Could not read the existing ${f.path}: ${errorMessage(e)}`); }
     writes.push({ path: f.path, bytes: f.bytes, action: !current ? 'new' : sameBytes(current, f.bytes) ? 'identical' : 'overwrite' });
   }
   const txtMerges: TxtMergePlan[] = [];
@@ -459,8 +462,8 @@ export async function planImport(pkg: MapPackage, fs: LayeredFs): Promise<Import
       }
       if (!merged.writes.length) txtMerges.push({ table: 'Level tables', path: '', key: '', keyValue: '', exists: true, action: 'unchanged', note: 'already set up' });
     } catch (e) {
-      const missing = /not found/.test((e as Error).message);
-      txtMerges.push({ table: 'Level tables', path: '', key: '', keyValue: '', exists: false, action: missing ? 'missing-table' : 'failed', note: (e as Error).message });
+      const missing = /not found/.test(errorMessage(e));
+      txtMerges.push({ table: 'Level tables', path: '', key: '', keyValue: '', exists: false, action: missing ? 'missing-table' : 'failed', note: errorMessage(e) });
     }
   }
   for (const r0 of pkg.manifest.txtRows) {
