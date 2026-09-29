@@ -123,6 +123,7 @@ import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TilePalette, type PaletteFocus } from './TilePalette';
+import { arrivalProblem, arrivalText } from '../game/arrival';
 import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
@@ -2326,6 +2327,11 @@ export function App() {
       }
       doc.ds1.version = WRITE_VERSION;
       doc.markSaved();
+      // A level reached by a map item: warn if portal arrivals would land on empty ground (the game stops there).
+      if (map?.resolution.preset) {
+        const p = arrivalProblem(doc.ds1, (type, id) => /waypoint/i.test(gd.objectName(doc.ds1.act, type, id)));
+        if (p) notify(`Saved ${name}, but a map item's portal into this level would crash the game: ${arrivalText(p)} Game → Compatibility check can crop it.`, true);
+      }
       // A whole-level preset must be exactly the level's size (Levels SizeX/SizeY = DS1 size - 1) or the game stops
       // building it: after a resize, keep the level in step.
       if (data.saveTarget) {
@@ -2347,7 +2353,7 @@ export function App() {
     } catch (e) {
       notify(`Save failed: ${(e as Error).message}`, true);
     }
-  }, [doc, gd, data, notify, writeFiles, reloadTables]);
+  }, [doc, gd, data, notify, writeFiles, reloadTables, map]);
 
   const exportFile = useCallback(async () => {
     if (!doc) return;
@@ -3681,6 +3687,14 @@ export function App() {
               : []),
           ]}
           popCount={popAreas.length}
+          arrival={arrivalProblem(doc.ds1, (type, id) => /waypoint/i.test(data.gd.objectName(doc.ds1.act, type, id)))}
+          onCrop={() => {
+            const p = arrivalProblem(doc.ds1, (type, id) => /waypoint/i.test(data.gd.objectName(doc.ds1.act, type, id)));
+            if (p?.crop) {
+              resize(p.crop);
+              notify(`Map cropped to ${doc.ds1.width}×${doc.ds1.height} (Ctrl+Z to undo): its centre is on the map's floor now.`);
+            }
+          }}
           onApply={applyTableWrites}
           onFix={async (writes) => {
             await writeFiles(writes);

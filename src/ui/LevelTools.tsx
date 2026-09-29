@@ -1,3 +1,4 @@
+import { arrivalText, type ArrivalProblem } from '../game/arrival';
 import { useEffect, useMemo, useState } from 'react';
 import { getCell, parseTxtTable, type TxtTableDoc } from '../formats/txtTable';
 import { dataRows, planAddToGame, recordOrderFix, typeAct, type TableFix } from '../game/addToGame';
@@ -40,13 +41,16 @@ interface RegisterProps {
   onClose: () => void;
   /** Pre-filled choices (e.g. right after importing a map). */
   initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string };
+  /** Where portal arrivals would land if that's empty ground (see game/arrival.ts), and how to crop the map. */
+  arrival?: ArrivalProblem | null;
+  onCrop?: () => void;
 }
 
 /**
  * Add map to game: the Levels / LvlPrest / LvlTypes rows that make the game load this map (see game/addToGame.ts for
  * the rules). Shows every field it sets, old → new and why, before anything is written.
  */
-export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onFix, onClose, initial }: RegisterProps) {
+export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCount = 0, onApply, onFix, onClose, initial, arrival, onCrop }: RegisterProps) {
   const [tables, setTables] = useState<{ prest: TxtTableDoc; levels: TxtTableDoc; types: TxtTableDoc } | null>(null);
   const [mode, setMode] = useState<'existing' | 'new'>(initial?.mode ?? 'new');
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
@@ -108,6 +112,18 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
       : ['Levels.txt', 'LvlPrest.txt', 'LvlTypes.txt'].map((t) => ({ t, rows: plan.changes.filter((c) => c.table === t) })).filter((g) => g.rows.length);
   return (
     <Modal title="Add map to game" onClose={onClose} wide>
+      {arrival && (
+        <div className="notice error arrival-warning">
+          <b>Using a map item for this map would crash the game.</b> {arrivalText(arrival)}
+          {arrival.crop && onCrop && (
+            <div>
+              <button className="btn small primary" onClick={onCrop}>
+                Crop the map to what&apos;s painted ({arrival.cropped!.w}×{arrival.cropped!.h})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {initial?.note && <p className="small accent-text">{initial.note}</p>}
       <p className="muted small">
         Makes the game load <span className="mono">{rel}</span>: a level for it in Levels.txt, the LvlPrest row <ColHelp table="LvlPrest" col="File1" /> that
