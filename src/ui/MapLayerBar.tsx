@@ -1,8 +1,15 @@
 import type { Ds1 } from '../formats/ds1';
 import type { Visibility } from './state';
+import { useMemo } from 'react';
+import type { TileLibrary } from '../game/GameData';
+import { wallCategory, wallLibraryKey, type WallCategory } from '../game/wallCategories';
 
 /** Always available above the map, including when the side panels are folded. */
-export function MapLayerBar({ ds1, visibility: v, onChange }: { ds1: Ds1; visibility: Visibility; onChange: (v: Visibility) => void }) {
+export function MapLayerBar({ ds1, lib, visibility: v, onChange }: { ds1: Ds1; lib: TileLibrary; visibility: Visibility; onChange: (v: Visibility) => void }) {
+  const libraries = useMemo(() => lib.loaded.map(source => {
+    const tiles = lib.tilesOf(source.path).filter(t => wallCategory(t.orientation));
+    return {path:source.path,tiles};
+  }).filter(source => source.tiles.length), [lib]);
   const indexed = (key: 'floors' | 'walls', index: number) => {
     const values = [...v[key]];
     values[index] = !(values[index] ?? true);
@@ -15,5 +22,24 @@ export function MapLayerBar({ ds1, visibility: v, onChange }: { ds1: Ds1; visibi
     {ds1.walls.map((_, i) => <button key={`w${i}`} aria-pressed={v.walls[i] ?? true} title={`Show or hide wall layer ${i + 1}, including its upper walls, lower walls and roofs`} onClick={() => indexed('walls', i)}>Wall layer {i + 1}</button>)}
     <span className="map-layer-separator" />
     {categories.map(([key, label]) => <button key={key} aria-pressed={v[key]} title={`Show or hide ${label.toLowerCase()}${key === 'shadows' || key === 'specials' ? '' : ' across the enabled wall layers'}`} onClick={() => onChange({ ...v, [key]: !v[key] })}>{label}</button>)}
+    <details className="wall-category-options">
+      <summary>DT1 wall categories</summary>
+      <div className="wall-category-list">
+        <p>Upper/Lower are visibility groups, separate from W1–W4. Automatic uses the DT1 tile type. Override a library here when its artwork belongs in a different group. This saves an editor preference; game files stay unchanged.</p>
+        {libraries.map(({path,tiles}) => {
+          const key = wallLibraryKey(path);
+          const lower = tiles.filter(t => wallCategory(t.orientation) === 'lower').length;
+          const heights = tiles.map(t => Math.abs(t.height));
+          return <label className="wall-category-row" key={path}>
+            <span title={path}>{path.replace(/^data[\\/]global[\\/]tiles[\\/]/i, '')}<small>{tiles.length} wall tiles · {Math.min(...heights)}–{Math.max(...heights)} px high · {tiles.length-lower} upper / {lower} lower in DT1</small></span>
+            <select aria-label={`Wall category for ${path}`} value={v.wallCategories?.[key] ?? 'auto'} onChange={e => {
+              const wallCategories = {...v.wallCategories};
+              if(e.target.value === 'auto') delete wallCategories[key]; else wallCategories[key] = e.target.value as WallCategory;
+              onChange({...v,wallCategories});
+            }}><option value="auto">Automatic (DT1 type)</option><option value="upper">Upper walls</option><option value="lower">Lower walls</option></select>
+          </label>;
+        })}
+      </div>
+    </details>
   </div>;
 }

@@ -9,6 +9,7 @@ export const TILE_H = 80;
 export type DrawKind = 'floor' | 'shadow' | 'lowerWall' | 'wall' | 'roof' | 'special';
 
 export interface DrawItem {
+  sourcePath?: string;
   tile: Dt1Tile;
   kind: DrawKind;
   /** Source layer index within its kind (floor 0-1, wall 0-3). */
@@ -122,7 +123,7 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
       return;
     }
     const [x, y] = placeTile(tile, cx, cy);
-    const item: DrawItem = { tile, kind, layer, cellX: cx, cellY: cy, x, y };
+    const item: DrawItem = { tile, kind, layer, cellX: cx, cellY: cy, x, y, sourcePath: lib.sourceOf(tile)?.path };
     if (tile.animated) {
       const frames = lib.frames(orientation, main, sub);
       if (frames.length > 1) {
@@ -136,7 +137,7 @@ export function buildScene(ds1: Ds1, lib: TileLibrary): Scene {
       const partner = lib.pick(Orientation.LeftPartOfNorthCornerWall, main, sub, seed);
       if (partner) {
         const [px, py] = placeTile(partner, cx, cy);
-        items.push({ tile: partner, kind, layer, cellX: cx, cellY: cy, x: px, y: py });
+        items.push({ tile: partner, kind, layer, cellX: cx, cellY: cy, x: px, y: py, sourcePath: lib.sourceOf(partner)?.path });
       }
     }
   };

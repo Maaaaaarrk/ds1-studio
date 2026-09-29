@@ -19,6 +19,7 @@ import { hideRect, popTargets, triggerRect, type PopArea } from '../game/pops';
 import type { Ds1 } from '../formats/ds1';
 import { canvasToWorld } from '../render/inputProjection';
 import { combinedCellAt, cycleWithWheel, tileEmphasis } from '../game/mapSelection';
+import { wallCategory } from '../game/wallCategories';
 
 export interface HoverInfo {
   cellX: number;
@@ -115,15 +116,15 @@ interface Props {
 const BACKGROUND: [number, number, number] = [0.043, 0.047, 0.059];
 
 export function isVisible(it: DrawItem, v: Visibility): boolean {
+  if (it.kind === 'wall' || it.kind === 'lowerWall') {
+    const category = it.tile ? wallCategory(it.tile.orientation, it.sourcePath, v.wallCategories) : null;
+    return (category === 'lower' || (!category && it.kind === 'lowerWall') ? v.lowerWalls : v.upperWalls) && (v.walls[it.layer] ?? true);
+  }
   switch (it.kind) {
     case 'floor':
       return v.floors[it.layer] ?? true;
     case 'shadow':
       return v.shadows;
-    case 'lowerWall':
-      return v.lowerWalls && (v.walls[it.layer] ?? true);
-    case 'wall':
-      return v.upperWalls && (v.walls[it.layer] ?? true);
     case 'roof':
       return v.roofs && (v.walls[it.layer] ?? true);
     case 'special':
@@ -529,13 +530,10 @@ export function MapView(props: Props) {
       const cam = camera.current;
       const [wx, wy] = toWorld(ev);
       const s = latest.current;
-      const cell = combinedCellAt(s.scene, [wx, wy], toCell(ev), s.hittable);
-      const selectedCell = !!s.selection && s.selection.x0 === s.selection.x1 && s.selection.y0 === s.selection.y1 && s.selection.x0 === cell[0] && s.selection.y0 === cell[1];
-      const nearFocus = !!s.focus?.anchor && Math.hypot(wx - s.focus.anchor[0], wy - s.focus.anchor[1]) * cam.zoom / dpr() < 24;
-      if (cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey, s.tool === 'select', selectedCell || nearFocus, !!ev.deltaX && !ev.deltaY)) {
+      if (cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey)) {
         // Shift+wheel picks one tile out of a stack instead of zooming (Windows turns it into a horizontal scroll).
         const d = ev.deltaY || ev.deltaX;
-        if (d) latest.current.onCycle(d > 0 ? 1 : -1, [wx, wy]);
+        if (d) s.onCycle(d > 0 ? 1 : -1, [wx, wy]);
         return;
       }
       const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015));

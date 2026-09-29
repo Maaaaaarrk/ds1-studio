@@ -1,7 +1,7 @@
 export type Tool = 'select' | 'paint' | 'erase' | 'pick' | 'object';
 
 export const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
-  { id: 'select', label: 'Select', key: 'v', hint: 'Drag to select combined cells. Shift+wheel or scroll over the selected cell cycles layers; Ctrl+wheel zooms. Shift+click/drag adds cells' },
+  { id: 'select', label: 'Select', key: 'v', hint: 'Click or drag to select combined cells. Only Shift+wheel selects individual tiles; scroll zooms. Shift+click/drag adds cells' },
   { id: 'paint', label: 'Paint', key: 'b', hint: 'Paint the chosen tile on the active layer' },
   { id: 'erase', label: 'Erase', key: 'e', hint: 'Clear cells on the active layer' },
   { id: 'pick', label: 'Pick', key: 'i', hint: 'Copy a tile from the map into the brush' },
@@ -15,6 +15,7 @@ export interface Visibility {
   roofs: boolean;
   lowerWalls: boolean;
   upperWalls: boolean;
+  wallCategories?: import('../game/wallCategories').WallCategories;
   specials: boolean;
   objects: boolean;
   paths: boolean;

@@ -29,14 +29,11 @@ describe('wall click and Shift+wheel selection', () => {
       expect(tileEmphasis({...item(kind,0),cellX:1}, selection, null, null)).toBeNull();
     }
   });
-  it('keeps wheel selection after clicking or losing wheel modifier flags, with explicit Ctrl zoom', () => {
-    expect(cycleWithWheel(false,false,false,true,true,false)).toBe(true);
-    expect(cycleWithWheel(false,true,false,true,false,false)).toBe(true);
-    expect(cycleWithWheel(false,false,false,true,false,true)).toBe(true);
-    expect(cycleWithWheel(true,false,false,false,false,false)).toBe(true);
-    expect(cycleWithWheel(true,true,true,true,true,true)).toBe(false);
-    expect(cycleWithWheel(false,false,false,true,false,false)).toBe(false);
-    expect(cycleWithWheel(false,false,false,false,true,false)).toBe(false);
+  it('enters individual selection only for Shift+wheel, including a missing wheel modifier flag', () => {
+    expect(cycleWithWheel(false,false,false)).toBe(false);
+    expect(cycleWithWheel(false,true,false)).toBe(true);
+    expect(cycleWithWheel(true,false,false)).toBe(true);
+    expect(cycleWithWheel(true,true,true)).toBe(false);
   });
   it('selects visible wall artwork at its owning cell, not the floor grid behind it', () => {
     expect(worldToCell(8,8).map(Math.floor)).toEqual([0,0]);

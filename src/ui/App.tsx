@@ -77,6 +77,7 @@ import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, im
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
 import { FileBrowser } from './FileBrowser';
 import { MapLayerBar } from './MapLayerBar';
+import { readWallCategories } from '../game/wallCategories';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
 import { DEFAULT_VISIBILITY, modeOf, nextView, oneMode, TOOLS, VIEW_NAMES, withMode, type Tool, type ViewMode, type Visibility } from './state';
@@ -207,13 +208,15 @@ export function App() {
   const [visibility, setVisibilityRaw] = useState<Visibility>(() => {
     try {
       const saved = localStorage.getItem('ds1studio.viewMode');
-      return saved && ['walk', 'automap', 'light', 'roofs'].includes(saved) ? withMode(DEFAULT_VISIBILITY, saved as ViewMode) : DEFAULT_VISIBILITY;
+      const initial = { ...DEFAULT_VISIBILITY, wallCategories: readWallCategories(localStorage.getItem('ds1studio.wallCategories')) };
+      return saved && ['walk', 'automap', 'light', 'roofs'].includes(saved) ? withMode(initial, saved as ViewMode) : initial;
     } catch {
       return DEFAULT_VISIBILITY;
     }
   });
   /** Every visibility change keeps one view mode at a time (see ViewMode). */
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
+  useEffect(() => { try { localStorage.setItem('ds1studio.wallCategories', JSON.stringify(visibility.wallCategories ?? {})); } catch { /* preferences may be unavailable */ } }, [visibility.wallCategories]);
   const viewMode: ViewMode = tool === 'object' ? 'objects' : modeOf(visibility);
   /** Switches to a view mode, or back to editing tiles when it is already on. */
   const toggleMode = useCallback((m: ViewMode) => {
@@ -721,14 +724,13 @@ export function App() {
   // The wall-layer tiles hide areas fade ("layer:x:y"; roofs, usually), and per area which layers they are on.
   const { popTargetCells, popAreaTargets } = useMemo(() => {
     const cells = new Set<string>();
-    const perArea: { layer: number; roof: boolean; lower: boolean }[][] = [];
+    const perArea: { layer: number; x: number; y: number }[][] = [];
     if (map)
       for (const a of popAreas) {
-        const list: { layer: number; roof: boolean; lower: boolean }[] = [];
+        const list: { layer: number; x: number; y: number }[] = [];
         for (const t of popTargets(map.ds1, a)) {
           cells.add(`${t.layer}:${t.x}:${t.y}`);
-          const orientation = map.ds1.walls[t.layer]?.[t.y * map.ds1.width + t.x]?.orientation;
-          list.push({ layer: t.layer, roof: orientation === Orientation.Roof, lower: orientation >= Orientation.LowerWallsEquivalentToLeftWall });
+          list.push({ layer: t.layer, x: t.x, y: t.y });
         }
         perArea.push(list);
       }
@@ -738,11 +740,22 @@ export function App() {
    * Whether a cell's tile is on screen: its layer is shown in Layers, and it isn't one of the tiles As if inside hides.
    * Copy, cut and clearing everything take what you see, so the roof over a floor you copy stays where it is.
    */
+  const drawnWallCells = useMemo(() => {
+    const shown = new Map<string, boolean>();
+    for (const it of scene?.items ?? []) {
+      if (it.kind === 'floor' || it.kind === 'shadow') continue;
+      const key = `${it.layer}:${it.cellX}:${it.cellY}`;
+      shown.set(key, (shown.get(key) ?? false) || isVisible(it, visibility));
+    }
+    return shown;
+  }, [scene, visibility]);
   const cellShown = useCallback(
     (layer: LayerRef, x: number, y: number, cell: TileCell | WallCell) => {
       if (layer.kind === 'floor') return visibility.floors[layer.index] ?? true;
       if (layer.kind === 'shadow') return visibility.shadows;
       if (!(visibility.walls[layer.index] ?? true)) return false;
+      const drawn = drawnWallCells.get(`${layer.index}:${x}:${y}`);
+      if (drawn !== undefined) return drawn && !(visibility.popsInside && popTargetCells.has(`${layer.index}:${x}:${y}`));
       const o = (cell as WallCell).orientation;
       if (o === Orientation.Roof && !visibility.roofs) return false;
       if (o >= Orientation.LowerWallsEquivalentToLeftWall && !visibility.lowerWalls) return false;
@@ -750,7 +763,7 @@ export function App() {
       if (o !== Orientation.Roof && o < Orientation.LowerWallsEquivalentToLeftWall && o !== Orientation.SpecialTile1 && o !== Orientation.SpecialTile2 && !visibility.upperWalls) return false;
       return !(visibility.popsInside && popTargetCells.has(`${layer.index}:${x}:${y}`));
     },
-    [visibility, popTargetCells],
+    [visibility, popTargetCells, drawnWallCells],
   );
 
   /**
@@ -766,10 +779,10 @@ export function App() {
       // Covered: inside an area whose fading tiles are drawn (not switched off in Layers).
       return popAreas.some(
         (a, i) =>
-          x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && popAreaTargets[i].some((t) => (visibility.walls[t.layer] ?? true) && (t.roof ? visibility.roofs : t.lower ? visibility.lowerWalls : visibility.upperWalls)),
+          x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && popAreaTargets[i].some(t => !!map && cellShown({kind:'wall',index:t.layer}, t.x, t.y, map.ds1.walls[t.layer][t.y * map.ds1.width + t.x])),
       );
     },
-    [popAreas, popTargetCells, popAreaTargets, visibility],
+    [popAreas, popTargetCells, popAreaTargets, visibility, cellShown, map],
   );
   /** What clicks, picks and Shift+wheel can reach: what is drawn, minus the hidden side of a hide area. */
   const hittable = useCallback(
@@ -1022,8 +1035,9 @@ export function App() {
           selectAnchor.current = cell;
           // Click visible walls, but keep the grid anchor for a subsequent rectangle drag.
           const clicked = scene ? wallClickStack(scene, world, hittable) : null;
-          setStack(mods?.shift ? null : clicked);
-          stackRef.current = mods?.shift ? null : clicked;
+          // Only Shift+wheel restricts selection to an individual layer.
+          setStack(null);
+          stackRef.current = null;
           // Shift adds to the selection: a cell per click, a rectangle per drag (irregular shapes).
           selectBase.current = mods?.shift && selection ? selection : null;
           const item = clicked?.items[clicked.index];
@@ -1203,9 +1217,12 @@ export function App() {
     (allLayers: boolean) => {
       if (!doc || !selection) return;
       const size = selectionLabel(selection);
-      clearArea(selection, allLayers, allLayers ? `Clear ${size}` : `Clear ${layerLabel(activeLayer)} ${size}`);
+      if (allLayers) { clearArea(selection, true, `Clear ${size}`); return; }
+      const layers = onlyLayer ? [onlyLayer] : doc.layers();
+      const edits = clearEdits(doc, selection, layers).filter(e => cellShown(e.layer, e.x, e.y, doc.cell(e.layer, e.x, e.y)));
+      if (doc.apply(edits, `Clear ${onlyLayer ? layerLabel(onlyLayer) : 'visible tiles'} ${size}`)) bump();
     },
-    [doc, selection, activeLayer], // eslint-disable-line react-hooks/exhaustive-deps
+    [doc, selection, activeLayer, onlyLayer, cellShown], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const fillSelection = useCallback(() => {
     if (!doc || !selection) return;
@@ -3227,7 +3244,7 @@ export function App() {
       </aside>
 
       <main className="stage">
-        {map && <MapLayerBar ds1={map.ds1} visibility={visibility} onChange={setVisibility} />}
+        {map && <MapLayerBar ds1={map.ds1} lib={map.lib} visibility={visibility} onChange={setVisibility} />}
         <div className="stage-map">
         {modeAlert && <div className="mode-alert" role="status" aria-live="polite">{modeAlert}</div>}
         {map && scene && visibility.walkable && <WalkLegend floating />}

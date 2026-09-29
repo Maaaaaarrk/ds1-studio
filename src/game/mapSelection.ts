@@ -15,9 +15,9 @@ export function tileEmphasis(item: DrawItem, selection: CellSelection | null, fo
   return hover && item.cellX === hover[0] && item.cellY === hover[1] ? 'hover' : null;
 }
 
-/** A selected cell owns the wheel until the pointer leaves it; Ctrl+wheel always offers explicit zoom. */
-export function cycleWithWheel(shift: boolean, trackedShift: boolean, ctrl: boolean, selectTool: boolean, selectedCell: boolean, horizontal: boolean): boolean {
-  return !ctrl && (shift || trackedShift || (selectTool && (selectedCell || horizontal)));
+/** Only an explicit Shift gesture enters individual-tile selection. */
+export function cycleWithWheel(shift: boolean, trackedShift: boolean, ctrl: boolean): boolean {
+  return !ctrl && (shift || trackedShift);
 }
 
 export function stackMatchesLayer(stack: TileStack, layer: LayerRef): boolean {

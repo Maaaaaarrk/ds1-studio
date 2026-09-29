@@ -17,6 +17,7 @@ import type { MapOverride, OpenMap } from '../game/openMap';
 import type { Scene } from '../render/scene';
 import type { HoverInfo } from './MapView';
 import { ORIENTATION_NAMES, type Visibility } from './state';
+import { wallCategory } from '../game/wallCategories';
 
 function Panel({ title, extra, children, defaultOpen = true }: { title: string; extra?: ReactNode; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -48,6 +49,7 @@ function Toggle({ label, checked, onChange, count, swatch, hotkey }: { label: st
 export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map: OpenMap; scene: Scene; visibility: Visibility; onChange: (v: Visibility) => void; keys: Bindings }) {
   const { ds1 } = map;
   const count = (kind: string, layer?: number) => scene.items.filter((i) => i.kind === kind && (layer === undefined || i.layer === layer)).length;
+  const wallCount = (category: 'upper' | 'lower') => scene.items.filter(i => (i.kind === 'wall' || i.kind === 'lowerWall') && wallCategory(i.tile.orientation, i.sourcePath, v.wallCategories) === category).length;
   const set = (patch: Partial<Visibility>) => onChange({ ...v, ...patch });
   const setIdx = (key: 'floors' | 'walls', i: number, val: boolean) => {
     const arr = [...v[key]];
@@ -66,8 +68,8 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
         ))}
         <Toggle label="Shadows" hotkey={keys['layer.shadows']} checked={v.shadows} onChange={(x) => set({ shadows: x })} count={count('shadow')} />
         <Toggle label="Roofs" hotkey={keys['layer.roofs']} checked={v.roofs} onChange={(x) => set({ roofs: x })} count={count('roof')} />
-        <Toggle label="Upper walls" checked={v.upperWalls} onChange={(x) => set({ upperWalls: x })} count={count('wall')} />
-        <Toggle label="Lower walls" hotkey={keys['layer.lowerWalls']} checked={v.lowerWalls} onChange={(x) => set({ lowerWalls: x })} count={count('lowerWall')} />
+        <Toggle label="Upper walls" checked={v.upperWalls} onChange={(x) => set({ upperWalls: x })} count={wallCount('upper')} />
+        <Toggle label="Lower walls" hotkey={keys['layer.lowerWalls']} checked={v.lowerWalls} onChange={(x) => set({ lowerWalls: x })} count={wallCount('lower')} />
       </div>
       <div className="toggle-group">
         <Toggle label="Object markers" hotkey={keys['view.markers']} swatch="rgb(240,80,80)" checked={v.objects} onChange={(x) => set({ objects: x })} count={npcs} />
@@ -84,7 +86,7 @@ export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map
       </div>
       <p className="muted small">
         Objects (blue) share the monster toggle. Walkability: amber blocks walking, red also blocks jumping/teleport. Space/right-drag to pan,
-        scroll to zoom (or cycle a selected cell), Ctrl+scroll to zoom explicitly, F to fit.
+        scroll to zoom, Shift+scroll to select an individual tile, F to fit.
       </p>
     </Panel>
   );
@@ -462,6 +464,7 @@ export function CellPanel({ map, doc, cell, editable, onEdit, onMutate, scene, o
           selects all layers again.
         </p>
       )}
+      {editable && !onlyLayer && <p className="small accent-text">All visible tiles in this cell are selected. Shift+scroll selects an individual tile; a normal click selects the combined cell again.</p>}
       {editable && tileFlags && tileFlags.pending > 0 && (
         <div className="cell-flags-bar">
           <span className="small">
@@ -548,8 +551,8 @@ export function SelectionPanel({ selection, activeLayer, brush, canPaste, onFill
         <button className="btn" disabled={!brush} onClick={onFill} title="Fill the selection with the brush tile on the active layer">
           Fill {layerLabel(activeLayer)}
         </button>
-        <button className="btn" onClick={() => onClear(false)} title="Clear the active layer in the selection (Delete)">
-          Clear {layerLabel(activeLayer)}
+        <button className="btn" onClick={() => onClear(false)} title="Clear the selected visible tiles (Delete); Shift+wheel limits this to one layer">
+          Clear {onlyLayer ? layerLabel(onlyLayer) : 'selected tiles'}
         </button>
         <button className="btn" onClick={() => onClear(true)} title="Clear every tile layer in the selection, and the objects and NPCs in it (Shift+Delete)">
           Clear everything
