@@ -3745,6 +3745,15 @@ export function App() {
           mapPath={doc.path}
           suggested={recipeSuggestion}
           onApply={applyTableWrites}
+          onRemove={async (writes) => {
+            try {
+              await writeFiles(writes);
+              await reloadTables();
+              notify(`${writes.flatMap((w) => w.summary).join('; ')} (the old file is kept as .bak)`);
+            } catch (e) {
+              notify((e as Error).message, true);
+            }
+          }}
           onAddToGame={() => setDialog('register')}
           onClose={() => {
             setRecipeSuggestion(null);

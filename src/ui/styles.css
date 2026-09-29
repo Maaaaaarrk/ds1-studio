@@ -949,3 +949,10 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .walk-area-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .walk-area-unit { font-size: 11px; font-weight: 500; opacity: 0.8; }
 .walk-area-box.small .walk-area-value { opacity: 0.85; }
+
+/* Cube recipe window: removing DS1 Studio's recipes and items, several at once, after a confirmation. */
+.cr-ours-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+.cr-pick { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.cr-confirm { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255, 90, 110, 0.6); border-radius: var(--radius); background: rgba(255, 90, 110, 0.08); display: flex; flex-direction: column; gap: 4px; }
+.cr-confirm ul { margin: 2px 0 2px 16px; padding: 0; max-height: 140px; overflow-y: auto; }
+.cr-confirm-actions { display: flex; justify-content: flex-end; gap: 6px; }

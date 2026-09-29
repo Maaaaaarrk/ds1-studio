@@ -50,6 +50,8 @@ interface Props {
   /** A recipe to start from (an imported package's): its ingredients and item name. */
   suggested?: { inputs: string[]; itemName: string | null } | null;
   onApply: (writes: TableWrite[]) => Promise<void>;
+  /** Writes removals and reloads the game tables, keeping this window open. */
+  onRemove: (writes: TableWrite[]) => Promise<void>;
   /** Opens Add to game (for a map that isn't a level yet). */
   onAddToGame: () => void;
   onClose: () => void;
@@ -164,7 +166,7 @@ function ItemPicker({ items, fs, palette, selected, onPick, groups, height = 220
  * makes it — without needing to know item codes or CubeMain syntax. Which level the item opens is up to the mod's
  * code (e.g. PD2's map system).
  */
-export function CubeRecipeDialog({ fs, mapName, mapPath, suggested, onApply, onAddToGame, onClose }: Props) {
+export function CubeRecipeDialog({ fs, mapName, mapPath, suggested, onApply, onRemove, onAddToGame, onClose }: Props) {
   const [tables, setTables] = useState<{
     misc: TxtTableDoc | null;
     weapons: TxtTableDoc | null;
@@ -189,6 +191,11 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, suggested, onApply, onA
   const [busy, setBusy] = useState(false);
   const [acceptMod, setAcceptMod] = useState(false);
   const [nobodyHolds, setNobodyHolds] = useState(false);
+  /** Rows of DS1 Studio's recipes (CubeMain) and items (Misc) ticked for removal, and a removal waiting to be confirmed. */
+  const [selRecipes, setSelRecipes] = useState<Set<number>>(new Set());
+  const [selItems, setSelItems] = useState<Set<number>>(new Set());
+  const [confirmRemove, setConfirmRemove] = useState<{ recipes: number[]; items: number[] } | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     void Promise.all([
@@ -207,7 +214,7 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, suggested, onApply, onA
       }),
     ]).then(([misc, weapons, armor, cube, levels, prest, strings]) => setTables({ misc, weapons, armor, cube, levels, prest, strings }));
     void fs.read(palettePath(0)).then((b) => b && setPalette(parsePalette(b)));
-  }, [fs]);
+  }, [fs, reload]);
 
   const allMisc = useMemo(() => catalog(tables?.misc ?? null, 'Misc'), [tables]);
   // Templates: never ones known to crash (see game/cubeRecipe.ts).
@@ -508,44 +515,137 @@ export function CubeRecipeDialog({ fs, mapName, mapPath, suggested, onApply, onA
           ))
         )}
       </div>
-      {(ours.recipes.length > 0 || ours.items.length > 0) && tables?.cube && tables.misc && (
-        <details className="cr-ours">
-          <summary className="small">
-            Made by DS1 Studio: {ours.recipes.length} recipe{ours.recipes.length === 1 ? '' : 's'}, {ours.items.length} item{ours.items.length === 1 ? '' : 's'}
-          </summary>
-          {ours.recipes.map((r) => (
-            <div key={`r${r.row}`} className="pops-row small">
-              <span>
-                Recipe “{r.description}” → <span className="mono">{r.output}</span>
-              </span>
-              <button className="btn small" disabled={busy} onClick={() => void onApply([removeRows('CubeMain.txt', tables.cube!, [r.row], () => `recipe “${r.description}”`)])}>
-                Remove recipe
-              </button>
-            </div>
-          ))}
-          {ours.items.length > 0 && (
-            <label className="small warn-text">
-              <input type="checkbox" checked={nobodyHolds} onChange={(e) => setNobodyHolds(e.target.checked)} /> no character holds these items (a character that
-              does may not load once its item&apos;s code is gone)
-            </label>
-          )}
-          {ours.items.map((it) => (
-            <div key={`i${it.row}`} className="pops-row small">
-              <span>
-                Item “{it.name}” <span className="mono">{it.code}</span>
-                {ours.recipes.some((r) => r.output === it.code) ? ' (a recipe still makes it: remove that first)' : ''}
-              </span>
+      {(ours.recipes.length > 0 || ours.items.length > 0) && tables?.cube && tables.misc && (() => {
+        const toggle = (set: Set<number>, put: (s: Set<number>) => void, row: number) => {
+          const n = new Set(set);
+          if (n.has(row)) n.delete(row);
+          else n.add(row);
+          put(n);
+        };
+        // An item can go once no remaining recipe makes it (its own recipes ticked too count as gone).
+        const madeBy = (code: string) => ours.recipes.filter((r) => r.output.split(',')[0].trim() === code);
+        const itemBlocked = (code: string, recipesGoing: Set<number>) => madeBy(code).some((r) => !recipesGoing.has(r.row));
+        const itemsOk = [...selItems].every((row) => {
+          const it = ours.items.find((x) => x.row === row);
+          return !!it && !itemBlocked(it.code, selRecipes);
+        });
+        const count = selRecipes.size + selItems.size;
+        const canRemove = count > 0 && (selItems.size === 0 || (nobodyHolds && itemsOk));
+        const everything = selRecipes.size === ours.recipes.length && selItems.size === ours.items.length;
+        const ask = (recipes: number[], items: number[]) => setConfirmRemove({ recipes, items });
+        const recipeName = (row: number) => ours.recipes.find((r) => r.row === row)?.description ?? `row ${row}`;
+        const itemName = (row: number) => {
+          const it = ours.items.find((x) => x.row === row);
+          return it ? `${it.name} (${it.code})` : `row ${row}`;
+        };
+        const doRemove = async () => {
+          if (!confirmRemove || !tables.cube || !tables.misc) return;
+          const writes: TableWrite[] = [];
+          if (confirmRemove.recipes.length) writes.push(removeRows('CubeMain.txt', tables.cube, confirmRemove.recipes, (r) => `recipe “${recipeName(r)}”`));
+          if (confirmRemove.items.length) writes.push(removeRows('Misc.txt', tables.misc, confirmRemove.items, (r) => `item “${itemName(r)}”`));
+          setBusy(true);
+          try {
+            await onRemove(writes);
+            setSelRecipes(new Set());
+            setSelItems(new Set());
+            setReload((n) => n + 1);
+          } finally {
+            setConfirmRemove(null);
+            setBusy(false);
+          }
+        };
+        const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+        return (
+          <details className="cr-ours" open={count > 0 || !!confirmRemove || undefined}>
+            <summary className="small">
+              Made by DS1 Studio: {plural(ours.recipes.length, 'recipe')}, {plural(ours.items.length, 'item')}
+            </summary>
+            <div className="cr-ours-tools small">
               <button
-                className="btn small"
-                disabled={busy || !nobodyHolds || ours.recipes.some((r) => r.output === it.code)}
-                onClick={() => void onApply([removeRows('Misc.txt', tables.misc!, [it.row], () => `item “${it.name}” (${it.code})`)])}
+                className="link"
+                onClick={() => {
+                  setSelRecipes(everything ? new Set() : new Set(ours.recipes.map((r) => r.row)));
+                  setSelItems(everything ? new Set() : new Set(ours.items.map((it) => it.row)));
+                }}
               >
-                Remove item
+                {everything ? 'Select none' : 'Select all'}
+              </button>
+              <button
+                className="btn small danger"
+                disabled={busy || !canRemove}
+                onClick={() => ask([...selRecipes], [...selItems])}
+                title={count && !canRemove ? 'Items need the box below ticked, and every recipe that makes them ticked too' : undefined}
+              >
+                Remove selected{count ? ` (${count})` : ''}
               </button>
             </div>
-          ))}
-        </details>
-      )}
+            {ours.recipes.map((r) => (
+              <div key={`r${r.row}`} className="pops-row small">
+                <label className="cr-pick">
+                  <input type="checkbox" checked={selRecipes.has(r.row)} onChange={() => toggle(selRecipes, setSelRecipes, r.row)} />
+                  <span>
+                    Recipe “{r.description}” → <span className="mono">{r.output}</span>
+                  </span>
+                </label>
+                <button className="btn small" disabled={busy} onClick={() => ask([r.row], [])}>
+                  Remove recipe
+                </button>
+              </div>
+            ))}
+            {ours.items.length > 0 && (
+              <label className="small warn-text">
+                <input type="checkbox" checked={nobodyHolds} onChange={(e) => setNobodyHolds(e.target.checked)} /> no character holds these items (a character that
+                does may not load once its item&apos;s code is gone)
+              </label>
+            )}
+            {ours.items.map((it) => (
+              <div key={`i${it.row}`} className="pops-row small">
+                <label className="cr-pick">
+                  <input type="checkbox" checked={selItems.has(it.row)} onChange={() => toggle(selItems, setSelItems, it.row)} />
+                  <span>
+                    Item “{it.name}” <span className="mono">{it.code}</span>
+                    {itemBlocked(it.code, selRecipes) ? ' (a recipe still makes it: remove that first, or tick it too)' : ''}
+                  </span>
+                </label>
+                <button className="btn small" disabled={busy || !nobodyHolds || itemBlocked(it.code, new Set())} onClick={() => ask([], [it.row])}>
+                  Remove item
+                </button>
+              </div>
+            ))}
+            {confirmRemove && (
+              <div className="cr-confirm" role="alertdialog">
+                <b>
+                  Remove{' '}
+                  {[confirmRemove.recipes.length ? plural(confirmRemove.recipes.length, 'recipe') : '', confirmRemove.items.length ? plural(confirmRemove.items.length, 'item') : '']
+                    .filter(Boolean)
+                    .join(' and ')}
+                  ?
+                </b>
+                <ul className="small">
+                  {confirmRemove.recipes.map((row) => (
+                    <li key={`cr${row}`}>Recipe “{recipeName(row)}”</li>
+                  ))}
+                  {confirmRemove.items.map((row) => (
+                    <li key={`ci${row}`}>Item “{itemName(row)}”</li>
+                  ))}
+                </ul>
+                <p className="small muted">
+                  They are taken out of {[confirmRemove.recipes.length ? 'CubeMain.txt' : '', confirmRemove.items.length ? 'Misc.txt' : ''].filter(Boolean).join(' and ')} (the old
+                  file is kept as .bak).
+                </p>
+                <div className="cr-confirm-actions">
+                  <button className="btn small" onClick={() => setConfirmRemove(null)} disabled={busy}>
+                    Cancel
+                  </button>
+                  <button className="btn small danger" onClick={() => void doRemove()} disabled={busy}>
+                    {busy ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </details>
+        );
+      })()}
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           Cancel
