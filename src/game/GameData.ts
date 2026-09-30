@@ -251,6 +251,11 @@ export class GameData {
   }
   private objectTable = false;
 
+  /** The levels (Levels.txt Id > 0) whose LevelType is this type. */
+  levelsOfType(typeId: number): number[] {
+    return [...this.levelTypeById].filter(([id, t]) => id > 0 && t === typeId).map(([id]) => id);
+  }
+
   lvlType(id: number): LvlTypeInfo | null {
     return this.lvlTypes.find((t) => t.id === id) ?? null;
   }

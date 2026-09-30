@@ -32,6 +32,13 @@ impl Config {
         roots
     }
 
+    /// The folders DS1 Studio may change files in: the mod folders and the save folder, never the game install.
+    fn write_roots(&self) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = self.mod_dirs.iter().map(PathBuf::from).collect();
+        roots.extend(self.save_dir.iter().map(PathBuf::from));
+        roots
+    }
+
     fn save_root(&self) -> Option<PathBuf> {
         self.save_dir.clone().or_else(|| self.mod_dirs.first().cloned()).map(PathBuf::from)
     }

@@ -76,3 +76,36 @@ export function typesUsing(types: { id: number; name: string; files: string[] }[
   const want = normalizePath(path);
   return types.filter((t) => t.files.some((f) => f && normalizePath(`data/global/tiles/${f}`) === want)).map((t) => `${t.id} ${t.name}`);
 }
+
+/** Points every LvlPrest File1–File6 cell that names `oldRel` (a map, relative to data/global/tiles) at `newRel`. */
+export function renameInLvlPrest(prest: TxtTableDoc, oldRel: string, newRel: string): { doc: TxtTableDoc; changed: string[] } {
+  const want = normalizePath(`data/global/tiles/${oldRel}`);
+  let doc = prest;
+  const changed: string[] = [];
+  for (let r = 0; r < doc.rows.length; r++)
+    for (let f = 1; f <= 6; f++) {
+      const v = getCell(doc, r, `File${f}`);
+      if (!v || v === '0' || normalizePath(`data/global/tiles/${v}`) !== want) continue;
+      doc = setCell(doc, r, `File${f}`, newRel);
+      const name = `${getCell(doc, r, 'Def')} ${getCell(doc, r, 'Name')}`.trim();
+      if (!changed.includes(name)) changed.push(name);
+    }
+  return { doc, changed };
+}
+
+/** A shorter tile path (relative to data/global/tiles) for one over `max` characters: the file name is cut first. */
+export function suggestShortPath(rel: string, max: number): string {
+  if (rel.length <= max) return rel;
+  const slash = rel.lastIndexOf('/');
+  const dir = slash >= 0 ? rel.slice(0, slash + 1) : '';
+  const file = rel.slice(slash + 1);
+  const dot = file.lastIndexOf('.');
+  const ext = dot > 0 ? file.slice(dot) : '';
+  const base = (dot > 0 ? file.slice(0, dot) : file).replace(/[\s_-]+/g, '');
+  const room = max - dir.length - ext.length;
+  if (room >= 3) return `${dir}${base.slice(0, room)}${ext}`;
+  // The folder alone is too long: keep only its last part.
+  const last = dir.split('/').filter(Boolean).pop() ?? '';
+  const d2 = last ? `${last.slice(0, 12)}/` : '';
+  return `${d2}${base.slice(0, Math.max(3, max - d2.length - ext.length))}${ext}`;
+}

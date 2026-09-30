@@ -11,6 +11,8 @@ import { findPops, popProblems } from './pops';
 import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
 import { ACT_TOWNS, exitProblems } from './exits';
 import { loadTable } from './levelTables';
+import { invalidAutomapRows } from './automapSafety';
+import { serializeTxtTable } from '../formats/txtTable';
 import { arrivalProblem, arrivalText } from './arrival';
 import { dt1Act, loadAct0Palette } from './act0Palette';
 import { neededDt1s } from './importMatch';
@@ -59,6 +61,8 @@ export type Fix = { label: string } & (
   | { kind: 'warp-link'; vis: number; edit: boolean; place: boolean; toTown?: number }
   /** Answers a check's question with "keep it as it is": remembered, so it isn't asked again. */
   | { kind: 'keep'; key: string }
+  /** Renames tile files whose paths are too long (relative to data/global/tiles), updating LvlTypes / LvlPrest. */
+  | { kind: 'shorten-paths'; paths: string[] }
 );
 
 /**
@@ -261,11 +265,15 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     // The rules the game's table loaders and level builder follow (row = record, first claiming row, sizes, act,
     // palette, overlaps, path lengths); see game/addToGame.ts.
     const [p2, l2, t2] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt'), loadTable(gd.fs, 'LvlTypes.txt')]);
-    if (p2 && l2 && t2)
-      for (const issue of verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1, {
-        entryImageExists: (name) => !!gd.fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`)),
-        kept,
-      }))
+    const issues = p2 && l2 && t2
+      ? verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1, {
+          entryImageExists: (name) => !!gd.fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`)),
+          kept,
+        })
+      : [];
+    // Every too-long path together, so one dialog renames them all.
+    const longPaths = [...new Map(issues.filter((i) => i.longPath).map((i) => [normalizePath(i.longPath!), i.longPath!])).values()];
+    for (const issue of issues)
         out.push({
           severity: issue.severity,
           title: issue.title,
@@ -273,6 +281,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
           columns: issue.columns,
           area: issue.columns?.[0]?.table === 'Levels' ? 'Level' : 'Tables',
           fixes: [
+            ...(issue.longPath ? [{ kind: 'shorten-paths' as const, label: longPaths.length > 1 ? `Rename the ${longPaths.length} long paths…` : 'Rename it…', paths: longPaths }] : []),
             ...(issue.keep ? [{ kind: 'keep' as const, label: issue.keep.label, key: issue.keep.key }] : []),
             ...(issue.fix ? [{ kind: 'table-write' as const, label: issue.fix.label, writes: issue.fix.writes }] : []),
             { kind: 'open-table' as const, label: `Open ${issue.columns?.[0]?.table ?? 'LvlPrest'}.txt`, table: `${issue.columns?.[0]?.table ?? 'LvlPrest'}.txt` },
@@ -575,6 +584,34 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   const automapDoc = await loadTable(gd.fs, 'AutoMap.txt');
   const amTable = automapDoc ? parseAutomap(automapDoc) : null;
   let noEntries = false;
+  if (automapDoc) {
+    // Rows with no picture (Cel1 -1 or empty after a -1 clear) stop the game while it loads AutoMap.txt.
+    let bad: number[] = [];
+    try {
+      bad = invalidAutomapRows(automapDoc);
+    } catch {
+      bad = [];
+    }
+    if (bad.length) {
+      const drop = new Set(bad);
+      const fixed = { ...automapDoc, rows: automapDoc.rows.filter((_, i) => !drop.has(i)) };
+      out.push({
+        severity: 'error',
+        area: 'Tables',
+        title: `AutoMap.txt has ${bad.length} rule${bad.length === 1 ? '' : 's'} with no picture (Cel1 -1): the game crashes while loading`,
+        detail: `Line${bad.length === 1 ? '' : 's'} ${bad.slice(0, 12).map((i) => i + 2).join(', ')}${bad.length > 12 ? '…' : ''}. The game's automap loader needs a picture in Cel1 of every rule, so a row whose Cel1 is -1 stops it at start-up. Removing those rows leaves those tiles with no automap piece, which is what they were meant to have. Earlier versions of DS1 Studio's "Clear piece" wrote such rows.`,
+        columns: [{ table: 'AutoMap', col: 'Cel1' }],
+        fixes: [
+          {
+            kind: 'table-write',
+            label: `Remove the ${bad.length} row${bad.length === 1 ? '' : 's'} (AutoMap.txt is backed up first)`,
+            writes: [{ table: 'AutoMap.txt', path: 'data/global/excel/AutoMap.txt', bytes: serializeTxtTable(fixed), summary: [`removed ${bad.length} row${bad.length === 1 ? '' : 's'} with Cel1 -1`] }],
+          },
+          { kind: 'open-table', label: 'Open AutoMap.txt', table: 'AutoMap.txt' },
+        ],
+      });
+    }
+  }
   if (amTable) {
     const unknown = unknownAutomapLevels(amTable);
     if (unknown.length)

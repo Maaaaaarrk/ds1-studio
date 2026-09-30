@@ -32,6 +32,8 @@ export interface GhostTile {
   tile: Dt1Tile;
   x: number;
   y: number;
+  /** A wall being placed on this wall layer of this cell: drawn behind the cell's tiles on higher wall layers. */
+  depth?: { cellX: number; cellY: number; wallLayer: number };
 }
 
 export type StrokePhase = 'start' | 'move' | 'end';
@@ -52,12 +54,18 @@ interface Props {
   /** Display name for an object marker. */
   objectLabel: (o: Ds1Object) => string;
   selectedObject: number | null;
+  /** More objects selected with it (double-click selects every one of a kind), highlighted too. */
+  selectedObjects?: ReadonlySet<number> | null;
+  /** A double click on the map, at this world point. */
+  onDoubleClick?: (world: [number, number]) => void;
   /** Object sprites by "type:id". */
   sprites: Map<string, Sprite>;
   /** Object animations by "type:id" (drawn instead of the still sprite while animation is on). */
   animations?: Map<string, SpriteAnimation>;
   /** Cells to call out (e.g. problems found by the compatibility check). */
   marks?: { x: number; y: number }[];
+  /** Cells whose existing tiles the pending paste would replace (drawn red). */
+  doomed?: { x: number; y: number }[] | null;
   /** Show edge handles that resize the map by dragging. */
   resizeMode: boolean;
   onResize: (delta: ResizeDelta) => void;
@@ -81,6 +89,8 @@ interface Props {
   gameView?: { on: boolean; signal: number; center?: [number, number] | null; width: number; height: number };
   /** One tile of a stack of overlapping tiles, chosen with Shift+wheel: highlighted and outlined. */
   focus: { item: DrawItem; index: number; count: number; label: string; anchor?: [number, number] } | null;
+  /** An area selection narrowed to one layer with Shift+scroll (only its tiles are highlighted). */
+  areaLayer?: { kind: 'floor' | 'wall' | 'shadow'; index: number } | null;
   hittable: (item: DrawItem) => boolean;
   /** The in-game automap drawn over the map (dimmed underneath). */
   automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array; style: AutomapStyle; kindOf: (orientation: number, main: number, sub: number) => AutomapKind } | null;
@@ -365,7 +375,7 @@ export function MapView(props: Props) {
         // show their current frame (each starts at its own phase so they don't move in step); otherwise frame 0.
         const anim = animations?.get(`${o.type}:${o.id}`);
         const [wx, wy] = subTileToWorld(o.x, o.y);
-        const flags = i === selectedObject ? InstanceFlag.Highlight : 0;
+        const flags = i === selectedObject || props.selectedObjects?.has(i) ? InstanceFlag.Highlight : 0;
         const parts = anim?.parts.length
           ? anim.parts[visibility.animate ? Math.floor((frame / 25) * anim.fps + i * 7) % anim.parts.length : 0]
           : [{ image: sprite, blend: -1 }];
@@ -377,14 +387,24 @@ export function MapView(props: Props) {
         }
       }
     };
+    // A wall being placed on a lower layer goes behind the higher layers' tiles at its cell (the layer shows).
+    const pendingGhosts = ghost.filter((g) => g.depth);
     for (const it of scene.items) {
+      if (pendingGhosts.length && it.kind !== 'floor' && it.kind !== 'shadow')
+        for (let k = pendingGhosts.length - 1; k >= 0; k--) {
+          const d = pendingGhosts[k].depth!;
+          if (d.cellX === it.cellX && d.cellY === it.cellY && it.layer > d.wallLayer) {
+            push(pendingGhosts[k].tile, pendingGhosts[k].x, pendingGhosts[k].y, InstanceFlag.Ghost);
+            pendingGhosts.splice(k, 1);
+          }
+        }
       if (it.kind === 'wall') flushObjects(it.cellX + it.cellY - 1);
       else if (it.kind === 'roof' || it.kind === 'special') flushObjects(Infinity);
       if (!isVisible(it, visibility)) continue;
       if (popsInside && (it.kind === 'wall' || it.kind === 'roof' || it.kind === 'lowerWall') && popsInside.has(`${it.layer}:${it.cellX}:${it.cellY}`)) continue;
       let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
       if (tool !== 'object' && !props.walkBrush && !ghost.length) {
-        const emphasis = tileEmphasis(it, tool === 'select' ? selection : null, tool === 'select' ? focus?.item ?? null : null, previewCell);
+        const emphasis = tileEmphasis(it, tool === 'select' ? selection : null, tool === 'select' ? focus?.item ?? null : null, previewCell, tool === 'select' ? props.areaLayer ?? null : null);
         if (emphasis === 'selected') flags |= InstanceFlag.Highlight;
         else if (emphasis === 'hover') flags |= InstanceFlag.Preview;
       }
@@ -392,15 +412,15 @@ export function MapView(props: Props) {
       push(tile, it.x, it.y, flags);
     }
     flushObjects(Infinity);
-    for (const g of ghost) push(g.tile, g.x, g.y, InstanceFlag.Ghost);
+    for (const g of ghost) if (!g.depth || pendingGhosts.includes(g)) push(g.tile, g.x, g.y, InstanceFlag.Ghost);
     renderer.current!.syncAtlas(a);
     renderer.current!.setInstances(instances);
     dirty.current = true;
-  }, [scene, visibility, previewCell, selection, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, focus, popsInside, !!props.walkBrush]);
+  }, [scene, visibility, previewCell, selection, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, props.selectedObjects, focus, props.areaLayer, popsInside, !!props.walkBrush]);
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost]);
+  }, [selection, pasteRect, selectedObject, props.selectedObjects, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost, props.doomed]);
 
   // Input.
   useEffect(() => {
@@ -584,6 +604,10 @@ export function MapView(props: Props) {
       }
     };
     setCursor();
+    const dbl = (ev: MouseEvent) => {
+      if (ev.button === 0) latest.current.onDoubleClick?.(toWorld(ev));
+    };
+    el.addEventListener('dblclick', dbl);
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -603,6 +627,7 @@ export function MapView(props: Props) {
     const blur = () => { shiftHeld = false; cancel(); };
     window.addEventListener('blur', blur);
     return () => {
+      el.removeEventListener('dblclick', dbl);
       el.removeEventListener('pointerdown', down);
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
@@ -1129,6 +1154,16 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     ctx.stroke();
   }
 
+  if (s.doomed?.length) {
+    ctx.lineWidth = 2 * px;
+    ctx.strokeStyle = 'rgba(255, 70, 90, 0.95)';
+    ctx.fillStyle = 'rgba(255, 70, 90, 0.28)';
+    ctx.beginPath();
+    for (const m of s.doomed) diamond(ctx, m.x + 0.06, m.y + 0.06, 0.88, 0.88);
+    ctx.fill();
+    ctx.stroke();
+  }
+
   if (s.marks?.length) {
     ctx.lineWidth = 3 * px;
     ctx.strokeStyle = 'rgba(255, 120, 60, 0.95)';
@@ -1229,7 +1264,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
   if (v.paths || tool === 'object') {
     ds1.objects.forEach((o, i) => {
       if (!o.path.length) return;
-      const selected = i === selectedObject;
+      const selected = i === selectedObject || !!s.selectedObjects?.has(i);
       if (!v.paths && !selected) return;
       // The NPC walks to point 0, then along the points, looping back to point 0.
       ctx.beginPath();
@@ -1257,7 +1292,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
     const full = Math.max(4 * px, 5);
     ds1.objects.forEach((o, i) => {
       const [x, y] = subTileToWorld(o.x, o.y);
-      const selected = i === selectedObject;
+      const selected = i === selectedObject || !!s.selectedObjects?.has(i);
       // Objects drawn with their real sprite don't need a marker on top (the map should look like the game): only
       // when hovered or selected, or as a small dot in object mode. Invisible objects keep their full marker.
       const key = `${o.type}:${o.id}`;

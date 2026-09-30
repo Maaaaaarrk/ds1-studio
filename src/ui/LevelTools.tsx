@@ -40,7 +40,7 @@ interface RegisterProps {
   onFix: (writes: TableWrite[]) => Promise<void>;
   onClose: () => void;
   /** Pre-filled choices (e.g. right after importing a map). */
-  initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string };
+  initial?: { mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string; newType?: boolean };
   /** Where portal arrivals would land if that's empty ground (see game/arrival.ts), and how to crop the map. */
   arrival?: ArrivalProblem | null;
   onCrop?: () => void;
@@ -58,6 +58,7 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
   const [levelId, setLevelId] = useState(initial?.levelId ?? 0);
   const [name, setName] = useState(() => initial?.name ?? mapPath.split('/').pop()!.replace(/\.ds1$/i, ''));
   const [pal, setPal] = useState<number | null>(null);
+  const [newType, setNewType] = useState(initial?.newType ?? false);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   // The file's own spelling when known (an imported map), so the table names it exactly as it is on disk.
@@ -105,8 +106,8 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
   const plan = useMemo(() => {
     if (!tables) return 'Loading tables…';
     if (!chosen) return mode === 'new' ? 'Pick the level to copy settings (monsters, lighting, music, tiles) from.' : 'Pick the preset level that should use this map.';
-    return planAddToGame(tables, { mode, levelId, name, mapRel: rel, width, height, usedDt1s, popCount, palAct: mode === 'new' ? (pal ?? autoPal) : undefined });
-  }, [tables, chosen, mode, levelId, name, rel, width, height, usedDt1s, popCount, pal, autoPal]);
+    return planAddToGame(tables, { mode, levelId, name, mapRel: rel, width, height, usedDt1s, popCount, palAct: mode === 'new' ? (pal ?? autoPal) : undefined, newType: mode === 'new' && newType });
+  }, [tables, chosen, mode, levelId, name, rel, width, height, usedDt1s, popCount, pal, autoPal, newType]);
 
   const byTable =
     typeof plan === 'string'
@@ -180,6 +181,19 @@ export function RegisterMapDialog({ fs, mapPath, width, height, usedDt1s, popCou
               ))}
             </select>
           </label>
+          <div className="form-row">
+            <span>
+              Level type <ColHelp table="Levels" col="LevelType" />
+            </span>
+            <div className="inline">
+              <label className="mini-check">
+                <input type="radio" checked={newType} onChange={() => setNewType(true)} /> a new level type (its own tile list)
+              </label>
+              <label className="mini-check">
+                <input type="radio" checked={!newType} onChange={() => setNewType(false)} /> the one it copies from (a new one only if tiles are missing)
+              </label>
+            </div>
+          </div>
           <p className="muted small">
             New levels are Act 5 levels in the game (it goes by the level number), so they use Act 5&apos;s objects, music and town. The palette follows the
             act the tiles were drawn for, as the game&apos;s own Act 5 levels that reuse other acts&apos; tiles do.

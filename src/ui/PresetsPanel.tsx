@@ -6,6 +6,7 @@ import { TileLibrary, type GameData } from '../game/GameData';
 import type { Preset, SuggestProgress } from '../game/presets';
 import { tilesAt } from '../render/scene';
 import { normalizePath } from '../vfs/vfs';
+import { ContextMenu, type MenuEntry } from './ContextMenu';
 
 /** Thumbnails per map (tile library + palette): the same preset looks different with another map's DT1s. */
 const thumbCache = new WeakMap<TileLibrary, WeakMap<Palette, Map<string, string | null>>>();
@@ -98,9 +99,13 @@ interface Props {
   onSavePreset: (p: Preset) => void;
   onSuggest: () => void;
   onBuild: () => void;
+  /** Saved presets: rename / recategorise (a changed copy replaces it), duplicate, delete. */
+  onUpdate: (p: Preset, change: { name?: string; category?: string }) => void;
+  onDuplicate: (p: Preset) => void;
+  onDelete: (p: Preset) => void;
 }
 
-function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s }: { p: Preset; lib: TileLibrary; gd: GameData; palette: Palette; missing: string[]; onPlace: () => void; onSave?: () => void; onAddDt1s: () => void }) {
+function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s, onMenu }: { p: Preset; lib: TileLibrary; gd: GameData; palette: Palette; missing: string[]; onPlace: () => void; onSave?: () => void; onAddDt1s: () => void; onMenu?: (x: number, y: number) => void }) {
   const [previewLib, setPreviewLib] = useState(lib);
   useEffect(() => {
     let live = true;
@@ -112,7 +117,14 @@ function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s }: { p:
     return () => { live = false; };
   }, [p, gd, lib]);
   return (
-    <div className={`preset-card${missing.length ? ' needs' : ''}`} title={`${p.name} · ${p.width}×${p.height} cells${p.objects.length ? ` · ${p.objects.length} objects` : ''}\nTiles from: ${p.dt1s.map((d) => d.replace('data/global/tiles/', '')).join(', ')}${p.foundIn ? `\nFound in ${p.foundIn}` : ''}`}>
+    <div
+      className={`preset-card${missing.length ? ' needs' : ''}`}
+      onContextMenu={(e) => {
+        if (!onMenu) return;
+        e.preventDefault();
+        onMenu(e.clientX, e.clientY);
+      }}
+      title={`${p.name} · ${p.width}×${p.height} cells${p.objects.length ? ` · ${p.objects.length} objects` : ''}\nTiles from: ${p.dt1s.map((d) => d.replace('data/global/tiles/', '')).join(', ')}${p.foundIn ? `\nFound in ${p.foundIn}` : ''}`}>
       <button className="preset-main" onClick={onPlace}>
         <PresetThumb preset={p} lib={previewLib} palette={palette} />
         <span className="preset-name">{p.name}</span>
@@ -140,6 +152,50 @@ function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s }: { p:
 export function PresetsPanel(props: Props) {
   const { saved, suggested, suggesting, lib, palette, dt1Paths, hasSelection, canSave, onPlace, onSaveSelection, onSavePreset, onSuggest, onBuild } = props;
   const [query, setQuery] = useState('');
+  const [menu, setMenu] = useState<{ p: Preset; x: number; y: number; saved: boolean } | null>(null);
+  const categories = useMemo(() => [...new Set(saved.map((p) => p.category))].sort(), [saved]);
+  const menuEntries = (m: { p: Preset; saved: boolean }): (MenuEntry | null)[] =>
+    m.saved
+      ? [
+          { label: 'Place', onClick: () => onPlace(m.p) },
+          null,
+          {
+            label: 'Rename…',
+            disabled: !canSave,
+            onClick: () => {
+              const name = window.prompt('Preset name', m.p.name)?.trim();
+              if (name && name !== m.p.name) props.onUpdate(m.p, { name });
+            },
+          },
+          {
+            label: 'Move to category',
+            disabled: !canSave,
+            children: [
+              ...categories.filter((c) => c !== m.p.category).map((c) => ({ label: c, onClick: () => props.onUpdate(m.p, { category: c }) })),
+              {
+                label: 'New category…',
+                onClick: () => {
+                  const category = window.prompt('Category', m.p.category)?.trim();
+                  if (category && category !== m.p.category) props.onUpdate(m.p, { category });
+                },
+              },
+            ],
+          },
+          { label: 'Duplicate', disabled: !canSave, onClick: () => props.onDuplicate(m.p) },
+          null,
+          {
+            label: 'Delete…',
+            disabled: !canSave,
+            title: 'Removes the preset from the mod (its file is kept aside as a backup)',
+            onClick: () => {
+              if (window.confirm(`Delete the preset "${m.p.name}"?`)) props.onDelete(m.p);
+            },
+          },
+        ]
+      : [
+          { label: 'Place', onClick: () => onPlace(m.p) },
+          { label: 'Save to mod', disabled: !canSave, onClick: () => onSavePreset(m.p) },
+        ];
   const have = useMemo(() => new Set(dt1Paths.map(normalizePath)), [dt1Paths]);
   const missingOf = (p: Preset) => props.isPrepared(p) ? [] : p.dt1s.filter((d) => !have.has(normalizePath(d)));
   const match = (p: Preset) => !query.trim() || `${p.name} ${p.category}`.toLowerCase().includes(query.trim().toLowerCase());
@@ -173,7 +229,7 @@ export function PresetsPanel(props: Props) {
             <div className="field-label">{cat}</div>
             <div className="preset-grid">
               {list.map((p) => (
-                <Card key={p.id} p={p} lib={lib} gd={props.gd} palette={palette} missing={missingOf(p)} onPlace={() => onPlace(p)} onAddDt1s={() => onPlace(p)} />
+                <Card key={p.id} p={p} lib={lib} gd={props.gd} palette={palette} missing={missingOf(p)} onPlace={() => onPlace(p)} onAddDt1s={() => onPlace(p)} onMenu={(x, y) => setMenu({ p, x, y, saved: true })} />
               ))}
             </div>
           </div>
@@ -196,12 +252,14 @@ export function PresetsPanel(props: Props) {
                   onPlace={() => onPlace(p)}
                   onSave={canSave ? () => onSavePreset(p) : undefined}
                   onAddDt1s={() => onPlace(p)}
+                  onMenu={(x, y) => setMenu({ p, x, y, saved: false })}
                 />
               ))}
             </div>
           </>
         )}
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} title={menu.p.name} entries={menuEntries(menu)} onClose={() => setMenu(null)} />}
     </section>
   );
 }

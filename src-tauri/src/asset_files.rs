@@ -2,7 +2,7 @@
 use super::{resolve_case_insensitive, AppState};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::Write, path::{Component, Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ManagedAsset { root: String, path: String }
@@ -37,8 +37,9 @@ fn contained(root: &Path, rel: &Path) -> Result<PathBuf, String> {
 
 fn configured_root(state: &State<AppState>, root: &str) -> Result<PathBuf, String> {
     let root = Path::new(root).canonicalize().map_err(|e| e.to_string())?;
-    if !state.config.lock().unwrap().read_roots().iter().filter_map(|r| r.canonicalize().ok()).any(|r| r == root) {
-        return Err("The asset's source folder is no longer configured.".into());
+    // Only the mod and save folders: the game install is never changed.
+    if !state.config.lock().unwrap().write_roots().iter().filter_map(|r| r.canonicalize().ok()).any(|r| r == root) {
+        return Err("The asset's source folder is not one of your mod folders (the game install is never changed).".into());
     }
     Ok(root)
 }
@@ -64,7 +65,7 @@ fn inventory(dir: &Path, root: &Path, out: &mut Vec<ManagedAsset>, seen: &mut Ha
 pub fn list_managed_assets(state: State<AppState>) -> Vec<ManagedAsset> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for root in state.config.lock().unwrap().read_roots() {
+    for root in state.config.lock().unwrap().write_roots() {
         if let Ok(root) = root.canonicalize() {
             let data = resolve_case_insensitive(&root, Path::new("data"));
             inventory(&data, &root, &mut out, &mut seen);
@@ -75,6 +76,16 @@ pub fn list_managed_assets(state: State<AppState>) -> Vec<ManagedAsset> {
 
 fn executable_dir() -> Result<PathBuf, String> {
     std::env::current_exe().map_err(|e| e.to_string())?.parent().map(Path::to_path_buf).ok_or("Cannot find the app folder.".into())
+}
+/// Where new backups go: the app's data folder (writable even when DS1 Studio is installed under Program Files).
+fn backup_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("Asset backups"))
+}
+/// Every place backups may be: the data folder, then beside the app (where earlier versions kept them).
+fn backup_dirs(app: &AppHandle) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = backup_dir(app).into_iter().collect();
+    if let Ok(exe) = executable_dir() { if !dirs.contains(&exe) { dirs.push(exe); } }
+    dirs
 }
 fn bucket(exe: &Path, path: &str) -> PathBuf {
     exe.join(if path.to_ascii_lowercase().ends_with(".dt1") { "Deleted DT1s" } else { "Deleted DS1s" })
@@ -103,7 +114,7 @@ fn archive_at(exe: &Path, root: &Path, path: &str, expected: &[u8], action: &str
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?;
     let id = format!("{}-{}", now.as_nanos(), std::process::id());
     let store = bucket(exe, path);
-    fs::create_dir_all(&store).map_err(|e| format!("Cannot create the backup folder beside DS1 Studio: {e}. The source has not been changed."))?;
+    fs::create_dir_all(&store).map_err(|e| format!("Cannot create the backup folder {}: {e}. The source has not been changed.", store.display()))?;
     let dir = store.join(&id);
     fs::create_dir(&dir).map_err(|e| e.to_string())?;
     fs::create_dir(dir.join("original")).map_err(|e| e.to_string())?;
@@ -130,9 +141,9 @@ fn archive_at(exe: &Path, root: &Path, path: &str, expected: &[u8], action: &str
 }
 
 #[tauri::command]
-pub fn archive_asset(state: State<AppState>, root: String, path: String, expected: Vec<u8>, action: String, remaining: Option<Vec<u8>>, removed: Vec<u8>) -> Result<RecycledAsset, String> {
+pub fn archive_asset(app: AppHandle, state: State<AppState>, root: String, path: String, expected: Vec<u8>, action: String, remaining: Option<Vec<u8>>, removed: Vec<u8>) -> Result<RecycledAsset, String> {
     let root = configured_root(&state, &root)?;
-    archive_at(&executable_dir()?, &root, &path, &expected, &action, remaining.as_deref(), &removed)
+    archive_at(&backup_dir(&app)?, &root, &path, &expected, &action, remaining.as_deref(), &removed)
 }
 
 fn records(exe: &Path) -> Vec<RecycledAsset> {
@@ -154,7 +165,11 @@ fn records(exe: &Path) -> Vec<RecycledAsset> {
     out
 }
 #[tauri::command]
-pub fn list_recycled_assets() -> Result<Vec<RecycledAsset>, String> { Ok(records(&executable_dir()?)) }
+pub fn list_recycled_assets(app: AppHandle) -> Result<Vec<RecycledAsset>, String> {
+    let mut out: Vec<RecycledAsset> = backup_dirs(&app).iter().flat_map(|d| records(d)).collect();
+    out.sort_by(|a, b| b.created.cmp(&a.created));
+    Ok(out)
+}
 
 fn restore_at(exe: &Path, root: &Path, entry: &mut RecycledAsset) -> Result<String, String> {
     let file = contained(root, &safe_relative(&entry.path)?)?;
@@ -185,11 +200,14 @@ fn restore_at(exe: &Path, root: &Path, entry: &mut RecycledAsset) -> Result<Stri
 }
 
 #[tauri::command]
-pub fn restore_asset(state: State<AppState>, id: String) -> Result<String, String> {
-    let exe = executable_dir()?;
-    let mut entry = records(&exe).into_iter().find(|r| r.id == id).ok_or("Backup not found.")?;
-    let root = configured_root(&state, &entry.root)?;
-    restore_at(&exe, &root, &mut entry)
+pub fn restore_asset(app: AppHandle, state: State<AppState>, id: String) -> Result<String, String> {
+    for dir in backup_dirs(&app) {
+        if let Some(mut entry) = records(&dir).into_iter().find(|r| r.id == id) {
+            let root = configured_root(&state, &entry.root)?;
+            return restore_at(&dir, &root, &mut entry);
+        }
+    }
+    Err("Backup not found.".into())
 }
 
 #[cfg(test)]

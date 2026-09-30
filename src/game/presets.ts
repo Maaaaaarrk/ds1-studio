@@ -30,6 +30,8 @@ export interface Preset {
   occurrences?: number;
   /** For suggestions: a map it was found in. */
   foundIn?: string;
+  /** A saved preset's file (set when loaded; not stored). */
+  file?: string;
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'preset';
@@ -141,14 +143,19 @@ export function parsePreset(bytes: Uint8Array): Preset | null {
 }
 
 export function serializePreset(p: Preset): Uint8Array {
-  const { occurrences: _o, foundIn: _f, ...stored } = p;
+  const { occurrences: _o, foundIn: _f, file: _file, ...stored } = p;
   return new TextEncoder().encode(JSON.stringify(stored, null, 1));
 }
 
 /** Loads every saved preset from the mod folder. */
 export async function loadPresets(gd: GameData): Promise<Preset[]> {
   const files = gd.fs.list((p) => p.startsWith(PRESET_DIR) && p.endsWith('.json'));
-  const loaded = await Promise.all(files.map(async (f) => parsePreset((await gd.fs.read(f)) ?? new Uint8Array())));
+  const loaded = await Promise.all(
+    files.map(async (f) => {
+      const p = parsePreset((await gd.fs.read(f)) ?? new Uint8Array());
+      return p ? ({ ...p, file: f } as Preset) : null;
+    }),
+  );
   return loaded.filter((p): p is Preset => !!p).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 }
 

@@ -92,6 +92,7 @@ interface Props {
 export function AutomapPanel(props: Props) {
   const { table, cels, palette, level, onLevel, pieces, cell, canSave, onSet, levelLabel, suggestions } = props;
   const [picking, setPicking] = useState<AutomapPiece | null>(null);
+  const [pickingWall, setPickingWall] = useState<AutomapPiece | null>(null);
   const [pickingCode, setPickingCode] = useState<AutomapSuggestion | null>(null);
   const [floors, setFloors] = useState(false);
   const floorsMissing = pieces.filter((p) => p.layer === 'floor' && !p.rule).length;
@@ -208,6 +209,15 @@ export function AutomapPanel(props: Props) {
             </div>
           </div>
         )}
+        {cell && here.length > 0 && !here.some((p) => /^w/.test(AUTOMAP_CODES[p.orientation] ?? '')) && (
+          <p className="small muted am-nowall">
+            This cell has no wall tile (a tree or roof stands where the wall would be), so no wall piece belongs to it. To draw one here, give one of its tiles a
+            wall piece for this cell only:{' '}
+            <button className="link" disabled={!canSave || !level} onClick={() => setPickingWall(here.find((p) => p.cel !== null) ?? here[0])}>
+              choose a wall piece…
+            </button>
+          </p>
+        )}
         {cell &&
           (here.length ? (
             <table className="kv automap-rows">
@@ -260,6 +270,22 @@ export function AutomapPanel(props: Props) {
           }}
         />
       )}
+      {pickingWall && level && (
+        <CelPicker
+          table={table}
+          cels={cels}
+          palette={palette}
+          level={level}
+          piece={pickingWall}
+          startWith="walls"
+          title={`A wall piece at cell ${pickingWall.cellX}, ${pickingWall.cellY} (drawn for its ${AUTOMAP_CODE_NAMES[AUTOMAP_CODES[pickingWall.orientation]] ?? AUTOMAP_CODES[pickingWall.orientation]} tile)`}
+          onClose={() => setPickingWall(null)}
+          onPick={(cel, scope) => {
+            onSet(pickingWall, cel, scope);
+            setPickingWall(null);
+          }}
+        />
+      )}
       {picking && level && (
         <CelPicker
           table={table}
@@ -278,8 +304,10 @@ export function AutomapPanel(props: Props) {
   );
 }
 
-function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideScope, title }: {
+function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideScope, title, startWith }: {
   hideScope?: boolean;
+  /** The list to open on (the pieces for this kind of tile by default). */
+  startWith?: 'kind' | 'walls' | 'level' | 'all';
   title?: string;
   table: AutomapTable;
   cels: SpriteFrame[];
@@ -303,10 +331,22 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
       }
     return { sameKind, sameLevel, labels };
   }, [table, level, code]);
-  const [which, setWhich] = useState<'kind' | 'level' | 'all'>('kind');
+  /** The pieces this level (else any level) uses for its walls: to draw a wall where a tree or roof stands. */
+  const walls = useMemo(() => {
+    const WALL = new Set(['wl', 'wr', 'wtlr', 'wtll', 'wtr', 'wbl', 'wbr', 'wld', 'wrd', 'wle', 'wre']);
+    const mine = new Set<number>();
+    const any = new Set<number>();
+    for (const rules of table.byKey.values())
+      for (const r of rules) {
+        if (!WALL.has(r.code)) continue;
+        for (const c of r.cels) (r.level === level ? mine : any).add(c.cel);
+      }
+    return mine.size ? mine : any;
+  }, [table, level]);
+  const [which, setWhich] = useState<'kind' | 'walls' | 'level' | 'all'>(startWith ?? 'kind');
   const [scope, setScope] = useState<'cell' | 'seq' | 'style'>('cell');
   const [filter, setFilter] = useState('');
-  const list = (which === 'kind' ? [...sameKind] : which === 'level' ? [...new Set([...sameKind, ...sameLevel])] : cels.map((_, i) => i))
+  const list = (which === 'kind' ? [...sameKind] : which === 'walls' ? [...walls] : which === 'level' ? [...new Set([...sameKind, ...sameLevel])] : cels.map((_, i) => i))
     .sort((a, b) => a - b)
     .filter((c) => !filter || String(c) === filter.trim() || (labels.get(c) ?? '').toLowerCase().includes(filter.toLowerCase()));
   return (
@@ -316,6 +356,7 @@ function CelPicker({ table, cels, palette, level, piece, onPick, onClose, hideSc
           <option value="kind">
             {level} · {AUTOMAP_CODE_NAMES[code] ?? code} pieces ({sameKind.size})
           </option>
+          <option value="walls">Wall pieces ({walls.size}): draw a wall here</option>
           <option value="level">All {level} pieces</option>
           <option value="all">Every piece ({cels.length})</option>
         </select>

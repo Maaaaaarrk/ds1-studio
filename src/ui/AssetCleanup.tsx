@@ -71,7 +71,7 @@ export function AssetCleanup({ gd, map, palette, initialRestore = false, onChang
     if (!requests.length || requests.some(r => !r.indices.length)) return;
     const label = tab === 'files' ? requests.length + ' DT1 file(s)' : requests[0].indices.length + ' tile(s)';
     if (!window.confirm((action === 'delete' ? 'Delete ' : 'Move ') + label + (action === 'unused' ? ' to PD2 Assets/unused?' : '?') +
-      '\n\nOriginal DT1 files will be backed up beside DS1 Studio in Deleted DT1s. Use “Deleted by accident?” to restore them.')) return;
+      '\n\nOriginal DT1 files will be backed up in DS1 Studio’s data folder (Asset backups). Use “Deleted by accident?” to restore them.')) return;
     setBusy(true); setMessage(''); hidePreview();
     let completed = 0;
     try {
@@ -116,7 +116,7 @@ export function AssetCleanup({ gd, map, palette, initialRestore = false, onChang
         <button className="btn small" disabled={busy || scanning} onClick={() => void runScan()}>Scan again</button>
       </div>
       {tab === 'restore' ? <div className="asset-restore">
-        <p className="small">Restore original files or tile groups. Backups are kept in Deleted DT1s (and Deleted DS1s) beside the app. A newer file at the original location is never overwritten.</p>
+        <p className="small">Restore original files or tile groups. Backups are kept in DS1 Studio’s data folder (Asset backups; older ones beside the app). A newer file at the original location is never overwritten.</p>
         {!isTauri && <p>Restore is available in the desktop app.</p>}
         {backups.map(b => <div className="asset-restore-row" key={b.id}>
           <div><b>{short(b.path)}</b><div className="muted small">{b.root} · {new Date(b.created).toLocaleString()} · {b.partial ? 'tile group' : 'whole file'} · {b.action === 'unused' ? 'moved to unused' : 'deleted'}</div></div>

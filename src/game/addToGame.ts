@@ -110,6 +110,8 @@ export interface AddToGameInput {
   popCount: number;
   /** new: the act whose palette the level uses (0-4); default: the act of the template's tiles. */
   palAct?: number;
+  /** A level type of its own even when the template's type already lists every tile library the map uses. */
+  newType?: boolean;
 }
 
 export interface AddToGamePlan {
@@ -250,7 +252,7 @@ export function planAddToGame(tables: { prest: TxtTableDoc; levels: TxtTableDoc;
     const before = types;
     const r = ensureTypeSlots(types, typeRow, input.usedDt1s);
     const sharers = levelsOfType(levels, typeId, input.mode === 'existing' ? input.levelId : -1);
-    if (r.added.length && sharers.length) {
+    if ((r.added.length || input.newType) && sharers.length) {
       const own = appendOwnType(types, typeRow, name, input.usedDt1s);
       const users = sharers.map((x) => `${getCell(levels, x, 'Id')} ${getCell(levels, x, 'Name')}`);
       warnings.push(
@@ -460,6 +462,8 @@ export interface TableIssue {
   fix?: TableFix;
   /** A question the map maker answers once: this answer ("keep it as it is") is remembered under `key`. */
   keep?: { key: string; label: string };
+  /** A tile path (relative to data/global/tiles) too long for the game: the check offers to rename it. */
+  longPath?: string;
 }
 
 /** Quest names by the number Levels.txt's QuestFlag uses (the game's quest state ids). */
@@ -611,7 +615,7 @@ export function verifyInGame(
     for (let i = 1; i <= 6; i++) {
       const f = getCell(prest, r, `File${i}`);
       const p = f && f !== '0' ? tilePathProblem(f) : null;
-      if (p) out.push({ severity: 'error', title: `${label}: File${i} path too long`, detail: p, columns: [{ table: 'LvlPrest', col: `File${i}` }] });
+      if (p) out.push({ severity: 'error', title: `${label}: File${i} path too long`, detail: p, columns: [{ table: 'LvlPrest', col: `File${i}` }], longPath: f });
     }
     const files = [1, 2, 3, 4, 5, 6].filter((i) => (getCell(prest, r, `File${i}`) || '0') !== '0').length;
     const filesCol = num(getCell(prest, r, 'Files'));
@@ -818,7 +822,7 @@ export function verifyInGame(
       for (let i = 1; i <= 32; i++) {
         const f = getCell(types, tRow, `File ${i}`);
         const p = mask & (1 << (i - 1)) && f && f !== '0' ? tilePathProblem(f) : null;
-        if (p) out.push({ severity: 'error', title: `LvlTypes "${getCell(types, tRow, 'Name')}" File ${i} path too long`, detail: p, columns: [{ table: 'LvlTypes', col: `File ${i}` }] });
+        if (p) out.push({ severity: 'error', title: `LvlTypes "${getCell(types, tRow, 'Name')}" File ${i} path too long`, detail: p, columns: [{ table: 'LvlTypes', col: `File ${i}` }], longPath: f });
       }
     if (tRow >= 0 && first === r) {
       const shared = sharedTypeIssue(tables, lRow, r, tRow);

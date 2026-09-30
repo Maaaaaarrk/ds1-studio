@@ -10,8 +10,16 @@ export function combinedCellAt(scene: Scene, world: [number, number], grid: [num
 }
 
 /** Selected artwork stays gold; a separate hover preview shows every visible layer of the next cell. */
-export function tileEmphasis(item: DrawItem, selection: CellSelection | null, focus: DrawItem | null, hover: [number, number] | null): 'selected' | 'hover' | null {
-  if (focus ? sameItem(item, focus) : selection && inSelection(selection, item.cellX, item.cellY)) return 'selected';
+export function tileEmphasis(
+  item: DrawItem,
+  selection: CellSelection | null,
+  focus: DrawItem | null,
+  hover: [number, number] | null,
+  /** An area selection narrowed to one layer (Shift+scroll): only that layer's tiles are selected. */
+  areaLayer: { kind: 'floor' | 'wall' | 'shadow'; index: number } | null = null,
+): 'selected' | 'hover' | null {
+  const layerOk = !areaLayer || ((item.kind === 'floor' ? 'floor' : item.kind === 'shadow' ? 'shadow' : 'wall') === areaLayer.kind && item.layer === areaLayer.index);
+  if (focus ? sameItem(item, focus) : selection && inSelection(selection, item.cellX, item.cellY) && layerOk) return 'selected';
   return hover && item.cellX === hover[0] && item.cellY === hover[1] ? 'hover' : null;
 }
 

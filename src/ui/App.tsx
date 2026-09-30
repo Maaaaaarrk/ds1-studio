@@ -57,7 +57,9 @@ import {
   Grid2x2Plus,
   Blend,
   House,
+  BrickWall,
   EyeOff,
+  Settings,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
@@ -88,13 +90,14 @@ import { DEFAULT_AUTOMAP_STYLE, kindClassifier, normalizeAutomapStyle, type Auto
 import { ClipboardPanel } from './ClipboardPanel';
 import { SavePresetDialog } from './SavePresetDialog';
 import { PresetBuilder } from './PresetBuilder';
+import { usePrefs } from './prefs';
 import { preparePresetLibrary, resolvePresetSources } from '../game/presetLibrary';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Splitter, usePersistentSize } from './Splitter';
-import { Modal, NewMapDialog, ResizeDialog, SaveAsDialog, type NewMapChoice } from './Dialogs';
+import { Modal, NewMapDialog, PreferencesDialog, ResizeDialog, SaveAsDialog, ShortenPathsDialog, UnsavedPrompt, type NewMapChoice } from './Dialogs';
 import { DataTables, type TableTarget } from './DataTables';
 import { Dt1LibraryDialog } from './Dt1Manager';
 import { MapDt1Review } from './Dt1Review';
@@ -109,7 +112,7 @@ import { prepareFloorLibrary } from '../game/floorLibrary';
 import { stackMatchesLayer, stepTileStack, wallClickStack, type TileStack } from '../game/mapSelection';
 import { planAutomapClear, planAutomapEdit } from '../game/automapClear';
 import { buildDt1, dt1Records } from '../formats/dt1Write';
-import { renameInLvlTypes } from '../game/dt1Review';
+import { renameInLvlPrest, renameInLvlTypes, suggestShortPath } from '../game/dt1Review';
 import { RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
 import { MapRecipeRibbon } from './MapRecipeRibbon';
@@ -128,7 +131,7 @@ import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
 import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
-import { cellFix, levelSizeFix, rowOfRecord, tilePathProblem } from '../game/addToGame';
+import { cellFix, levelSizeFix, MAX_TILE_PATH, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
@@ -225,6 +228,12 @@ export function App() {
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
   useEffect(() => { try { localStorage.setItem('ds1studio.wallCategories', JSON.stringify(visibility.wallCategories ?? {})); } catch { /* preferences may be unavailable */ } }, [visibility.wallCategories]);
   const viewMode: ViewMode = tool === 'object' ? 'objects' : modeOf(visibility);
+  // Changing view drops a selected object (and a double-clicked group): it belongs to the Objects view.
+  useEffect(() => {
+    if (viewMode === 'objects') return;
+    setSelectedObject(null);
+    setObjectGroup(null);
+  }, [viewMode]);
   /** Switches to a view mode, or back to editing tiles when it is already on. */
   const toggleMode = useCallback((m: ViewMode) => {
     const next = viewMode === m ? 'tiles' : m;
@@ -311,7 +320,9 @@ export function App() {
   >(null);
   const [importBusy, setImportBusy] = useState(false);
   /** Choices "Add to game" starts with (after importing a map). */
-  const [registerInitial, setRegisterInitial] = useState<{ mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string } | undefined>(undefined);
+  const [registerInitial, setRegisterInitial] = useState<{ mode?: 'existing' | 'new'; levelId?: number; name?: string; note?: string; path?: string; newType?: boolean } | undefined>(undefined);
+  /** New maps' level type choice (by path): Add to game starts from it. typeId null = a new level type. */
+  const newMapTypes = useRef(new Map<string, { typeId: number | null }>());
   const [paletteFocus, setPaletteFocus] = useState<PaletteFocus | null>(null);
   /** Shows a tile in the Tiles panel: switches to its layer and DT1, scrolls to it and highlights it. */
   const focusTile = useCallback((tile: Dt1Tile, layer: LayerRef) => {
@@ -332,6 +343,8 @@ export function App() {
   /** The Copied panel: from a copy or cut until Esc. */
   const [clipPane, setClipPane] = useState(false);
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
+  /** Every object of one kind, selected together by double-clicking one (Delete / Ctrl+C / Ctrl+X act on all). */
+  const [objectGroup, setObjectGroup] = useState<Set<number> | null>(null);
   const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
@@ -528,6 +541,36 @@ export function App() {
   const objectLabel = useCallback((o: Ds1Object) => (gd && map ? gd.objectName(map.ds1.act, o.type, o.id) : `${o.type},${o.id}`), [gd, map]);
   const nameOf = useCallback((type: number, id: number) => (gd && map ? gd.objectName(map.ds1.act, type, id) : `${type},${id}`), [gd, map]);
 
+  /** The save / discard / cancel prompt, while one is open (its answer resolves the waiting caller). */
+  const [unsavedAsk, setUnsavedAsk] = useState<{ closing: boolean; resolve: (c: 'save' | 'discard' | 'cancel') => void } | null>(null);
+  const askUnsaved = useCallback((closing: boolean) => new Promise<'save' | 'discard' | 'cancel'>((resolve) => setUnsavedAsk({ closing, resolve })), []);
+  const [prefs, setPrefs] = usePrefs();
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  /**
+   * Before leaving the open map (opening another, or closing it): saves it when the preference says so, else asks.
+   * false = stay (cancelled, or the save didn't go through).
+   */
+  const leaveMap = useCallback(
+    async (closing: boolean): Promise<boolean> => {
+      if (flagEdits.current.size) {
+        if (!window.confirm(`Discard the unsaved sub-tile changes to ${flagEdits.current.size} tile${flagEdits.current.size === 1 ? '' : 's'}?`)) return false;
+        for (const [t, e] of flagEdits.current) t.subTileFlags = e.original;
+        flagEdits.current.clear();
+        setFlagEditCount(0);
+      }
+      if (!doc) return true;
+      const choice = !closing && doc.dirty && prefs.saveOnSwitch ? 'save' : !closing && !doc.dirty ? 'discard' : await askUnsaved(closing);
+      if (choice === 'cancel') return false;
+      if (choice === 'save' && doc.dirty) {
+        await handlers.current.save();
+        if (doc.dirty) return false; // not saved: stay
+      }
+      if (choice === 'discard' && doc.dirty) void deleteRecovery(doc.path).then(() => listRecoveries().then(setRecoveries));
+      return true;
+    },
+    [doc, prefs.saveOnSwitch, askUnsaved],
+  );
+
   const confirmDiscard = useCallback(() => {
     if (flagEdits.current.size) {
       if (!window.confirm(`Discard the unsaved sub-tile changes to ${flagEdits.current.size} tile${flagEdits.current.size === 1 ? '' : 's'}?`)) return false;
@@ -545,7 +588,7 @@ export function App() {
     /** `confirmed`: the caller already asked about unsaved changes. `using`: tables just reloaded (see reloadTables). */
     async (path: string, confirmed = false, using?: GameData) => {
       const g = using ?? gd;
-      if (!g || (!confirmed && !confirmDiscard())) return;
+      if (!g || (!confirmed && !(await leaveMap(false)))) return;
       const request = ++mapRequest.current;
       setLoadingPath(path);
       try {
@@ -574,7 +617,7 @@ export function App() {
         if (request === mapRequest.current) setLoadingPath(null);
       }
     },
-    [gd, confirmDiscard, notify],
+    [gd, leaveMap, notify],
   );
 
   /** Re-resolve DT1s (level type change) without discarding edits. */
@@ -809,6 +852,24 @@ export function App() {
         : paintRect,
     [pasting, clipboard, hover, paintRect],
   );
+  /** While pasting: the cells whose existing tiles the paste would replace (shown red before clicking). */
+  const pasteDoomed = useMemo(() => {
+    if (!pasting || !clipboard || !hover || !doc) return null;
+    const have = new Set(doc.layers().map(layerKey));
+    const out = new Map<number, { x: number; y: number; n: number }>();
+    for (const e of pasteEdits(doc, clipboard, hover.cellX, hover.cellY, true)) {
+      if (!have.has(layerKey(e.layer))) continue;
+      const now = doc.cell(e.layer, e.x, e.y);
+      if (isEmptyCell(now)) continue;
+      const same = now.mainIndex === e.cell.mainIndex && now.subIndex === e.cell.subIndex && (e.layer.kind !== 'wall' || (now as WallCell).orientation === (e.cell as WallCell).orientation);
+      if (same) continue;
+      const k = e.y * 65536 + e.x;
+      const c = out.get(k);
+      if (c) c.n++;
+      else out.set(k, { x: e.x, y: e.y, n: 1 });
+    }
+    return [...out.values()];
+  }, [pasting, clipboard, hover, doc, revision]); // eslint-disable-line react-hooks/exhaustive-deps
   const ghost = useMemo((): GhostTile[] => {
     if (!map || !hover) return [];
     if (pasting && clipboard) {
@@ -823,7 +884,8 @@ export function App() {
       );
     }
     if (tool !== 'paint' || !brush) return [];
-    return tilesAt(map.lib, brushOrientation(activeLayer, brush), brush.main, brush.sub, hover.cellX, hover.cellY);
+    const depth = activeLayer.kind === 'wall' ? { cellX: hover.cellX, cellY: hover.cellY, wallLayer: activeLayer.index } : undefined;
+    return tilesAt(map.lib, brushOrientation(activeLayer, brush), brush.main, brush.sub, hover.cellX, hover.cellY).map((g) => ({ ...g, depth }));
   }, [map, hover, tool, brush, activeLayer, pasting, clipboard]);
 
   // The chosen stacked tile, found again in the current scene (edits rebuild it); gone when its tile is gone.
@@ -834,10 +896,35 @@ export function App() {
     if (!item) return null;
     return { item, index: stack.index, count: stack.items.length, anchor: stack.anchor, label: `${layerLabel(layerOfItem(item))} ${item.tile.mainIndex}/${item.tile.subIndex}` };
   }, [stack, scene, hittable]);
-  const onlyLayer = focus ? layerOfItem(focus.item) : null;
+  /** An area selection narrowed to one layer with Shift+scroll: Copy, Cut and Delete act on that layer only. */
+  const [areaLayer, setAreaLayer] = useState<LayerRef | null>(null);
+  useEffect(() => setAreaLayer(null), [selection]);
+  const onlyLayer = focus ? layerOfItem(focus.item) : areaLayer;
   const cycleStack = useCallback(
     (dir: 1 | -1, world: [number, number]) => {
       if (!doc || !scene || tool === 'object' || pasting) return;
+      // A tile ready to paint: Shift+scroll picks the layer it goes on (the preview shows it in front or behind).
+      if (tool === 'paint' && brush) {
+        const same = doc.layers().filter((l) => l.kind === activeLayer.kind);
+        const at = same.findIndex((l) => l.index === activeLayer.index);
+        const next = same[Math.min(same.length - 1, Math.max(0, at + dir))];
+        if (next && next.index !== activeLayer.index) {
+          setActiveLayer(next);
+          notify(`Placing on ${layerLabel(next)}${next.kind === 'wall' ? ': drawn behind tiles on higher wall layers at the same spot' : ''} · Shift+scroll to change`);
+        } else notify(`Already on ${layerLabel(activeLayer)}${dir > 0 ? ' (the last layer of this kind)' : ' (the first)'}`);
+        return;
+      }
+      // An area selected: Shift+scroll narrows it to one layer at a time (All, then each layer with tiles there).
+      if (selection && (!isSingleCell(selection) || (selection.cells?.size ?? 0) > 1)) {
+        const present = doc.layers().filter((l) => rectCells(selection).some(([x, y]) => inSelection(selection, x, y) && !isEmptyCell(doc.cell(l, x, y))));
+        const order: (LayerRef | null)[] = [null, ...present];
+        const at = order.findIndex((l) => (l === null ? areaLayer === null : areaLayer !== null && layerKey(l) === layerKey(areaLayer)));
+        const next = order[(Math.max(0, at) + dir + order.length) % order.length];
+        setAreaLayer(next);
+        const count = next ? rectCells(selection).filter(([x, y]) => inSelection(selection, x, y) && !isEmptyCell(doc.cell(next, x, y))).length : 0;
+        notify(next ? `Selection: ${layerLabel(next)} only (${count} tiles) · Copy, Cut and Delete act on it · Shift+scroll for the next layer` : 'Selection: all layers');
+        return;
+      }
       // Keep stepping through the same stack while the cursor stays near where it started (a pixel of mouse drift
       // would otherwise land on a different set of tiles and start over); farther away, stack up the new spot.
       const next = stepTileStack(scene, stackRef.current, dir, world, zoom, hittable);
@@ -849,7 +936,7 @@ export function App() {
       focusTile(item.tile, layerOfItem(item));
       setTool('select');
     },
-    [doc, scene, tool, pasting, hittable, focusTile, zoom],
+    [doc, scene, tool, pasting, hittable, focusTile, zoom, brush, activeLayer, selection, areaLayer, notify],
   );
 
   const pickAt = useCallback(
@@ -987,6 +1074,7 @@ export function App() {
           let hit = -1;
           for (let i = objs.length - 1; i >= 0 && hit < 0; i--) if (near(objs[i].x, objs[i].y)) hit = i;
           setSelectedObject(hit >= 0 ? hit : null);
+          setObjectGroup(null);
           if (hit >= 0) {
             doc.beginObjectEdit();
             objectDrag.current = { obj: hit, point: null };
@@ -1118,6 +1206,27 @@ export function App() {
     [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, hittable, focusTile, walkBrush, objectPasting, objectClip, objectLabel],
   );
 
+  /** Double-clicking an object selects every object of the same kind on the map. */
+  const selectSameObjects = useCallback(
+    (world: [number, number]) => {
+      if (!doc) return;
+      const objs = doc.ds1.objects;
+      let hit = -1;
+      for (let i = objs.length - 1; i >= 0 && hit < 0; i--) {
+        const [wx, wy] = subTileToWorld(objs[i].x, objs[i].y);
+        if (Math.hypot(wx - world[0], wy - world[1]) < 10) hit = i;
+      }
+      if (hit < 0) return;
+      const { type, id } = objs[hit];
+      const group = new Set(objs.map((o, i) => (o.type === type && o.id === id ? i : -1)).filter((i) => i >= 0));
+      setTool('object');
+      setSelectedObject(hit);
+      setObjectGroup(group.size > 1 ? group : null);
+      notify(`Selected ${group.size} × ${objectLabel(objs[hit])}${group.size > 1 ? ' · Delete removes them, Ctrl+C / Ctrl+X copies or cuts them, Esc deselects' : ''}`);
+    },
+    [doc, notify, objectLabel],
+  );
+
   // Selection commands.
   const copy = useCallback(
     (cut: boolean) => {
@@ -1125,15 +1234,21 @@ export function App() {
         // Object mode: the selected object goes on the cursor, green (copy) or red (cut: taken off the map now).
         const o = selectedObject !== null ? doc.ds1.objects[selectedObject] : null;
         if (!o) return notify(`Select an object first (click it), then ${cut ? 'cut' : 'copy'} it.`);
-        const rel: Ds1Object = { ...o, x: 0, y: 0, path: o.path.map((p) => ({ ...p, x: p.x - o.x, y: p.y - o.y })) };
-        setObjectClip({ objects: [rel], cut });
+        const group = objectGroup && objectGroup.size > 1 ? [...objectGroup].sort((a, b) => a - b) : [selectedObject!];
+        const rel: Ds1Object[] = group.map((i) => {
+          const g = doc.ds1.objects[i];
+          return { ...g, x: g.x - o.x, y: g.y - o.y, path: g.path.map((p) => ({ ...p, x: p.x - o.x, y: p.y - o.y })) };
+        });
+        setObjectClip({ objects: rel, cut });
         if (cut) {
-          setObjects(doc.ds1.objects.filter((_, i) => i !== selectedObject));
+          const drop = new Set(group);
+          setObjects(doc.ds1.objects.filter((_, i) => !drop.has(i)));
           setSelectedObject(null);
+          setObjectGroup(null);
         }
         setPlacing(null);
         setObjectPasting(true);
-        return notify(`${cut ? 'Cut' : 'Copied'} ${objectLabel(o)} · click the map to place it · Esc to drop it from the cursor`);
+        return notify(`${cut ? 'Cut' : 'Copied'} ${group.length > 1 ? `${group.length} × ${objectLabel(o)}` : objectLabel(o)} · click the map to place ${group.length > 1 ? 'them' : 'it'} · Esc to drop ${group.length > 1 ? 'them' : 'it'} from the cursor`);
       }
       if (!doc || !selection) return;
       const raw = copyRect(doc, selection);
@@ -1174,10 +1289,35 @@ export function App() {
       setClipPane(true);
       setPasting(true);
     },
-    [doc, selection, notify, onlyLayer, cellShown, tool, selectedObject, objectLabel], // eslint-disable-line react-hooks/exhaustive-deps
+    [doc, selection, notify, onlyLayer, cellShown, tool, selectedObject, objectLabel, objectGroup], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
   const [pasteOffer, setPasteOffer] = useState<{ clip: Clipboard; tiles: number; different: number; dt1s: string[]; label: string } | null>(null);
+  /** New names for pasted DT1s whose file name is already taken by another of the map's DT1s (path → new file name). */
+  const [pasteRenames, setPasteRenames] = useState<Record<string, string>>({});
+  /** The pasted DT1s named like a different DT1 the map loads: path → the loaded one. */
+  const pasteNameClashes = useMemo(() => {
+    const out = new Map<string, string>();
+    if (!pasteOffer || !map) return out;
+    const base = (p: string) => p.split('/').pop()!.toLowerCase();
+    const loaded = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
+    for (const p of pasteOffer.dt1s) {
+      const twin = loaded.find((l) => base(l) === base(p) && normalizePath(l) !== normalizePath(p));
+      if (twin) out.set(p, twin);
+    }
+    return out;
+  }, [pasteOffer, map]);
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const p of pasteNameClashes.keys()) {
+      const name = p.split('/').pop()!.replace(/\.dt1$/i, '');
+      const dir = p.slice(0, p.lastIndexOf('/') + 1);
+      let n = 2;
+      while (gd?.fs.locate(`${dir}${name}${n}.dt1`)) n++;
+      next[p] = `${name}${n}`;
+    }
+    setPasteRenames(next);
+  }, [pasteNameClashes, gd]);
   const beginPaste = useCallback(
     (clip: Clipboard, label: string, skipCheck = false) => {
       if (!skipCheck && map) {
@@ -1286,10 +1426,13 @@ export function App() {
   );
   const deleteSelectedObject = useCallback(() => {
     if (!doc || selectedObject === null) return false;
-    setObjects(doc.ds1.objects.filter((_, i) => i !== selectedObject));
+    const drop = objectGroup ?? new Set([selectedObject]);
+    setObjects(doc.ds1.objects.filter((_, i) => !drop.has(i)));
+    if (drop.size > 1) notify(`Deleted ${drop.size} objects (Ctrl+Z to undo)`);
     setSelectedObject(null);
+    setObjectGroup(null);
     return true;
-  }, [doc, selectedObject, setObjects]);
+  }, [doc, selectedObject, objectGroup, setObjects, notify]);
   // Load sprites for every distinct object on the map (cached per object id in GameData).
   // (and those on the cursor after a cut, which are off the map but still drawn)
   const objectKeys = map ? [...new Set([...map.ds1.objects, ...(objectClip?.objects ?? [])].map((o) => `${o.type}:${o.id}`))].sort().join(',') : '';
@@ -1353,11 +1496,16 @@ export function App() {
       if (!gd || !confirmDiscard()) return;
       // Only the special-tile library to start with (the rest are picked next, from the DT1 library), in the Act 0
       // colours. The game finds special tiles such as the Map entry only in a loaded DT1 that has them.
-      const paths = gd.fs.locate(SPECIAL_TILES_DT1) ? [gd.fs.exactPath(SPECIAL_TILES_DT1) ?? SPECIAL_TILES_DT1] : [];
+      const special = gd.fs.locate(SPECIAL_TILES_DT1) ? [gd.fs.exactPath(SPECIAL_TILES_DT1) ?? SPECIAL_TILES_DT1] : [];
+      // An existing level type: its tile libraries to start with (the ones found), in its act's colours.
+      const type = c.lvlType !== null ? gd.lvlType(c.lvlType) : null;
+      const typeFiles = type ? GameData.dt1sFor(type, 0xffffffff).filter((p) => gd.fs.locate(p)).map((p) => gd.fs.exactPath(p) ?? p) : [];
+      const paths = [...typeFiles, ...special.filter((s) => !typeFiles.some((p) => normalizePath(p) === normalizePath(s)))];
       const ds1 = newDs1({ ...c, files: paths.map(embeddedFileName) });
+      newMapTypes.current.set(normalizePath(c.path), { typeId: type?.id ?? null });
       try {
-        rememberPalette(c.path, ACT0_PALETTE);
-        const m = await openMap(gd, c.path, { source: 'manual', lvlType: null, paths }, ds1);
+        if (!type) rememberPalette(c.path, ACT0_PALETTE);
+        const m = await openMap(gd, c.path, { source: 'manual', lvlType: type, paths }, ds1);
         const d = new MapDocument(c.path, m.ds1);
         d.markUnsaved();
         setMap(m);
@@ -1365,8 +1513,13 @@ export function App() {
         setSelection(null);
         setSelectedObject(null);
         setActiveLayer({ kind: 'floor', index: 0 });
-        setDialog('dt1lib');
-        notify(`New ${c.width}×${c.height} map, in the Act 0 colours. Choose its tile libraries in the DT1 library, then paint (B); Save writes ${c.path}.`);
+        if (type) {
+          setDialog(null);
+          notify(`New ${c.width}×${c.height} map with level type ${type.id} "${type.name}" (${typeFiles.length} tile libraries). Paint (B); Save writes ${c.path}.`);
+        } else {
+          setDialog('dt1lib');
+          notify(`New ${c.width}×${c.height} map, in the Act 0 colours. Choose its tile libraries in the DT1 library, then paint (B); Save writes ${c.path}.`);
+        }
       } catch (e) {
         notify(errorMessage(e), true);
       }
@@ -1554,7 +1707,7 @@ export function App() {
       if (!owned) throw new Error('This map is inside a game archive or a read-only source. Only loose DS1 files can be deleted.');
       const active = doc && normalizePath(doc.path) === normalizePath(path);
       if (!window.confirm('Delete ' + path + '?\n\n' + (active && doc.dirty ? 'Its unsaved edits will also be discarded.\n' : '') +
-        'A recoverable backup will be kept beside DS1 Studio in Deleted DS1s. Game table references are unchanged. If this overrides a base-game map, the base version will become visible.')) return;
+        'A recoverable backup will be kept in DS1 Studio’s data folder (Asset backups). Game table references are unchanged. If this overrides a base-game map, the base version will become visible.')) return;
       await archiveAsset(owned, await gd.fs.readOrThrow(path), 'delete');
       if (active && currentContext.current.doc === doc) {
         ++mapRequest.current;
@@ -1699,6 +1852,81 @@ export function App() {
       return newPath;
     },
     [gd, map, data, writeFiles, applyDt1s, notify],
+  );
+
+  /** Which the hide-area dialog sets up by default: roof or wall hiding (the same game feature). */
+  const [popsKind, setPopsKind] = useState<'roof' | 'wall'>('roof');
+  /** Tile files whose paths are too long, being renamed (from the compatibility check). */
+  const [shortenPaths, setShortenPaths] = useState<string[] | null>(null);
+  /**
+   * Moves tile files (paths relative to data/global/tiles) to shorter paths: writes each at its new path, points every
+   * LvlTypes / LvlPrest row at it, retires the old file, and reopens the map (at its new path when it moved).
+   */
+  const moveTileFiles = useCallback(
+    async (renames: { from: string; to: string }[]) => {
+      const target = data.status === 'ready' ? data.saveTarget : null;
+      if (!gd || !map || !doc || !target) throw new Error('No writable mod folder is configured.');
+      if (!renames.length) return;
+      const full = (rel: string) => `data/global/tiles/${rel}`;
+      const movesMap = renames.find((r) => normalizePath(full(r.from)) === normalizePath(map.path));
+      if (movesMap && doc.dirty) {
+        await handlers.current.save();
+        if (doc.dirty) throw new Error('Save the map first (it is one of the files being moved).');
+      }
+      const writes: { path: string; bytes: Uint8Array }[] = [];
+      for (const r of renames) {
+        if (gd.fs.locate(full(r.to))) throw new Error(`${r.to} already exists.`);
+        const bytes = await gd.fs.read(full(r.from));
+        if (!bytes) throw new Error(`${r.from} was not found.`);
+        writes.push({ path: full(r.to), bytes });
+      }
+      let types = await loadTable(gd.fs, 'LvlTypes.txt');
+      let prest = await loadTable(gd.fs, 'LvlPrest.txt');
+      const changedTypes: string[] = [];
+      const changedPrest: string[] = [];
+      for (const r of renames) {
+        if (types) {
+          const t = renameInLvlTypes(types, r.from, r.to);
+          types = t.doc;
+          changedTypes.push(...t.changed.filter((c) => !changedTypes.includes(c)));
+        }
+        if (prest) {
+          const p = renameInLvlPrest(prest, r.from, r.to);
+          prest = p.doc;
+          changedPrest.push(...p.changed.filter((c) => !changedPrest.includes(c)));
+        }
+      }
+      if (types && changedTypes.length) writes.push({ path: 'data/global/excel/LvlTypes.txt', bytes: serializeTxtTable(types) });
+      if (prest && changedPrest.length) writes.push({ path: 'data/global/excel/LvlPrest.txt', bytes: serializeTxtTable(prest) });
+      await writeFiles(writes);
+      let retired = 0;
+      if (target.retire)
+        for (const r of renames) {
+          const at = gd.fs.exactPath(full(r.from)) ?? full(r.from);
+          await target.retire(full(r.from));
+          gd.fs.forget(at);
+          retired++;
+        }
+      const swapped = (p: string) => {
+        const r = renames.find((x) => normalizePath(full(x.from)) === normalizePath(p));
+        return r ? full(r.to) : p;
+      };
+      if (movesMap) {
+        const next = await reloadTables();
+        await open(full(movesMap.to), true, next);
+      } else {
+        const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => swapped(l.path));
+        await applyDt1s(libs, { keepOpen: true });
+      }
+      notify(
+        `Moved ${renames.length} file${renames.length === 1 ? '' : 's'} to shorter paths` +
+          (changedTypes.length ? `; level types updated: ${changedTypes.join(', ')}` : '') +
+          (changedPrest.length ? `; presets updated: ${changedPrest.join(', ')}` : '') +
+          (retired ? '; the old files are kept aside' : '; the old files are still there (nothing loads them any more)'),
+      );
+      setTimeout(() => void runCheckRef.current(), 300);
+    },
+    [gd, map, doc, data, writeFiles, reloadTables, open, applyDt1s, notify],
   );
 
   /**
@@ -2328,6 +2556,60 @@ export function App() {
     },
     [gd, writeFiles, notify],
   );
+  /** Presets panel's right-click menu: rename / recategorise (written under the new name, the old file retired), duplicate, delete. */
+  const retirePresetFile = useCallback(
+    async (p: Preset) => {
+      const target = data.status === 'ready' ? data.saveTarget : null;
+      const file = p.file ?? presetPath(p);
+      if (!gd || !target?.retire) throw new Error('This mod folder cannot move files aside.');
+      await target.retire(file);
+      gd.fs.forget(gd.fs.exactPath(file) ?? file);
+    },
+    [gd, data],
+  );
+  const updatePreset = useCallback(
+    async (p: Preset, change: { name?: string; category?: string }) => {
+      try {
+        if (!gd) return;
+        const next: Preset = { ...p, ...change, file: undefined };
+        const to = presetPath(next);
+        await writeFiles([{ path: to, bytes: serializePreset(next) }]);
+        if (normalizePath(to) !== normalizePath(p.file ?? presetPath(p))) await retirePresetFile(p);
+        setPresets(await loadPresets(gd));
+        notify(change.name ? `Renamed the preset to "${change.name}"` : `Moved "${p.name}" to ${change.category}`);
+      } catch (e) {
+        notify(errorMessage(e), true);
+      }
+    },
+    [gd, writeFiles, retirePresetFile, notify],
+  );
+  const duplicatePreset = useCallback(
+    async (p: Preset) => {
+      try {
+        if (!gd) return;
+        const copy: Preset = { ...p, name: `${p.name} copy`, id: Math.random().toString(36).slice(2, 10), file: undefined };
+        await writeFiles([{ path: presetPath(copy), bytes: serializePreset(copy) }]);
+        setPresets(await loadPresets(gd));
+        notify(`Duplicated as "${copy.name}"`);
+      } catch (e) {
+        notify(errorMessage(e), true);
+      }
+    },
+    [gd, writeFiles, notify],
+  );
+  const deletePreset = useCallback(
+    async (p: Preset) => {
+      try {
+        if (!gd) return;
+        await retirePresetFile(p);
+        setPresets(await loadPresets(gd));
+        notify(`Deleted the preset "${p.name}" (its file is kept aside as a backup)`);
+      } catch (e) {
+        notify(errorMessage(e), true);
+      }
+    },
+    [gd, retirePresetFile, notify],
+  );
   /** Save as preset: the block to save (a selection, or what was copied) and its suggested name. */
   const [presetSave, setPresetSave] = useState<{ clip: Clipboard; name: string } | null>(null);
   const saveSelectionPreset = useCallback(async () => {
@@ -2445,6 +2727,8 @@ export function App() {
             if (!fix.edit) return armWarpTile(fix.vis);
             setWarpInit({ target: fix.toTown ?? 0, place: fix.place });
             return setWarpEdit(fix.vis);
+          case 'shorten-paths':
+            return setShortenPaths(fix.paths);
           case 'keep': {
             // "Keep it as it is": remembered for this map, so the check doesn't ask again.
             const kept = keptAnswers();
@@ -2823,8 +3107,20 @@ export function App() {
           }
           return;
         }
-        if (tool === 'object') setSelectedObject(null);
-        else if (stack && stack.index >= 0) setStack({ ...stack, index: -1 });
+        const nothing = tool === 'object' ? selectedObject === null : !selection && !stack;
+        if (nothing && map && doc) {
+          // Nothing left to cancel: offer to close the map.
+          void leaveMap(true).then((ok) => {
+            if (!ok) return;
+            setMap(null);
+            setDoc(null);
+          });
+          return;
+        }
+        if (tool === 'object') {
+          setSelectedObject(null);
+          setObjectGroup(null);
+        } else if (stack && stack.index >= 0) setStack({ ...stack, index: -1 });
         else {
           setSelection(null);
           setStack(null);
@@ -2854,9 +3150,9 @@ export function App() {
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView, toggleMode]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView, toggleMode, leaveMap, selectedObject, selection, map]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
-  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu || clearingAutomap || presetBuilder || !!presetSave || !!pasteOffer || presetImportBusy };
+  keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu || clearingAutomap || presetBuilder || !!presetSave || !!pasteOffer || presetImportBusy || !!unsavedAsk || prefsOpen };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -2972,6 +3268,7 @@ export function App() {
               ],
             },
             ...(isTauri ? [{ label: 'Folders…', icon: <FolderCog />, onClick: () => confirmDiscard() && setChangingFolders(true), size: 'sm' as const, title: 'The game and mod folders DS1 Studio works with' }] : []),
+            { label: 'Preferences…', icon: <Settings />, onClick: () => setPrefsOpen(true), size: 'sm' as const, title: 'Save before opening another map, and other preferences' },
           ],
         },
         {
@@ -3120,7 +3417,10 @@ export function App() {
         },
         {
           label: 'Buildings',
-          items: [{ label: 'Roof hiding…', icon: <House />, onClick: () => setDialog('pops'), disabled: noMap, title: 'Make roofs (or other tiles) disappear when a player walks into a building' }],
+          items: [
+            { label: 'Roof hiding…', icon: <House />, onClick: () => { setPopsKind('roof'); setDialog('pops'); }, disabled: noMap, title: 'Make roofs (or other tiles) disappear when a player walks into a building' },
+            { label: 'Wall hiding…', icon: <BrickWall />, onClick: () => { setPopsKind('wall'); setDialog('pops'); }, disabled: noMap, title: 'Make walls in front of a room (the south and east walls) disappear while a player is inside it' },
+          ],
         },
       ],
     },
@@ -3358,6 +3658,13 @@ export function App() {
           );
         })()}
         {map && scene && viewMode === 'automap' && <AutomapLegend style={automapStyle} />}
+        {pasteDoomed && (
+          <div className={`paste-doomed${pasteDoomed.length ? ' bad' : ''}`} role="status">
+            {pasteDoomed.length
+              ? `Placing here replaces ${pasteDoomed.reduce((n, c) => n + c.n, 0)} existing tile${pasteDoomed.reduce((n, c) => n + c.n, 0) === 1 ? '' : 's'} (red cells) · hold Alt when clicking to stack instead`
+              : 'Placing here replaces no existing tiles'}
+          </div>
+        )}
         {map && !rightCollapsed && (
           <button className="stage-fold" onClick={() => setRightCollapsed(true)} title="Fold the side panels away (more room for the map)">
             <PanelRightClose size={15} />
@@ -3382,9 +3689,12 @@ export function App() {
             objectLabel={objectLabel}
             objectGhost={objectPasting && tool === 'object' ? objectClip : null}
             selectedObject={selectedObject}
+            selectedObjects={objectGroup}
+            onDoubleClick={selectSameObjects}
             sprites={sprites}
             animations={animations}
             marks={marks}
+            doomed={pasteDoomed}
             resizeMode={resizeMode}
             onResize={(d) => {
               resize(d);
@@ -3398,6 +3708,7 @@ export function App() {
             onContextMenu={(at, cell, world) => setMapMenu({ at, cell, world })}
             gameView={{ ...gameView, width: gameSize[0], height: gameSize[1] }}
             focus={focus}
+            areaLayer={areaLayer}
             hittable={hittable}
             onCycle={cycleStack}
             automap={automapView}
@@ -3545,7 +3856,10 @@ export function App() {
                   setMarks(cells);
                   notify(`${cells.length} markers marked · Esc to clear`);
                 }}
-                onSetUp={() => setDialog('pops')}
+                onSetUp={() => {
+                  setPopsKind('roof');
+                  setDialog('pops');
+                }}
               />
             )}
           </ModeFrame>
@@ -3654,6 +3968,9 @@ export function App() {
                 onSaveSelection={() => void saveSelectionPreset()}
                 onSavePreset={(p) => void savePreset(p).catch(e => notify(String(e), true))}
                 onBuild={() => setPresetBuilder(true)}
+                onUpdate={(p, change) => void updatePreset(p, change)}
+                onDuplicate={(p) => void duplicatePreset(p)}
+                onDelete={(p) => void deletePreset(p)}
                 onSuggest={() => void suggest()}
               />
             )}
@@ -3781,7 +4098,28 @@ export function App() {
         />
       )}
 
-      {dialog === 'new' && <NewMapDialog onCreate={createMap} onClose={() => setDialog(null)} />}
+      {dialog === 'new' && <NewMapDialog types={data.status === 'ready' ? data.gd.lvlTypes : []} onCreate={createMap} onClose={() => setDialog(null)} />}
+      {shortenPaths && (
+        <ShortenPathsDialog
+          paths={shortenPaths}
+          max={MAX_TILE_PATH}
+          suggest={(rel) => suggestShortPath(rel, MAX_TILE_PATH)}
+          onApply={moveTileFiles}
+          onClose={() => setShortenPaths(null)}
+        />
+      )}
+      {unsavedAsk && doc && (
+        <UnsavedPrompt
+          name={doc.path.split('/').pop() ?? 'this map'}
+          dirty={doc.dirty}
+          closing={unsavedAsk.closing}
+          onChoose={(c) => {
+            unsavedAsk.resolve(c);
+            setUnsavedAsk(null);
+          }}
+        />
+      )}
+      {prefsOpen && <PreferencesDialog prefs={prefs} onChange={setPrefs} onClose={() => setPrefsOpen(false)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
@@ -3891,6 +4229,31 @@ export function App() {
                   <li key={p}>{p.replace(/^data\/global\/tiles\//i, '')}</li>
                 ))}
               </ul>
+              {pasteNameClashes.size > 0 && (
+                <div className="imp-callout small">
+                  <span>
+                    <b>Same name as a DT1 this map already has.</b> Two tile libraries with one file name get mixed up (a DS1 lists its libraries by name), so
+                    tiles can be drawn from the wrong one. Rename the pasted {pasteNameClashes.size === 1 ? 'one' : 'ones'} (a copy is saved next to it under
+                    the new name and added instead):
+                  </span>
+                  {[...pasteNameClashes].map(([p, twin]) => {
+                    const v = pasteRenames[p] ?? '';
+                    const dir = p.slice(0, p.lastIndexOf('/') + 1);
+                    const bad = !/^[A-Za-z0-9_-]+$/.test(v) ? 'letters, digits, - and _ only' : gd?.fs.locate(`${dir}${v}.dt1`) ? 'already exists' : null;
+                    return (
+                      <label key={p} className="form-row">
+                        <span className="mono" title={`clashes with ${twin}`}>
+                          {p.split('/').pop()} →
+                        </span>
+                        <span className="inline">
+                          <input className="text-input mono" value={v} spellCheck={false} onKeyDown={(e) => e.stopPropagation()} onChange={(e) => setPasteRenames({ ...pasteRenames, [p]: e.target.value.trim() })} />
+                          .dt1 {bad && <span className="error-text">{bad}</span>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
               <p className="muted small">Adding them loads them for this map (and updates LvlTypes.txt / Dt1Mask when the map is in LvlPrest.txt).</p>
             </>
           ) : (
@@ -3917,12 +4280,31 @@ export function App() {
                 disabled={presetImportBusy || !canWrite}
                 onClick={async () => {
                   const o = pasteOffer;
+                  // Renamed copies for the ones whose name is taken.
+                  const add: string[] = [];
+                  try {
+                    for (const p of o.dt1s) {
+                      const to = pasteNameClashes.has(p) ? `${p.slice(0, p.lastIndexOf('/') + 1)}${pasteRenames[p]}.dt1` : null;
+                      if (!to) {
+                        add.push(p);
+                        continue;
+                      }
+                      if (!/^[A-Za-z0-9_-]+$/.test(pasteRenames[p] ?? '') || gd?.fs.locate(to)) throw new Error(`Choose another name for ${p.split('/').pop()}.`);
+                      const bytes = await gd!.fs.read(p);
+                      if (!bytes) throw new Error(`${p} was not found.`);
+                      await writeFiles([{ path: to, bytes }]);
+                      add.push(to);
+                    }
+                  } catch (e) {
+                    return notify(errorMessage(e), true);
+                  }
                   setPasteOffer(null);
-                  await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...o.dt1s]);
+                  await applyDt1s([...map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), ...add]);
+                  if (add.length !== o.dt1s.length || add.some((a, i) => a !== o.dt1s[i])) notify(`Added ${add.map((a) => a.split('/').pop()).join(', ')}`);
                   beginPaste(o.clip, o.label, true);
                 }}
               >
-                Add {pasteOffer.dt1s.length} DT1{pasteOffer.dt1s.length === 1 ? '' : 's'} and paste
+                {pasteNameClashes.size ? 'Rename, add and paste' : `Add ${pasteOffer.dt1s.length} DT1${pasteOffer.dt1s.length === 1 ? '' : 's'} and paste`}
               </button>
             )}
           </div>
@@ -3956,6 +4338,7 @@ export function App() {
       ))}
  {dialog === 'pops' && map && doc && (
         <PopsDialog
+          kind={popsKind}
           map={map}
           areas={popAreas}
           preset={popPreset ? { pops: popPreset.pops, popPad: popPreset.popPad } : null}
@@ -4160,7 +4543,15 @@ export function App() {
             setDialog(null);
             setRegisterInitial(undefined);
           }}
-          initial={registerInitial}
+          initial={
+            registerInitial ??
+            (() => {
+              const chosen = newMapTypes.current.get(normalizePath(doc.path));
+              if (!chosen) return undefined;
+              if (chosen.typeId === null) return { mode: 'new' as const, newType: true };
+              return { mode: 'new' as const, levelId: data.gd.levelsOfType(chosen.typeId)[0], newType: false };
+            })()
+          }
         />
       )}
       {historyBusy && <div className="modal-backdrop" role="status" style={{ zIndex: 1000 }}><div className="modal">Updating history…</div></div>}

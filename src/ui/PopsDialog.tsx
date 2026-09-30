@@ -20,14 +20,20 @@ interface Props {
   onSetTables: (pops: number, popPad: number) => Promise<void>;
   onShow: (area: PopArea) => void;
   onClose: () => void;
+  /** What a new area hides by default: the roofs, or the walls (e.g. the south walls in front of the inside). */
+  kind?: 'roof' | 'wall';
 }
+
+/** Wall orientations (upper and lower walls, doors, pillars): what wall hiding fades. */
+const isWallKind = (o: number) => (o >= Orientation.LeftWall && o <= 9) || o === 12 || (o >= 16 && o <= 19);
 
 /**
  * Roof hiding: the game fades roofs (or any wall-layer tiles) while a player is inside a marked rectangle ("pops", see
  * game/pops.ts). Lists the map's areas and what's wrong with them, and makes a new one from the selection: pick the
  * kinds of tiles to hide and DS1 Studio places the corner markers and sets LvlPrest's Pops/PopPad.
  */
-export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, onRemove, onSetTables, onShow, onClose }: Props) {
+export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, onRemove, onSetTables, onShow, onClose, kind = 'roof' }: Props) {
+  const walls = kind === 'wall';
   const { ds1 } = map;
   const problems = useMemo(() => popProblems(ds1, areas, preset?.pops ?? null, preset?.popPad ?? 0), [ds1, areas, preset]);
   const [popPad, setPopPad] = useState(() => (preset && (preset.pops > 0 || preset.popPad !== 0) ? preset.popPad : -4));
@@ -51,11 +57,18 @@ export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, o
           if (c.orientation === Orientation.Roof) e.sample = { o: c.orientation, sub: c.subIndex };
         }
     });
-    return [...byMain.values()].sort((a, b) => Number(b.kinds.has(Orientation.Roof)) - Number(a.kinds.has(Orientation.Roof)) || b.count - a.count);
-  }, [ds1, selection]);
+    const wanted = (e: { kinds: Map<number, number> }) => (walls ? [...e.kinds.keys()].some(isWallKind) && !e.kinds.has(Orientation.Roof) : e.kinds.has(Orientation.Roof));
+    return [...byMain.values()].sort((a, b) => Number(wanted(b)) - Number(wanted(a)) || b.count - a.count);
+  }, [ds1, selection, walls]);
   const [picked, setPicked] = useState<Set<number> | null>(null);
-  // Default: the roofs.
-  const chosen = picked ?? new Set(candidates.filter((c) => c.kinds.has(Orientation.Roof)).map((c) => c.main));
+  // Default: the roofs (wall hiding: the walls, at most 4 kinds, the most common first).
+  const chosen =
+    picked ??
+    new Set(
+      (walls ? candidates.filter((c) => [...c.kinds.keys()].some(isWallKind) && !c.kinds.has(Orientation.Roof)).slice(0, 4) : candidates.filter((c) => c.kinds.has(Orientation.Roof))).map(
+        (c) => c.main,
+      ),
+    );
   const targets = candidates.filter((c) => chosen.has(c.main)).map((c) => c.main);
   const plan = selection && targets.length ? planPops(ds1, selection, targets) : null;
   const newCount = Math.max(preset?.pops ?? 0, areas.length + targets.length);
@@ -79,7 +92,13 @@ export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, o
 
   const popsFix = preset && areas.length && preset.pops < areas.length ? areas.length : null;
   return (
-    <Modal title="Roof hiding" onClose={onClose} wide>
+    <Modal title={walls ? 'Wall hiding' : 'Roof hiding'} onClose={onClose} wide>
+      {walls && (
+        <p className="small">
+          <b>Wall hiding</b> fades walls (usually the south and east walls in front of a room, which would block the view) while a player stands inside,
+          the same way roofs fade: it uses the same hide areas, just ticking the walls instead of the roof.
+        </p>
+      )}
       <p className="small">
         The game fades roofs (or any tiles on the wall layers) while a player is inside a building. A <b>hide area</b> is marked by two special tiles at
         opposite corners of the inside; they name which tiles fade by their <i>main index</i>, and every such tile in the area (one cell around it
@@ -124,7 +143,7 @@ export function PopsDialog({ map, areas, preset, selection, canSave, onCreate, o
       <div className="field-label">New hide area</div>
       {!selection ? (
         <p className="small">
-          With the Select tool, drag over the <b>inside</b> of the building — the floor a player walks on — then open Roof hiding again (Map tab).
+          With the Select tool, drag over the <b>inside</b> of the building — the floor a player walks on — then open {walls ? 'Wall' : 'Roof'} hiding again (Map tab).
         </p>
       ) : (
         <>

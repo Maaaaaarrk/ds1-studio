@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ResizeDelta } from '../formats/ds1ops';
+import type { LvlTypeInfo } from '../game/GameData';
+import { HelpTip } from './HelpTip';
 
 export function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
@@ -46,6 +48,8 @@ export interface NewMapChoice {
   floorLayers: number;
   wallLayers: number;
   tagType: number;
+  /** null: a new level type (made when it is added to the game); else an existing LvlTypes Id whose tiles it starts with. */
+  lvlType: number | null;
 }
 
 /**
@@ -53,7 +57,9 @@ export interface NewMapChoice {
  * colours so tiles from every act look as they will anywhere. The act is the one the game will give the level: Add
  * to game makes new levels Act 5 levels.
  */
-export function NewMapDialog({ onCreate, onClose }: { onCreate: (c: NewMapChoice) => void; onClose: () => void }) {
+export function NewMapDialog({ types, onCreate, onClose }: { types: LvlTypeInfo[]; onCreate: (c: NewMapChoice) => void; onClose: () => void }) {
+  const [typeMode, setTypeMode] = useState<'new' | 'existing'>('new');
+  const [typeId, setTypeId] = useState<number | null>(null);
   const [act, setAct] = useState(4);
   const [path, setPath] = useState('data/global/tiles/expansion/Custom/newmap.ds1');
   const [width, setWidth] = useState(150);
@@ -61,7 +67,12 @@ export function NewMapDialog({ onCreate, onClose }: { onCreate: (c: NewMapChoice
   const [floorLayers, setFloorLayers] = useState(1);
   const [wallLayers, setWallLayers] = useState(2);
   const [tag, setTag] = useState(false);
-  const valid = /^data\/global\/tiles\/.+\.ds1$/i.test(path);
+  const valid = /^data\/global\/tiles\/.+\.ds1$/i.test(path) && (typeMode === 'new' || typeId !== null);
+  const pickType = (id: number) => {
+    setTypeId(id);
+    const t = types.find((x) => x.id === id);
+    if (t?.act) pickAct(Math.min(4, Math.max(0, t.act - 1)));
+  };
   const pickAct = (a: number) => {
     setAct(a);
     setPath((p) => p.replace(/^data\/global\/tiles\/[^/]+\//i, `data/global/tiles/${ACT_DIRS[a]}/`));
@@ -79,6 +90,36 @@ export function NewMapDialog({ onCreate, onClose }: { onCreate: (c: NewMapChoice
           <IntInput value={width} onChange={setWidth} min={1} max={256} /> × <IntInput value={height} onChange={setHeight} min={1} max={256} /> tiles
         </div>
       </div>
+      <div className="form-row">
+        <span>Level type</span>
+        <div className="inline">
+          <label className="mini-check">
+            <input type="radio" checked={typeMode === 'new'} onChange={() => setTypeMode('new')} /> (New Lvltype)
+          </label>
+          <HelpTip text="The map starts with no tile libraries: choose any from any act. Game → Add to game gives it a level type of its own (a new LvlTypes.txt row) listing just the tile libraries it uses, so no other level is affected." />
+          <label className="mini-check">
+            <input type="radio" checked={typeMode === 'existing'} onChange={() => setTypeMode('existing')} /> (Choose Existing)
+          </label>
+          <HelpTip text="The map starts with an existing level type's tile libraries (LvlTypes.txt), in that act's colours: paint with the tiles that type already loads. Game → Add to game uses that type; if you add libraries it doesn't list, the map gets its own type then instead of changing the shared one." />
+        </div>
+      </div>
+      {typeMode === 'existing' && (
+        <label className="form-row">
+          <span>Existing type</span>
+          <select value={typeId ?? ''} onChange={(e) => pickType(Number(e.target.value))}>
+            <option value="" disabled>
+              Choose…
+            </option>
+            {types.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.id} · {t.name}
+                {t.act ? ` (Act ${t.act}` : ' ('}
+                {`${t.act ? ', ' : ''}${t.files.filter(Boolean).length} tile libraries)`}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="form-row">
         <span>Act</span>
         <select value={act} onChange={(e) => pickAct(Number(e.target.value))}>
@@ -109,7 +150,7 @@ export function NewMapDialog({ onCreate, onClose }: { onCreate: (c: NewMapChoice
         <button className="btn" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn primary" disabled={!valid} onClick={() => onCreate({ path, width, height, act, floorLayers, wallLayers, tagType: tag ? 1 : 0 })}>
+        <button className="btn primary" disabled={!valid} onClick={() => onCreate({ path, width, height, act, floorLayers, wallLayers, tagType: tag ? 1 : 0, lvlType: typeMode === 'existing' ? typeId : null })}>
           Create
         </button>
       </div>
@@ -181,6 +222,138 @@ export function ResizeDialog({ width, height, onResize, onClose }: { width: numb
         </button>
         <button className="btn primary" disabled={w < 1 || h < 1 || (w === width && h === height)} onClick={() => onResize(d)}>
           Resize
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Unsaved changes: save, discard or cancel (before opening another map, or closing this one). */
+export function UnsavedPrompt({ name, dirty, closing, onChoose }: { name: string; dirty: boolean; closing: boolean; onChoose: (c: 'save' | 'discard' | 'cancel') => void }) {
+  return (
+    <Modal title={closing ? `Close ${name}?` : `Unsaved changes in ${name}`} onClose={() => onChoose('cancel')}>
+      <p className="small">
+        {dirty
+          ? closing
+            ? `${name} has unsaved changes.`
+            : `${name} has unsaved changes. Save them before opening the other map?`
+          : `${name} has no unsaved changes.`}
+      </p>
+      <div className="modal-actions">
+        <button className="btn" onClick={() => onChoose('cancel')}>
+          Cancel
+        </button>
+        {dirty && (
+          <button className="btn danger" onClick={() => onChoose('discard')}>
+            {closing ? 'Discard and close' : 'Discard changes'}
+          </button>
+        )}
+        <button className="btn primary" autoFocus onClick={() => onChoose('save')}>
+          {closing ? (dirty ? 'Save and close' : 'Close') : 'Save'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Preferences, remembered on this computer. */
+export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: import('./prefs').Prefs; onChange: (patch: Partial<import('./prefs').Prefs>) => void; onClose: () => void }) {
+  return (
+    <Modal title="Preferences" onClose={onClose}>
+      <label className="pref-row">
+        <input type="checkbox" checked={prefs.saveOnSwitch} onChange={(e) => onChange({ saveOnSwitch: e.target.checked })} />
+        <span>
+          <b>Save automatically before opening another map</b>
+          <span className="muted small">
+            {' '}
+            (on by default). Off: opening another map with unsaved changes asks you to save or discard them.
+          </span>
+        </span>
+      </label>
+      <div className="modal-actions">
+        <button className="btn primary" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Tile files whose paths are too long for the game, listed together to rename: the files move and every LvlTypes /
+ * LvlPrest row naming them is updated (the old files are kept aside).
+ */
+export function ShortenPathsDialog({ paths, max, suggest, onApply, onClose }: {
+  paths: string[];
+  max: number;
+  suggest: (rel: string) => string;
+  onApply: (renames: { from: string; to: string }[]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [names, setNames] = useState(() => paths.map(suggest));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const clean = names.map((n) => n.trim().replace(/\\/g, '/').replace(/^\/+/, ''));
+  const problem = (i: number): string | null => {
+    const n = clean[i];
+    const ext = paths[i].slice(paths[i].lastIndexOf('.')).toLowerCase();
+    if (!n) return 'Give it a path.';
+    if (n.length > max) return `${n.length - max} too many`;
+    if (!n.toLowerCase().endsWith(ext)) return `Keep the ${ext} ending`;
+    if (clean.some((o, j) => j !== i && o.toLowerCase() === n.toLowerCase())) return 'Two files would share this path';
+    return null;
+  };
+  const ok = clean.every((_, i) => !problem(i));
+  return (
+    <Modal title="Shorten long tile paths" wide onClose={() => !busy && onClose()}>
+      <p className="small">
+        The game copies each tile path into a buffer that holds {max} characters after <code>data\global\tiles\</code>; a longer one can crash it or fail to load.
+        Give these files shorter paths: each is moved, and every LvlTypes.txt and LvlPrest.txt row that names it is updated (the old file and tables are kept as
+        backups).
+      </p>
+      <table className="shorten-table">
+        <thead>
+          <tr>
+            <th>Now</th>
+            <th>New path (in data/global/tiles)</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {paths.map((p, i) => {
+            const bad = problem(i);
+            return (
+              <tr key={p}>
+                <td className="mono small" title={p}>
+                  {p} <span className="muted">({p.length})</span>
+                </td>
+                <td>
+                  <input className="mono" value={names[i]} spellCheck={false} onChange={(e) => setNames(names.map((n, j) => (j === i ? e.target.value : n)))} />
+                </td>
+                <td className={`small ${bad ? 'bad' : 'good'}`}>{bad ?? `${clean[i].length} / ${max}`}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {error && <p className="small bad">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn" disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn primary"
+          disabled={!ok || busy}
+          onClick={() => {
+            setBusy(true);
+            setError(null);
+            onApply(paths.map((from, i) => ({ from, to: clean[i] })).filter((r) => r.from !== r.to))
+              .then(onClose)
+              .catch((e) => setError(String(e?.message ?? e)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? 'Renaming…' : `Rename ${paths.length === 1 ? 'it' : `all ${paths.length}`}`}
         </button>
       </div>
     </Modal>

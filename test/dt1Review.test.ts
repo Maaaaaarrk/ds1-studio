@@ -3,7 +3,7 @@ import { newDs1 } from '../src/formats/ds1ops';
 import { Orientation, parseDt1 } from '../src/formats/dt1';
 import { blockerRecord, buildDt1 } from '../src/formats/dt1Write';
 import { getCell, parseTxtTable } from '../src/formats/txtTable';
-import { cellsUsing, mapTileUsage, renameInLvlTypes, tileKey, typesUsing, withoutTile } from '../src/game/dt1Review';
+import { cellsUsing, mapTileUsage, renameInLvlPrest, renameInLvlTypes, suggestShortPath, tileKey, typesUsing, withoutTile } from '../src/game/dt1Review';
 
 describe('reviewing a map’s tile libraries', () => {
   const ds1 = newDs1({ width: 4, height: 4, act: 0, floorLayers: 1, wallLayers: 1, tagType: 0, files: [] });
@@ -40,5 +40,25 @@ describe('reviewing a map’s tile libraries', () => {
     expect(getCell(doc, 1, 'File 1')).toBe('PD2assets/custom/New.dt1');
     expect(getCell(doc, 0, 'File 1')).toBe('Act1/x.dt1');
     expect(typesUsing([{ id: 1, name: 'A', files: ['Act1/x.dt1'] }, { id: 2, name: 'B', files: ['act1/X.dt1', ''] }], 'data/global/tiles/act1/x.dt1')).toEqual(['1 A', '2 B']);
+  });
+
+  it('points every LvlPrest File column naming a map at its new path', () => {
+    const prest = parseTxtTable(new TextEncoder().encode('Name\tDef\tFile1\tFile2\tFile3\tFile4\tFile5\tFile6\r\nA\t0\tPD2/Long/map.ds1\t0\t0\t0\t0\t0\r\nB\t1\tother.ds1\tpd2/long/MAP.ds1\t0\t0\t0\t0\r\n'));
+    const { doc, changed } = renameInLvlPrest(prest, 'PD2/Long/map.ds1', 'PD2/m.ds1');
+    expect(changed).toEqual(['0 A', '1 B']);
+    expect(getCell(doc, 0, 'File1')).toBe('PD2/m.ds1');
+    expect(getCell(doc, 1, 'File2')).toBe('PD2/m.ds1');
+    expect(getCell(doc, 1, 'File1')).toBe('other.ds1');
+  });
+
+  it('suggests a path that fits the game’s limit, cutting the file name first', () => {
+    expect(suggestShortPath('PD2assets/custom/short.dt1', 41)).toBe('PD2assets/custom/short.dt1');
+    const s = suggestShortPath('PD2assets/custom/a_very_long_house_name_here.dt1', 41);
+    expect(s.length).toBeLessThanOrEqual(41);
+    expect(s.startsWith('PD2assets/custom/')).toBe(true);
+    expect(s.endsWith('.dt1')).toBe(true);
+    const d = suggestShortPath('an/extremely/long/folder/structure/that/cannot/fit/x.dt1', 41);
+    expect(d.length).toBeLessThanOrEqual(41);
+    expect(d.endsWith('.dt1')).toBe(true);
   });
 });

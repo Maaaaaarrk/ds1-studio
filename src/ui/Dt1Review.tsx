@@ -205,13 +205,13 @@ export function MapDt1Review({ map, gd, ds1, usage, modRoot, onApply, onShowCell
                     <button
                       className="btn small danger"
                       disabled={busy || !!cantChange}
-                      title={cantChange ?? 'Remove this whole tile group, keeping a recoverable original in Deleted DT1s'}
+                      title={cantChange ?? 'Remove this whole tile group, keeping a recoverable original in Asset backups'}
                       onClick={() => {
                         const lines = [
                           `Take tile #${index} (${tile.mainIndex}/${tile.subIndex}) out of ${short(selected)}?`,
                           uses ? `\nThis map places it in ${uses} cell${uses === 1 ? '' : 's'}: ${uses === 1 ? 'it' : 'they'} will show as missing unless another variant remains.` : '',
                           otherTypes.length ? `\nOther level types load this DT1 too (${otherTypes.join(', ')}): their maps lose the tile as well.` : '',
-                          '\nEvery animation frame and random variant in this tile group is removed together. The original is kept in Deleted DT1s beside the app. Use “Deleted by accident?” to restore it.',
+                          '\nEvery animation frame and random variant in this tile group is removed together. The original is kept in DS1 Studio’s data folder (Asset backups). Use “Deleted by accident?” to restore it.',
                         ];
                         if (window.confirm(lines.join(''))) void run(() => onRemoveTile(selected, index));
                       }}

@@ -242,7 +242,10 @@ function removeAutomapMatches(doc: TxtTableDoc, level: string, code: string, sty
     const start = Number(row[3]), end = Number(row[4]) < 0 ? start : Number(row[4]);
     if (scope === 'seq' && start >= 0 && (sub < start || sub > end)) { rows.push(row); continue; }
     // Wildcards cannot always be split into signed-byte ranges losslessly. Local editing normally uses a fresh key.
-    if (Number(row[2]) === -1 || (scope === 'seq' && start < 0)) throw new Error('This automap wildcard cannot be safely split. Use a tile identity outside this wildcard, or edit the wildcard rule explicitly.');
+    if (Number(row[2]) === -1 || (scope === 'seq' && start < 0))
+      throw new Error(
+        `This tile gets its automap piece from a wildcard rule for every ${Number(row[2]) === -1 ? 'style' : 'sequence'} of ${code} tiles in ${level}, which can't be split safely. Choose "Only this cell" to clear just this cell (it gets a tile of its own with no piece), or change that rule in the Automap editor.`,
+      );
     if (scope === 'seq') {
       if (start < sub) { const left = row.slice(); left[4] = String(sub - 1); rows.push(left); }
       if (end > sub) { const right = row.slice(); right[3] = String(sub + 1); rows.push(right); }
