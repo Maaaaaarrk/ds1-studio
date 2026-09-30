@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decodeCell, isEmptyCell, withTile, type Ds1 } from '../src/formats/ds1';
-import { addToSelection, cellKey, clearEdits, copyRect, inSelection, pasteEdits, selectionCount, selectionMask, type CellSelection } from '../src/game/clipboard';
+import { addToSelection, cellKey, cellsToSelection, clearEdits, copyRect, fitSelection, inSelection, pasteEdits, removeFromSelection, selectionCount, selectionMask, type CellSelection } from '../src/game/clipboard';
 import { objectInRect, rectCells } from '../src/game/editTools';
 import { MapDocument } from '../src/game/MapDocument';
 
@@ -50,5 +50,26 @@ describe('irregular selections (Shift+click / Shift+drag add to the selection)',
     expect(clip.objects!.map((o) => o.id)).toEqual([2]);
     const pasted = pasteEdits(doc, clip, 0, 3).filter((e) => e.layer.kind === 'floor');
     expect(pasted.map((e) => [e.x, e.y])).toEqual([[0, 3], [1, 3], [2, 3], [0, 4]]);
+  });
+});
+
+describe('taking cells out of a selection and fitting it to the map', () => {
+  it('removes a cell from a rectangle, leaving an irregular selection', () => {
+    const s = removeFromSelection({ x0: 0, y0: 0, x1: 2, y1: 1 }, { x0: 1, y0: 1, x1: 1, y1: 1 })!;
+    expect(selectionCount(s)).toBe(5);
+    expect(inSelection(s, 1, 1)).toBe(false);
+    expect(inSelection(s, 2, 1)).toBe(true);
+  });
+  it('shrinks the bounding box and returns null when nothing is left', () => {
+    const s = removeFromSelection({ x0: 0, y0: 0, x1: 2, y1: 2 }, { x0: 0, y0: 1, x1: 2, y1: 2 })!;
+    expect(s).toEqual({ x0: 0, y0: 0, x1: 2, y1: 0 });
+    expect(removeFromSelection({ x0: 3, y0: 3, x1: 3, y1: 3 }, { x0: 3, y0: 3, x1: 3, y1: 3 })).toBeNull();
+  });
+  it('cuts a selection to a smaller map', () => {
+    const inside = { x0: 1, y0: 1, x1: 2, y1: 2 };
+    expect(fitSelection(inside, 10, 10)).toBe(inside);
+    expect(fitSelection({ x0: 5, y0: 5, x1: 12, y1: 6 }, 8, 8)).toEqual({ x0: 5, y0: 5, x1: 7, y1: 6 });
+    expect(fitSelection({ x0: 9, y0: 9, x1: 12, y1: 12 }, 8, 8)).toBeNull();
+    expect(cellsToSelection(new Set([cellKey(1, 1), cellKey(3, 1)]))).toMatchObject({ x0: 1, y0: 1, x1: 3, y1: 1 });
   });
 });

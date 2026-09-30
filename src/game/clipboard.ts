@@ -62,6 +62,40 @@ export function addToSelection(s: CellSelection | null, r: CellRect): CellSelect
   return cells.size === (box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1) ? box : { ...box, cells };
 }
 
+/**
+ * The selection without rectangle `r` (Shift+click on a selected cell takes it out, Shift+drag from one a rectangle).
+ * null when nothing is left.
+ */
+export function removeFromSelection(s: CellSelection, r: CellRect): CellSelection | null {
+  const cells = new Set<number>();
+  for (let y = s.y0; y <= s.y1; y++)
+    for (let x = s.x0; x <= s.x1; x++) if (inSelection(s, x, y) && !(x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1)) cells.add(cellKey(x, y));
+  return cellsToSelection(cells);
+}
+
+/** A selection of exactly these cells (a plain rectangle when they fill their bounding box); null when empty. */
+export function cellsToSelection(cells: Set<number>): CellSelection | null {
+  if (!cells.size) return null;
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -1, -1];
+  for (const k of cells) {
+    const x = k % 65536;
+    const y = Math.floor(k / 65536);
+    [x0, y0, x1, y1] = [Math.min(x0, x), Math.min(y0, y), Math.max(x1, x), Math.max(y1, y)];
+  }
+  const box = { x0, y0, x1, y1 };
+  return cells.size === (x1 - x0 + 1) * (y1 - y0 + 1) ? box : { ...box, cells };
+}
+
+/** The selection cut to a map of this size (after an undo, a restore or a crop); null when none of it is left. */
+export function fitSelection(s: CellSelection | null, width: number, height: number): CellSelection | null {
+  if (!s) return null;
+  if (s.x0 >= 0 && s.y0 >= 0 && s.x1 < width && s.y1 < height) return s;
+  const cells = new Set<number>();
+  for (let y = Math.max(0, s.y0); y <= Math.min(height - 1, s.y1); y++)
+    for (let x = Math.max(0, s.x0); x <= Math.min(width - 1, s.x1); x++) if (inSelection(s, x, y)) cells.add(cellKey(x, y));
+  return cellsToSelection(cells);
+}
+
 /** The selection's cells as a mask over its bounding rectangle, row by row (null for a plain rectangle). */
 export function selectionMask(s: CellSelection): boolean[] | null {
   if (!s.cells) return null;

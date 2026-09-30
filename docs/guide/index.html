@@ -431,7 +431,7 @@
           <figure class="shot"><img src="media/walkability.png" alt="Walkability view" /><figcaption>Walkability (<kbd>W</kbd>): amber blocks walking, red blocks jumping and teleporting too.</figcaption></figure>
           <figure class="shot"><img src="media/rooms.png" alt="Rooms and grid" /><figcaption>Rooms 8×8 (<kbd>R</kbd>) and Grid (<kbd>G</kbd>).</figcaption></figure>
         </div>
-        <p><b>Level light</b> draws the map as brightly and in the colour the game lights the level (Levels.txt Intensity and Red/Green/Blue), and the Map panel changes them.</p>
+        <p><b>Level light</b> draws the map as brightly and in the colour the game lights the level (Levels.txt Intensity and Red/Green/Blue). Its panel changes them with a slider or a number, shows the Levels.txt values underneath, previews every change, and <b>Apply</b> saves them.</p>
         <figure class="shot"><img src="img/mode-light.png" alt="Level light mode" /><figcaption>Level light on the Worldstone Chamber (Intensity 40).</figcaption></figure>
 
         <p><b>Walkable area.</b> The box at the bottom right counts the tiles² a player can stand on, updated as you edit. Its colour tells you roughly how big the level feels:</p>
@@ -515,14 +515,14 @@
 
       <article class="topic" id="selecting">
         <h3><span class="num">3.4</span>Selecting, copying and moving</h3>
-        <p>With Select (<kbd>V</kbd>), drag to select or press <kbd>Ctrl</kbd>+<kbd>A</kbd> for the whole map. <kbd>Shift</kbd>+click and <kbd>Shift</kbd>+drag add to the selection, for any shape. The Selection panel offers Fill, Clear, Clear everything, Copy, Cut, Re-roll and Find &amp; replace.</p>
+        <p>With Select (<kbd>V</kbd>), drag to select or press <kbd>Ctrl</kbd>+<kbd>A</kbd> for the whole map. <kbd>Shift</kbd>+click and <kbd>Shift</kbd>+drag add to the selection, for any shape; <kbd>Shift</kbd>+click a selected cell to take it out. Undo keeps the selection. The Selection panel offers Fill, Clear, Clear everything, Copy, Cut, Re-roll and Find &amp; replace.</p>
         <figure class="shot"><img src="img/selection.png" alt="A selection with the Selection panel" /><figcaption>A selection with the Selection panel on the right.</figcaption></figure>
         <p><b>Copy</b> (<kbd>Ctrl</kbd>+<kbd>C</kbd>) and <b>Cut</b> (<kbd>Ctrl</kbd>+<kbd>X</kbd>) take what you see; hidden layers stay put. The copy then follows the mouse: click to paste, <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste again later. Objects in the selection come along, so Cut then Paste moves an area with everything in it.</p>
         <div class="pair">
           <figure class="anim"><div class="frame"><img src="posters/same-tiles.png" data-gif="img/same-tiles.gif" alt="Double-clicking a fence post" /></div><figcaption><b>Double-click</b> a tile to select every copy of it on its layer.</figcaption></figure>
           <figure class="anim"><div class="frame"><img src="posters/layer-scroll.png" data-gif="img/layer-scroll.gif" alt="Shift+scroll through a selection's layers" /></div><figcaption><kbd>Shift</kbd>+scroll narrows a selection to one layer at a time.</figcaption></figure>
         </div>
-        <p><b>One layer of a selection:</b> select 10×10 cells, <kbd>Shift</kbd>+scroll to Wall 1, and Delete removes only the Wall 1 tiles.</p>
+        <p><b>One layer of a selection:</b> select 10×10 cells, <kbd>Shift</kbd>+scroll to Wall 1, and Delete removes only the Wall 1 tiles. <kbd>Esc</kbd> goes back to all layers.</p>
         <figure class="shot"><img src="img/paste-preview.png" alt="Paste preview with red cells" /><figcaption>Before you click, red cells show the tiles a paste would replace.</figcaption></figure>
         <p>Hold <kbd>Alt</kbd> when you click to <b>stack</b> the paste onto what's there (the next free layer) instead of replacing. Pasting into a map that lacks the copied tiles' DT1s offers to add them, and asks for a new name if one clashes with a DT1 the map already loads.</p>
       </article>
@@ -595,7 +595,7 @@
         <ul>
           <li><b>Save selection</b> (Presets panel, Map → Presets, or <b>Save as preset…</b> after a copy) asks for a name and a category (one of yours, or <b>New category…</b>) and lets you choose what to keep: floors, walls, roofs, shadows, markers, objects.</li>
           <li><b>Suggest</b> finds structures that recur across maps that share this map's tiles.</li>
-          <li>Click a preset, then click the map to place it. Red cells show what it would replace; <kbd>Alt</kbd> stacks it.</li>
+          <li>Click a preset, then click the map to place it. Red cells show what it would replace; <kbd>Alt</kbd> stacks it. Rest the pointer on a preset to see it enlarged.</li>
           <li><b>Right-click</b> a saved preset to place, rename, move to another category, duplicate or delete it.</li>
         </ul>
         <div class="pair">

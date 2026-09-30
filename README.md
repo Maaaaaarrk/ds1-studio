@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/RoofooEvazan/ds1-studio/releases/latest"><b>⬇ Download</b></a> ·
+  <a href="https://roofooevazan.github.io/ds1-studio/"><b>📖 Guide</b></a> ·
   <a href="#features">Features</a> ·
   <a href="#keyboard-shortcuts">Shortcuts</a> ·
   <a href="https://github.com/RoofooEvazan/ds1-studio/issues/new?template=bug_report.md">Report a bug</a>

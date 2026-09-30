@@ -70,7 +70,7 @@ import { ACT0_PALETTE, PALETTE_NAMES } from '../formats/palette';
 import { act0Convert, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, planCustomDt1, type CustomDt1Plan } from '../game/customDt1';
-import { cellKey, addToSelection, clampRect, fillEdits, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
+import { cellKey, addToSelection, removeFromSelection, fitSelection, clampRect, fillEdits, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
@@ -231,17 +231,25 @@ export function App() {
   useEffect(() => { try { localStorage.setItem('ds1studio.wallCategories', JSON.stringify(visibility.wallCategories ?? {})); } catch { /* preferences may be unavailable */ } }, [visibility.wallCategories]);
   const viewMode: ViewMode = tool === 'object' ? 'objects' : modeOf(visibility);
   // Changing view (Tiles, Objects, Walkability…) drops what was selected: tiles, a tile picked from a stack, objects.
+  // A selection made by the same action that changed the view (Ctrl+A or "Select this cell" from another view) stays.
   const firstView = useRef(true);
+  const seenSelection = useRef<{ selection: unknown; object: unknown }>({ selection: null, object: null });
   useEffect(() => {
     if (firstView.current) {
       firstView.current = false;
       return;
     }
+    const madeNow = seenSelection.current.selection !== selection || seenSelection.current.object !== selectedObject;
+    if (madeNow) return;
     setSelectedObject(null);
     setObjectGroup(null);
     setSelection(null);
     setStack(null);
   }, [viewMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  // What was selected as of the last render (read by the view-change effect above, which runs first).
+  useEffect(() => {
+    seenSelection.current = { selection, object: selectedObject };
+  });
   /** Switches to a view mode, or back to editing tiles when it is already on. */
   const toggleMode = useCallback((m: ViewMode) => {
     const next = viewMode === m ? 'tiles' : m;
@@ -401,6 +409,10 @@ export function App() {
   const [playerLight, setPlayerLight] = useState(0);
   /** Applies a finished walkability stroke (set below, once the table helpers it uses exist). */
   const applyWalkRef = useRef<((paint: WalkPaint) => Promise<void>) | null>(null);
+  /** The pointer stroke that pasted: its drag does nothing more. */
+  const strokeUsed = useRef(false);
+  /** Shift+drag that started on a selected cell: takes cells out of the selection. */
+  const selectSubtract = useRef(false);
   const selectAnchor = useRef<[number, number] | null>(null);
   /** Shift+click / Shift+drag with the Select tool: the selection being added to (null = a new selection). */
   const selectBase = useRef<CellSelection | null>(null);
@@ -626,6 +638,7 @@ export function App() {
         setActiveLayer((l) => (l.kind === 'wall' && m.ds1.walls.length ? { kind: 'wall', index: 0 } : { kind: 'floor', index: 0 }));
         setBrush(null);
         setSelection(null);
+        setStack(null);
         setPasting(false);
         setSelectedObject(null);
         setPlacing(null);
@@ -734,6 +747,9 @@ export function App() {
       d.markUnsaved();
       setMap(m);
       setDoc(d);
+      setSelection(null);
+      setStack(null);
+      setPasting(false);
       notify(`Restored the changes autosaved ${new Date(r.time).toLocaleString()}. Save to keep them.`);
     } catch (e) {
       notify(`Couldn't restore: ${errorMessage(e)}`, true);
@@ -1159,7 +1175,13 @@ export function App() {
           } else if (doc.apply(edits, `Paste ${clipboard.width}×${clipboard.height}`)) bump();
           setSelection(clampRect({ x0: x, y0: y, x1: x + clipboard.width - 1, y1: y + clipboard.height - 1 }, doc.ds1.width, doc.ds1.height));
           setPasting(false);
+          strokeUsed.current = true;
         }
+        return;
+      }
+      // The click that pasted: the rest of its drag paints, erases or selects nothing.
+      if (strokeUsed.current) {
+        if (phase === 'end') strokeUsed.current = false;
         return;
       }
       if (tool === 'select') {
@@ -1171,13 +1193,20 @@ export function App() {
           // Only Shift+wheel restricts selection to an individual layer.
           setStack(null);
           stackRef.current = null;
-          // Shift adds to the selection: a cell per click, a rectangle per drag (irregular shapes).
+          // Shift adds to the selection: a cell per click, a rectangle per drag (irregular shapes). Starting on a cell
+          // that is already selected takes cells out instead.
           selectBase.current = mods?.shift && selection ? selection : null;
           const item = clicked?.items[clicked.index];
           const start: [number, number] = item ? [item.cellX, item.cellY] : cell;
+          selectSubtract.current = !!selectBase.current && (inSelection(selectBase.current, start[0], start[1]) || inSelection(selectBase.current, cell[0], cell[1]));
           if (item) focusTile(item.tile, layerOfItem(item));
           const r = clampRect(rectFrom(start, start), doc.ds1.width, doc.ds1.height);
           if (selectBase.current) setStack(null);
+          if (selectSubtract.current && selectBase.current) {
+            const [ox, oy] = inSelection(selectBase.current, start[0], start[1]) ? start : cell;
+            setSelection(removeFromSelection(selectBase.current, { x0: ox, y0: oy, x1: ox, y1: oy }));
+            return;
+          }
           setSelection(selectBase.current && r ? addToSelection(selectBase.current, r) : r);
           return;
         }
@@ -1185,11 +1214,13 @@ export function App() {
           const r = clampRect(rectFrom(selectAnchor.current, cell), doc.ds1.width, doc.ds1.height);
           setStack(null);
           stackRef.current = null;
-          setSelection(selectBase.current ? (r ? addToSelection(selectBase.current, r) : selectBase.current) : r);
+          if (selectSubtract.current && selectBase.current) setSelection(r ? removeFromSelection(selectBase.current, r) : selectBase.current);
+          else setSelection(selectBase.current ? (r ? addToSelection(selectBase.current, r) : selectBase.current) : r);
         }
         if (phase === 'end') {
           selectAnchor.current = null;
           selectBase.current = null;
+          selectSubtract.current = false;
         }
         return;
       }
@@ -1271,8 +1302,8 @@ export function App() {
   const selectSameObjects = useCallback(
     (world: [number, number]) => {
       if (!doc) return;
-      // Outside object editing, a double-click selects tiles.
-      if (tool !== 'object' && viewMode !== 'objects') return selectSameTiles(world);
+      // Outside object editing, a double-click selects tiles, with the Select tool only (Paint / Erase clicks stay clicks).
+      if (tool !== 'object' && viewMode !== 'objects') return tool === 'select' ? selectSameTiles(world) : undefined;
       const objs = doc.ds1.objects;
       let hit = -1;
       for (let i = objs.length - 1; i >= 0 && hit < 0; i--) {
@@ -1320,7 +1351,7 @@ export function App() {
       if (onlyLayer) {
         // One tile of a stack (Shift+wheel): just its layer, no objects.
         setClipboard({ ...clip, layers: clip.layers.filter((l) => layerKey(l.layer) === layerKey(onlyLayer)), objects: undefined });
-        if (cut && doc.apply(clearEdits(doc, selection, [onlyLayer]))) bump();
+        if (cut && doc.apply(clearEdits(doc, selection, [onlyLayer]).filter((e) => cellShown(e.layer, e.x, e.y, doc.cell(e.layer, e.x, e.y))), `Cut ${layerLabel(onlyLayer)} ${size}`)) bump();
         notify(`${cut ? 'Cut' : 'Copied'} ${layerLabel(onlyLayer)} only · move over the map to preview, click to paste, Esc when done`);
         setClipPane(true);
         setPasting(true);
@@ -2995,7 +3026,8 @@ export function App() {
       for (let i = 0; i < count; i++) {
         if (!(await (direction === 'undo' ? doc.undoWithFiles(write) : doc.redoWithFiles(write)))) break;
       }
-      setSelection(null); setStack(null); setHover(null); bump();
+      setSelection((s) => fitSelection(s, doc.ds1.width, doc.ds1.height));
+      setStack(null); setHover(null); bump();
     } catch (e) { notify(String(e), true); }
     finally { historyBusyRef.current = false; setHistoryBusy(false); }
   }, [doc, gd, writeFiles, notify]);
@@ -3181,7 +3213,7 @@ export function App() {
           }
           return;
         }
-        const nothing = tool === 'object' ? selectedObject === null : !selection && !stack;
+        const nothing = tool === 'object' ? selectedObject === null : !selection && !stack && !areaLayer;
         if (nothing && map && doc) {
           // Nothing left to cancel: offer to close the map.
           void leaveMap(true).then((ok) => {
@@ -3195,7 +3227,10 @@ export function App() {
           setSelectedObject(null);
           setObjectGroup(null);
         } else if (stack && stack.index >= 0) setStack({ ...stack, index: -1 });
-        else {
+        else if (areaLayer) {
+          setAreaLayer(null);
+          notify('Selection: all layers');
+        } else {
           setSelection(null);
           setStack(null);
         }
@@ -3239,6 +3274,10 @@ export function App() {
       const id = keyState.current.actionFor(combo);
       const run = id && keyState.current.actions[id];
       if (!run) return;
+      if (e.repeat && id === 'edit.cancel') {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       run();
     };
@@ -3614,6 +3653,7 @@ export function App() {
     const inside = doc.inBounds(x, y);
     const selectCell = () => {
       setTool('select');
+      setStack(null);
       setSelection({ x0: x, y0: y, x1: x, y1: y });
       const hit = hitTest(scene, m.world[0], m.world[1], hittable);
       if (hit) focusTile(hit.tile, layerOfItem(hit));

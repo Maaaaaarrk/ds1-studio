@@ -1039,3 +1039,4 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .pref-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; align-items: center; }
 .pref-grid .text-input { flex: 1; min-width: 160px; }
 .category-picker { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.light-num { width: 58px; padding: 2px 4px; font-size: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }

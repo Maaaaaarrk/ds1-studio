@@ -612,6 +612,14 @@ export function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDr
     setRgb(light.rgb);
   }
   const changed = intensity !== light.intensity || rgb.some((c, i) => c !== light.rgb[i]);
+  /**
+   * A level lit by the act's daylight (Intensity 0) usually stores colour 0,0,0; a fixed light with that colour would
+   * be black, so leaving daylight starts from white light.
+   */
+  const pickIntensity = (v: number) => {
+    if (v > 0 && intensity === 0 && rgb.every((c) => c === 0)) setRgb([255, 255, 255]);
+    setIntensity(v);
+  };
   // Values being tried out (not applied yet) show on the map while previewing.
   useEffect(() => onDraft(changed ? { ...light, intensity, rgb } : null), [changed, intensity, rgb.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onDraft(null), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -630,8 +638,18 @@ export function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDr
       )}
       <div className="light-row">
         <span className="small">Intensity</span>
-        <input type="range" min={0} max={255} value={intensity} onChange={(e) => setIntensity(Number(e.target.value))} />
-        <span className="small mono">{intensity || 'daylight'}</span>
+        <input type="range" min={0} max={255} value={intensity} onChange={(e) => pickIntensity(Number(e.target.value))} aria-label="Light intensity" />
+        <input
+          className="light-num mono"
+          type="number"
+          min={0}
+          max={255}
+          value={intensity}
+          onChange={(e) => pickIntensity(Math.max(0, Math.min(255, Math.round(Number(e.target.value) || 0))))}
+          onKeyDown={(e) => e.stopPropagation()}
+          aria-label="Light intensity (0-255)"
+        />
+        <span className="small mono">{intensity ? '' : 'daylight'}</span>
       </div>
       <div className="light-row" title="While previewing, the area around the mouse is lit as if a player stood there: their light radius, in sub-tiles (5 per cell). Characters start with a small radius; items and skills raise it.">
         <span className="small">Player light</span>
@@ -642,6 +660,10 @@ export function LevelLightEditor({ light, shown, canWrite, onShow, onApply, onDr
         <span className="small">Colour</span>
         <input type="color" value={toHex(rgb)} onChange={(e) => setRgb(fromHex(e.target.value))} />
         <span className="small mono">{rgb.join(', ')}</span>
+      </div>
+      <div className="small muted">
+        In Levels.txt: Intensity {light.intensity || '0 (daylight)'}, colour {light.rgb.join(', ')}
+        {changed ? ' · the map shows your new values; Apply saves them' : ''}
       </div>
       {changed && (
         <div className="light-row">

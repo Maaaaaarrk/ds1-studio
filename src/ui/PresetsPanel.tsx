@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { decodeCell, isEmptyCell } from '../formats/ds1';
 import { decodeTile, Orientation } from '../formats/dt1';
 import type { Palette } from '../formats/palette';
@@ -71,6 +72,58 @@ function renderPreset(p: Preset, lib: TileLibrary, palette: Palette): string | n
   return canvas.toDataURL();
 }
 
+/** The picture of a preset with this library and palette (rendered once, then cached). */
+function presetPicture(preset: Preset, lib: TileLibrary, palette: Palette): string | null {
+  const key = `${preset.id}:${preset.foundIn ?? ''}`;
+  const cache = thumbsFor(lib, palette);
+  if (!cache.has(key)) cache.set(key, renderPreset(preset, lib, palette));
+  return cache.get(key) ?? null;
+}
+
+/**
+ * An enlarged view of a preset while the pointer rests on its card, beside the side panel: the picture at up to its
+ * real size (crisp pixels), and what the preset holds.
+ */
+function PresetPreview({ p, lib, palette, rect, missing }: { p: Preset; lib: TileLibrary; palette: Palette; rect: DOMRect; missing: string[] }) {
+  const url = presetPicture(p, lib, palette);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!url) return;
+    const img = new Image();
+    img.onload = () => setSize({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = url;
+  }, [url]);
+  const maxW = Math.min(560, window.innerWidth * 0.5);
+  const maxH = Math.min(460, window.innerHeight - 160);
+  const scale = size ? Math.min(2, maxW / size.w, maxH / size.h) : 1;
+  const w = Math.max(240, (size ? size.w * scale : 200) + 20);
+  const lines = [
+    `${p.width}×${p.height} cells · ${p.category}${p.objects.length ? ` · ${p.objects.length} object${p.objects.length === 1 ? '' : 's'}` : ''}${p.occurrences ? ` · found ×${p.occurrences}` : ''}`,
+    `Tiles from: ${p.dt1s.map((d) => d.replace(/^data\/global\/tiles\//i, '')).join(', ') || '—'}`,
+    ...(p.foundIn ? [`Found in ${p.foundIn.replace(/^data\/global\/tiles\//i, '')}`] : []),
+    ...(missing.length ? [`Needs ${missing.length} tile ${missing.length === 1 ? 'library' : 'libraries'} this map doesn't load`] : []),
+  ];
+  const h = (size ? size.h * scale : 60) + 36 + lines.length * 18;
+  const left = rect.left - w - 12 >= 8 ? rect.left - w - 12 : Math.max(8, Math.min(rect.right + 12, window.innerWidth - w - 8));
+  const top = Math.min(Math.max(8, rect.top + rect.height / 2 - h / 2), window.innerHeight - h - 8);
+  return createPortal(
+    <div className="tile-preview preset-preview" style={{ left, top, width: w }}>
+      <div className="tile-preview-title">{p.name}</div>
+      {url ? (
+        size && <img src={url} alt="" width={Math.round(size.w * scale)} height={Math.round(size.h * scale)} className="tile-preview-img" />
+      ) : (
+        <div className="muted small">No picture (its tiles aren't in the loaded libraries)</div>
+      )}
+      {lines.map((l) => (
+        <div key={l} className="tile-preview-line">
+          {l}
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
 export const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: { preset: Preset; lib: TileLibrary; palette: Palette }) {
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
@@ -118,15 +171,30 @@ function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s, onMenu
     }).catch(() => { if (live) setPreviewLib(lib); });
     return () => { live = false; };
   }, [p, gd, lib]);
+  // The enlarged preview after the pointer rests on the card a moment.
+  const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
+  const timer = useRef<number | null>(null);
+  const endHover = () => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    setHoverRect(null);
+  };
+  useEffect(() => endHover, []);
   return (
     <div
+      onMouseEnter={(e) => {
+        const el = e.currentTarget;
+        if (timer.current) window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => setHoverRect(el.getBoundingClientRect()), 300);
+      }}
+      onMouseLeave={endHover}
+      onMouseDown={endHover}
       className={`preset-card${missing.length ? ' needs' : ''}`}
       onContextMenu={(e) => {
         if (!onMenu) return;
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
-      }}
-      title={`${p.name} · ${p.width}×${p.height} cells${p.objects.length ? ` · ${p.objects.length} objects` : ''}\nTiles from: ${p.dt1s.map((d) => d.replace('data/global/tiles/', '')).join(', ')}${p.foundIn ? `\nFound in ${p.foundIn}` : ''}`}>
+      }}>
       <button className="preset-main" onClick={onPlace}>
         <PresetThumb preset={p} lib={previewLib} palette={palette} />
         <span className="preset-name">{p.name}</span>
@@ -136,6 +204,7 @@ function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s, onMenu
           {p.objects.length ? ` · ${p.objects.length} obj` : ''}
         </span>
       </button>
+      {hoverRect && <PresetPreview p={p} lib={previewLib} palette={palette} rect={hoverRect} missing={missing} />}
       {missing.length > 0 && (
         <button className="link small" onClick={onAddDt1s} title={missing.join('\n')}>
           needs tiles — review import
