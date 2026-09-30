@@ -19,6 +19,7 @@ import {
   FolderCog,
   FileText,
   Footprints,
+  Shapes,
   Grid3x3,
   RefreshCw,
   Info,
@@ -74,6 +75,7 @@ import { cellKey, addToSelection, removeFromSelection, fitSelection, clampRect, 
 import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
+import { buildPresetPackage, planPresetImport, type PresetImportPlan } from '../game/presetPackage';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef, type FileHistoryChange } from '../game/MapDocument';
 import { guessDrawnAct, openMap, refreshPalette, rememberPalette, setViewPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
@@ -114,12 +116,12 @@ import { stackMatchesLayer, stepTileStack, wallClickStack, type TileStack } from
 import { planAutomapClear, planAutomapEdit } from '../game/automapClear';
 import { buildDt1, dt1Records } from '../formats/dt1Write';
 import { renameInLvlPrest, renameInLvlTypes, suggestShortPath } from '../game/dt1Review';
-import { RegisterMapDialog, type TableWrite } from './LevelTools';
+import { ChangeLevelTypeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
 import { MapRecipeRibbon } from './MapRecipeRibbon';
 import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
-import { applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
+import { AUTOMAP_CODES, applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { getCell, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
@@ -364,7 +366,7 @@ export function App() {
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
   /** Every object of one kind, selected together by double-clicking one (Delete / Ctrl+C / Ctrl+X act on all). */
   const [objectGroup, setObjectGroup] = useState<Set<number> | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -2727,6 +2729,49 @@ export function App() {
     },
     [gd, retirePresetFile, notify],
   );
+  /** Preset packages: export some presets to a file, import presets from one (with a summary to confirm first). */
+  const exportPresets = useCallback(
+    async (list: Preset[], name: string) => {
+      if (!gd || !list.length) return;
+      try {
+        const built = await buildPresetPackage(gd.fs, list);
+        const file = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'presets'}-presets.zip`;
+        const where = await exportBytes(file, built.zip);
+        if (!where) return;
+        notify(
+          `Exported ${list.length} preset${list.length === 1 ? '' : 's'}${built.dt1s.length ? ` and ${built.dt1s.length} tile librar${built.dt1s.length === 1 ? 'y' : 'ies'} from your mod` : ''} to ${where}` +
+            (built.missing.length ? ` · not found, so not included: ${built.missing.join(', ')}` : ''),
+          built.missing.length > 0,
+        );
+      } catch (e) {
+        notify(errorMessage(e), true);
+      }
+    },
+    [gd, notify],
+  );
+  const [presetImport, setPresetImport] = useState<{ name: string; plan: PresetImportPlan } | null>(null);
+  const importPresets = useCallback(async () => {
+    if (!gd) return;
+    try {
+      const f = await importNamed('zip,json');
+      if (!f) return;
+      setPresetImport({ name: f.name, plan: await planPresetImport(gd.fs, f.bytes, presets) });
+    } catch (e) {
+      notify(errorMessage(e), true);
+    }
+  }, [gd, presets, notify]);
+  const applyPresetImport = useCallback(async () => {
+    if (!gd || !presetImport) return;
+    const { plan } = presetImport;
+    try {
+      await writeFiles([...plan.dt1Writes, ...plan.presets.map((p) => ({ path: presetPath(p), bytes: serializePreset(p) }))]);
+      setPresets(await loadPresets(gd));
+      setPresetImport(null);
+      notify(`Imported ${plan.presets.length} preset${plan.presets.length === 1 ? '' : 's'}${plan.dt1Writes.length ? ` and ${plan.dt1Writes.length} tile librar${plan.dt1Writes.length === 1 ? 'y' : 'ies'}` : ''}`);
+    } catch (e) {
+      notify(errorMessage(e), true);
+    }
+  }, [gd, presetImport, writeFiles, notify]);
   /** Save as preset: the block to save (a selection, or what was copied) and its suggested name. */
   const [presetSave, setPresetSave] = useState<{ clip: Clipboard; name: string } | null>(null);
   const saveSelectionPreset = useCallback(async () => {
@@ -3569,6 +3614,7 @@ export function App() {
           label: 'Level',
           items: [
             { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
+            { label: 'Change level type…', icon: <Shapes />, onClick: () => setDialog('lvltype'), disabled: noMap || !canWrite, size: 'sm', title: 'Give the map’s level another level type (LvlTypes), with the File slots, Dt1Mask and automap rows it needs' },
             { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
             { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],
@@ -3626,6 +3672,25 @@ export function App() {
     },
   ];
 
+  /** The DT1s the map's tiles come from (plus the special-tile library when the map loads it), as Add to game uses. */
+  const mapUsedDt1s = [
+    ...[...dt1Usage.keys()].filter((p) => !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p),
+    ...((map?.lib.loaded ?? []).some((l) => l.found && normalizePath(l.path) === normalizePath(SPECIAL_TILES_DT1)) && ![...dt1Usage.keys()].some((p) => normalizePath(p) === normalizePath(SPECIAL_TILES_DT1))
+      ? [data.gd.fs.exactPath(SPECIAL_TILES_DT1) ?? SPECIAL_TILES_DT1]
+      : []),
+  ];
+  /** The automap tile kinds ("code|style", AutoMap.txt TileName and Style) the map's tiles use. */
+  const mapAutomapKinds = (() => {
+    const out = new Set<string>();
+    if (!doc) return out;
+    for (const layer of doc.ds1.floors) for (const c of layer) if (!isEmptyCell(c)) out.add(`fl|${c.mainIndex}`);
+    for (const layer of doc.ds1.walls)
+      for (const c of layer) {
+        const code = !isEmptyCell(c) ? AUTOMAP_CODES[c.orientation] : undefined;
+        if (code) out.add(`${code}|${c.mainIndex}`);
+      }
+    return out;
+  })();
   const sourcesText = data.gd.fs.baseSources.map((s) => s.label.split(/[\\/]/).slice(-2).join('/')).join('  ›  ');
   /** What a click on the map does right now, in the status bar. */
   const statusHint = !map
@@ -4117,6 +4182,8 @@ export function App() {
                 onUpdate={(p, change) => void updatePreset(p, change)}
                 onDuplicate={(p) => void duplicatePreset(p)}
                 onDelete={(p) => void deletePreset(p)}
+                onExport={(list, name) => void exportPresets(list, name)}
+                onImport={() => void importPresets()}
                 confirmDelete={prefs.confirmBulkDelete}
                 onSuggest={() => void suggest()}
               />
@@ -4263,6 +4330,59 @@ export function App() {
             setUnsavedAsk(null);
           }}
         />
+      )}
+      {presetImport && (
+        <Modal title={`Import presets from ${presetImport.name}`} onClose={() => setPresetImport(null)}>
+          {(() => {
+            const { plan } = presetImport;
+            const cats = [...new Set(plan.presets.map((p) => p.category))];
+            return (
+              <>
+                <p className="small">
+                  {plan.presets.length
+                    ? `${plan.presets.length} preset${plan.presets.length === 1 ? '' : 's'} to add, in ${cats.map((c) => `“${c}”`).join(', ')}.`
+                    : 'Nothing new to add.'}
+                  {plan.duplicates.length ? ` ${plan.duplicates.length} already here unchanged (skipped).` : ''}
+                </p>
+                {plan.presets.length > 0 && (
+                  <ul className="small">
+                    {plan.presets.slice(0, 12).map((p) => (
+                      <li key={p.id}>
+                        {p.name} <span className="muted">· {p.category} · {p.width}×{p.height}</span>
+                      </li>
+                    ))}
+                    {plan.presets.length > 12 && <li className="muted">and {plan.presets.length - 12} more</li>}
+                  </ul>
+                )}
+                {plan.dt1Writes.length > 0 && (
+                  <p className="small">
+                    Tile libraries written into your mod: {plan.dt1Writes.map((w) => w.path.replace(/^data\/global\/tiles\//i, '')).join(', ')}.
+                  </p>
+                )}
+                {plan.same.length > 0 && <p className="small muted">Already in your mod exactly: {plan.same.join(', ')}.</p>}
+                {plan.renamed.length > 0 && (
+                  <p className="small warn-text">
+                    A different file with the same name is already in your mod, so the package's copy is saved under a new name (the imported presets use it):{' '}
+                    {plan.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')}.
+                  </p>
+                )}
+                {plan.problems.map((p) => (
+                  <p key={p} className="small error-text">
+                    {p}
+                  </p>
+                ))}
+                <div className="modal-actions">
+                  <button className="btn" onClick={() => setPresetImport(null)}>
+                    Cancel
+                  </button>
+                  <button className="btn primary" disabled={!plan.presets.length || !canWrite} onClick={() => void applyPresetImport()}>
+                    Import
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+        </Modal>
       )}
       {prefsOpen && <PreferencesDialog prefs={prefs} onChange={setPrefs} onClose={() => setPrefsOpen(false)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
@@ -4641,6 +4761,23 @@ export function App() {
             await writeFiles([{ path, bytes }]);
             await reloadTables();
             return `Saved ${path.split('/').pop()} into ${data.saveTarget?.label}`;
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'lvltype' && doc && map && (
+        <ChangeLevelTypeDialog
+          fs={data.gd.fs}
+          mapPath={data.gd.fs.exactPath(doc.path) ?? doc.path}
+          levelId={map.resolution.preset?.levelId}
+          usedDt1s={mapUsedDt1s}
+          automapUsed={mapAutomapKinds}
+          canWrite={canWrite}
+          onApply={async (plan) => {
+            await writeFiles(plan.writes);
+            await reloadTables();
+            notify(`Level ${plan.levelId} now uses level type ${plan.typeId}${plan.copied ? ' (a copy of its own)' : ''}. Updated ${plan.writes.map((w) => w.table).join(', ')} (old files kept as .bak). Checking the map…`);
+            setTimeout(() => void runCheckRef.current(true), 800);
           }}
           onClose={() => setDialog(null)}
         />

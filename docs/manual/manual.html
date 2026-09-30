@@ -497,6 +497,7 @@
     <li><b>Suggest</b> finds structures that recur across the maps sharing this map's tiles and offers them as presets.</li>
     <li>Click a preset, then click the map to place it (like a <a href="#s-select">paste</a>; <kbd>Alt</kbd> stacks it onto existing tiles). Red cells show the tiles it would replace. Rest the pointer on a preset for an enlarged picture of it, with its size, category, objects and the tile libraries it uses.</li>
     <li><b>Right-click</b> a saved preset to place, rename, move it to another category, duplicate or delete it (a deleted preset's file is kept aside as a backup). Right-click a suggestion to place it or save it to the mod.</li>
+    <li><b>Sharing presets:</b> <b>Export all…</b> (top of the panel), <b>Export</b> on a category heading, or <b>Export…</b> / <b>Export category…</b> in a preset's right-click menu saves them as a <code>.zip</code> with the tile libraries from your mod they use (the game's own DT1s are left out: everyone has them). <b>Import…</b> adds presets from such a file, or from a single preset <code>.json</code>: it shows what it will add first. A tile library already in your mod exactly is not written again; a different file under the same name is kept, and the imported one is saved under a new name that the imported presets use.</li>
     <li>The <b>Preset builder</b> starts with this map's tile libraries; add any other DT1 with <b>Add a DT1</b>. Tiles from a library that isn't in the Act 0 colours yet (an added one, or one of the map's) are copied into the preset converted to Act 0, so a preset looks right in any act.</li>
   </ul>
   <p>Open the panel with the <b>Presets</b> tab next to Tiles, or <b>Map → Presets</b>.</p>
@@ -657,6 +658,16 @@
     <tr><td>Tile and map paths are at most 41 characters.</td><td>The game adds <code>DATA\GLOBAL\TILES\</code> in front, in a 60-byte buffer. The game's own longest path is 40.</td></tr>
   </table>
   <p>The <a href="#s-check">Compatibility check</a> checks the same rules for any map already in the game, and offers one-click fixes: rows out of order (put back in Id order; no Id changes), a preset pointing at a missing level, the level size, act, palette, an overlapping position, the file count and a copied quest requirement. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>. Set the DS1 header to Act 5 (the check offers it), so the map's object numbers are read as Act 5 objects.</p>
+
+  <h3 id="s-lvltype">Changing a level's level type</h3>
+  <p><b>Game → Change level type…</b> gives the map's level another level type (Levels.txt <code>LevelType</code>): the LvlTypes.txt row that lists the tile libraries the level can load, and whose AutoMap.txt pieces it draws. Pick the new type from the list; the dialog lists every change before anything is written, then the map reopens with its new type and the Compatibility check runs. What it does, following the game's own code:</p>
+  <ul>
+    <li>The new type lists every tile library the map uses (free <code>File</code> slots are filled from File 1, without gaps), and the map's <code>Dt1Mask</code> selects exactly those slots.</li>
+    <li>A type other levels use keeps its tile list for them: if it lacks some of the map's libraries, the level gets a <b>copy</b> of it of its own (you can also ask for a copy). The copy keeps the Act of the type it copies; a level can use a type of another act, as the game's own Pandemonium levels and PD2's map levels do.</li>
+    <li>When the map's LvlPrest row lists several maps (the game picks one, like the town's variants), every library the row loads stays loaded, so the other maps keep their tiles.</li>
+    <li>AutoMap.txt: a copy gets the chosen type's rows under its own number (in mods that read level-type numbers, like PD2; the unmodded game only knows its 36 types by name), and the tile kinds the map uses that the new type has no piece for take the old type's pieces.</li>
+    <li>Only levels built from one map (preset levels) can change type: the game builds maze and outdoor levels from pieces it chooses by level-type number. A map that belongs to several levels asks which one.</li>
+  </ul>
 
   <h2 id="s-cube"><span class="num">9.3</span>Cube recipe</h2>
   <figure class="medium"><img src="../media/cube-recipe.png" alt="Cube recipe" /><figcaption>Game → Cube recipe.</figcaption></figure>

@@ -596,7 +596,8 @@
           <li><b>Save selection</b> (Presets panel, Map → Presets, or <b>Save as preset…</b> after a copy) asks for a name and a category (one of yours, or <b>New category…</b>) and lets you choose what to keep: floors, walls, roofs, shadows, markers, objects.</li>
           <li><b>Suggest</b> finds structures that recur across maps that share this map's tiles.</li>
           <li>Click a preset, then click the map to place it. Red cells show what it would replace; <kbd>Alt</kbd> stacks it. Rest the pointer on a preset to see it enlarged.</li>
-          <li><b>Right-click</b> a saved preset to place, rename, move to another category, duplicate or delete it.</li>
+          <li><b>Right-click</b> a saved preset to place, rename, move to another category, duplicate, export or delete it.</li>
+          <li><b>Share presets:</b> <b>Export all…</b>, <b>Export</b> on a category heading, or <b>Export…</b> on one preset saves a <code>.zip</code> with the tile libraries from your mod they use. <b>Import…</b> adds presets from such a file (or a single <code>.json</code>), showing what it adds first; a different tile library with the same name is kept and the imported one renamed.</li>
         </ul>
         <div class="pair">
           <figure class="shot"><img src="img/save-preset.png" alt="Save as preset" /><figcaption>Save as preset with the category list.</figcaption></figure>
@@ -718,14 +719,26 @@
         </div>
       </article>
 
+      <article class="topic" id="level-type">
+        <h3><span class="num">9.3</span>Changing a level’s level type</h3>
+        <p><b>Game → Change level type…</b> gives the map’s level another level type (Levels.txt LevelType): the LvlTypes row listing the tile libraries it can load, and whose automap pieces it draws. Every change is listed before anything is written; afterwards the map reopens and the Compatibility check runs.</p>
+        <ul>
+          <li>The new type lists every tile library the map uses, and the map’s Dt1Mask points at exactly those slots.</li>
+          <li>A type other levels use keeps its tile list: if it lacks some of the map’s libraries, the level gets a copy of its own.</li>
+          <li>A preset row with several maps (like the town’s variants) keeps every library it loads, so the other maps keep their tiles.</li>
+          <li>Automap pieces are carried over (under the type’s number in mods like PD2).</li>
+          <li>Only preset levels (built from one map) can change type; the game builds maze and outdoor levels by type number.</li>
+        </ul>
+      </article>
+
       <article class="topic" id="cube">
-        <h3><span class="num">9.3</span>Cube recipe</h3>
+        <h3><span class="num">9.4</span>Cube recipe</h3>
         <p><b>Game → Cube recipe</b> creates a new item and a Horadric Cube recipe for it, with icons for the template and ingredients. It adds the item at the end of Misc.txt, refuses duplicate recipes, and keeps the item out of random drops. Pick one of your mod's map items as the template and the new item opens the map you have open.</p>
         <figure class="shot medium"><img src="media/cube-recipe.png" alt="Cube recipe" /><figcaption>Game → Cube recipe.</figcaption></figure>
       </article>
 
       <article class="topic" id="compatibility">
-        <h3><span class="num">9.4</span>Compatibility check</h3>
+        <h3><span class="num">9.5</span>Compatibility check</h3>
         <p><b>Diagnostics → Compatibility</b> checks the map will load and play in game: missing tiles and DT1s, table wiring, entry markers, a missing waypoint, NPCs on unwalkable ground, walls missing from the automap, and more. Most results have one-click fixes, and <b>Show on map</b> marks the cells.</p>
         <figure class="shot medium"><img src="media/compatibility.png" alt="Compatibility check" /><figcaption>The Compatibility check.</figcaption></figure>
         <ul>
@@ -737,7 +750,7 @@
       </article>
 
       <article class="topic" id="automap">
-        <h3><span class="num">9.5</span>The automap</h3>
+        <h3><span class="num">9.6</span>The automap</h3>
         <p><b>View → Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined in pink have no AutoMap.txt entry (a hole). Click a cell to see each tile's piece: <b>Change piece…</b> or <b>Clear piece</b>, for <b>Only this cell</b> by default. Where a tree or roof stands in a wall's place, <b>choose a wall piece…</b> draws one anyway.</p>
         <div class="pair">
           <figure class="anim"><div class="frame"><img src="posters/automap-toggle.png" data-gif="media/automap-toggle.gif" alt="Automap on and off" /></div><figcaption>The automap on and off.</figcaption></figure>

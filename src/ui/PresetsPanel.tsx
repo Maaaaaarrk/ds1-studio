@@ -207,6 +207,10 @@ interface Props {
   onSavePreset: (p: Preset) => void;
   onSuggest: () => void;
   onBuild: () => void;
+  /** Saves these presets (one, a category, or all) as a package to share; `name` names the file. */
+  onExport: (presets: Preset[], name: string) => void;
+  /** Adds presets from a package or a single preset file. */
+  onImport: () => void;
   /** Saved presets: rename / recategorise (a changed copy replaces it), duplicate, delete. */
   onUpdate: (p: Preset, change: { name?: string; category?: string }) => void;
   onDuplicate: (p: Preset) => void;
@@ -310,6 +314,8 @@ export function PresetsPanel(props: Props) {
             ],
           },
           { label: 'Duplicate', disabled: !canSave, onClick: () => props.onDuplicate(m.p) },
+          { label: 'Export…', title: 'Save this preset (and the mod tile libraries it uses) as a file to share', onClick: () => props.onExport([m.p], m.p.name) },
+          { label: `Export category “${m.p.category}”…`, onClick: () => props.onExport(saved.filter((s) => s.category === m.p.category), m.p.category) },
           null,
           {
             label: 'Delete…',
@@ -342,6 +348,12 @@ export function PresetsPanel(props: Props) {
         </div>
         <div className="button-grid">
           <button className="btn" disabled={!canSave} onClick={onBuild}>Preset builder…</button>
+          <button className="btn" disabled={!canSave} onClick={props.onImport} title="Add presets from a preset package (.zip) or a single preset (.json)">
+            Import…
+          </button>
+          <button className="btn" disabled={!saved.length} onClick={() => props.onExport(saved, 'presets')} title="Save every preset (and the mod tile libraries they use) as one file to share">
+            Export all…
+          </button>
           <button className="btn" disabled={!hasSelection || !canSave} onClick={onSaveSelection} title={canSave ? 'Save the selected cells as a preset (you choose what it keeps)' : 'No writable mod folder'}>
             Save selection…
           </button>
@@ -357,6 +369,9 @@ export function PresetsPanel(props: Props) {
             <div className="preset-cat">
               <span>{cat}</span>
               <span className="preset-cat-count">{list.length}</span>
+              <button className="link small preset-cat-export" onClick={() => props.onExport(list, cat)} title={`Save the “${cat}” presets as one file to share`}>
+                Export
+              </button>
             </div>
             <div className="preset-grid">
               {list.map((p) => (
