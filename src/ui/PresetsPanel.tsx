@@ -124,16 +124,71 @@ function PresetPreview({ p, lib, palette, rect, missing }: { p: Preset; lib: Til
   );
 }
 
-export const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: { preset: Preset; lib: TileLibrary; palette: Palette }) {
-  const [url, setUrl] = useState<string | null | undefined>(undefined);
+/** Thumbnails waiting to be drawn: one per slice of idle time, so opening the panel never waits for all of them. */
+const thumbQueue: (() => void)[] = [];
+let thumbTimer = 0;
+function queueThumb(job: () => void): () => void {
+  thumbQueue.push(job);
+  if (!thumbTimer) thumbTimer = window.setTimeout(drainThumbs, 0);
+  return () => {
+    const i = thumbQueue.indexOf(job);
+    if (i >= 0) thumbQueue.splice(i, 1);
+  };
+}
+function drainThumbs() {
+  const until = performance.now() + 12;
+  while (thumbQueue.length && performance.now() < until) thumbQueue.shift()!();
+  thumbTimer = thumbQueue.length ? window.setTimeout(drainThumbs, 0) : 0;
+}
+
+export const PresetThumb = memo(function PresetThumb({ preset, lib, palette }: { preset: Preset; lib: TileLibrary | null; palette: Palette }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const key = `${preset.id}:${preset.foundIn ?? ''}`;
+  const cached = lib ? thumbsFor(lib, palette).get(key) : undefined;
+  const [url, setUrl] = useState<string | null | undefined>(cached);
   useEffect(() => {
-    const key = `${preset.id}:${preset.foundIn ?? ''}`;
+    if (!lib) return;
     const cache = thumbsFor(lib, palette);
-    if (!cache.has(key)) cache.set(key, renderPreset(preset, lib, palette));
-    setUrl(cache.get(key));
-  }, [preset, lib, palette]);
-  return <div className="preset-img" style={url ? { backgroundImage: `url(${url})` } : undefined} />;
+    if (cache.has(key)) {
+      setUrl(cache.get(key));
+      return;
+    }
+    // Drawn once the card is on screen, between frames.
+    let cancel = () => {};
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      cancel = queueThumb(() => {
+        if (!cache.has(key)) cache.set(key, renderPreset(preset, lib, palette));
+        setUrl(cache.get(key));
+      });
+    });
+    io.observe(ref.current!);
+    return () => {
+      io.disconnect();
+      cancel();
+    };
+  }, [preset, lib, palette, key]);
+  return <div ref={ref} className={`preset-img${url === undefined ? ' loading' : ''}`} style={url ? { backgroundImage: `url(${url})` } : undefined} />;
 });
+
+/** Each preset's own tile library (its DT1s), loaded once and shared, so its thumbnail is drawn once. */
+const presetLibs = new WeakMap<GameData, Map<string, Promise<TileLibrary>>>();
+function presetLibrary(gd: GameData, p: Preset): Promise<TileLibrary> {
+  let m = presetLibs.get(gd);
+  if (!m) presetLibs.set(gd, (m = new Map()));
+  const key = `${p.id}|${p.dt1s.join('|')}`;
+  let lib = m.get(key);
+  if (!lib) {
+    lib = Promise.all(p.dt1s.map(async (path) => ({ path, dt1: await gd.dt1(path) }))).then((sources) => {
+      const own = new TileLibrary();
+      for (const { path, dt1 } of sources) own.add(path, dt1);
+      return own;
+    });
+    m.set(key, lib);
+  }
+  return lib;
+}
 
 interface Props {
   gd: GameData;
@@ -161,15 +216,17 @@ interface Props {
 }
 
 function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s, onMenu }: { p: Preset; lib: TileLibrary; gd: GameData; palette: Palette; missing: string[]; onPlace: () => void; onSave?: () => void; onAddDt1s: () => void; onMenu?: (x: number, y: number) => void }) {
-  const [previewLib, setPreviewLib] = useState(lib);
+  // The preset's own libraries (shared between openings of the panel); drawn with nothing until they're loaded.
+  const [previewLib, setPreviewLib] = useState<TileLibrary | null>(null);
   useEffect(() => {
     let live = true;
-    void Promise.all(p.dt1s.map(async path => ({ path, dt1: await gd.dt1(path) }))).then(sources => {
-      const own = new TileLibrary();
-      for (const { path, dt1 } of sources) own.add(path, dt1);
-      if (live) setPreviewLib(own);
-    }).catch(() => { if (live) setPreviewLib(lib); });
-    return () => { live = false; };
+    presetLibrary(gd, p).then(
+      (own) => live && setPreviewLib(own),
+      () => live && setPreviewLib(lib),
+    );
+    return () => {
+      live = false;
+    };
   }, [p, gd, lib]);
   // The enlarged preview after the pointer rests on the card a moment.
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
@@ -204,7 +261,7 @@ function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s, onMenu
           {p.objects.length ? ` · ${p.objects.length} obj` : ''}
         </span>
       </button>
-      {hoverRect && <PresetPreview p={p} lib={previewLib} palette={palette} rect={hoverRect} missing={missing} />}
+      {hoverRect && previewLib && <PresetPreview p={p} lib={previewLib} palette={palette} rect={hoverRect} missing={missing} />}
       {missing.length > 0 && (
         <button className="link small" onClick={onAddDt1s} title={missing.join('\n')}>
           needs tiles — review import
@@ -297,7 +354,10 @@ export function PresetsPanel(props: Props) {
       <div className="panel-body">
         {groups.map(([cat, list]) => (
           <div key={cat}>
-            <div className="field-label">{cat}</div>
+            <div className="preset-cat">
+              <span>{cat}</span>
+              <span className="preset-cat-count">{list.length}</span>
+            </div>
             <div className="preset-grid">
               {list.map((p) => (
                 <Card key={p.id} p={p} lib={lib} gd={props.gd} palette={palette} missing={missingOf(p)} onPlace={() => onPlace(p)} onAddDt1s={() => onPlace(p)} onMenu={(x, y) => setMenu({ p, x, y, saved: true })} />
@@ -308,8 +368,9 @@ export function PresetsPanel(props: Props) {
         {!saved.length && <p className="muted small">No saved presets yet. Select cells (V) and choose “Save selection…”, or save one of the suggestions.</p>}
         {suggested && (
           <>
-            <div className="field-label">
-              Suggested for this map <span className="muted small">{suggested.length}</span>
+            <div className="preset-cat">
+              <span>Suggested for this map</span>
+              <span className="preset-cat-count">{suggested.length}</span>
             </div>
             <div className="preset-grid">
               {suggested.filter(match).map((p) => (

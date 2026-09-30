@@ -369,6 +369,11 @@ export function App() {
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
+  /** The Presets panel stays mounted (hidden) once opened, so switching back to it is instant. */
+  const [presetsOpened, setPresetsOpened] = useState(false);
+  useEffect(() => {
+    if (sidePanel === 'presets') setPresetsOpened(true);
+  }, [sidePanel]);
   const [presetBuilder, setPresetBuilder] = useState(false);
   const [presetImportBusy, setPresetImportBusy] = useState(false);
   const [presetImportError, setPresetImportError] = useState('');
@@ -4088,7 +4093,8 @@ export function App() {
                 </button>
               </div>
             )}
-            {tool !== 'object' && sidePanel === 'presets' && (
+            {tool !== 'object' && (sidePanel === 'presets' || presetsOpened) && (
+              <div hidden={sidePanel !== 'presets'} className="presets-host">
               <PresetsPanel
                 gd={data.gd}
                 isPrepared={(p) => {
@@ -4114,6 +4120,7 @@ export function App() {
                 confirmDelete={prefs.confirmBulkDelete}
                 onSuggest={() => void suggest()}
               />
+              </div>
             )}
             <section className="panel" hidden={tool === 'object' || sidePanel !== 'tiles'}>
               <div className="panel-header static">

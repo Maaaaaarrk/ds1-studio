@@ -1040,3 +1040,9 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .pref-grid .text-input { flex: 1; min-width: 160px; }
 .category-picker { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .light-num { width: 58px; padding: 2px 4px; font-size: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+/* Presets panel: category headings stand out from the cards (name, count, a rule). */
+.preset-cat { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.preset-cat:first-child { margin-top: 4px; }
+.preset-cat-count { margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--muted); background: var(--panel-2); border-radius: 999px; padding: 0 7px; }
+.preset-img.loading { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent) var(--bg); }
+.presets-host[hidden] { display: none !important; }
