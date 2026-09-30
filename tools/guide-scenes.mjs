@@ -265,6 +265,19 @@ export function makeScenes(h) {
       await closeDialogs();
     },
 
+    /** Game → Change level type, with a type chosen so the planned changes show. */
+    async levelType() {
+      await town();
+      await ribbonButton(/^Change level type/);
+      await sleep(1500);
+      await js(`[...document.querySelectorAll('.ct-row')].find((r) => r.querySelector('span').innerText.trim() === '7')?.click()`);
+      await sleep(800);
+      await js(`document.querySelector('.ct-list .ct-row.on')?.scrollIntoView({ block: 'center' })`);
+      await sleep(300);
+      await shot('change-level-type', await dialog());
+      await closeDialogs();
+    },
+
     /** Wall hiding, over a selection around a building's walls. */
     async wallHiding() {
       // A town with houses (Act 2's Lut Gholein): the first map the file list shows for it.

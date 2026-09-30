@@ -660,6 +660,7 @@
   <p>The <a href="#s-check">Compatibility check</a> checks the same rules for any map already in the game, and offers one-click fixes: rows out of order (put back in Id order; no Id changes), a preset pointing at a missing level, the level size, act, palette, an overlapping position, the file count and a copied quest requirement. A new level has no connections yet: link it with <a href="#ch-warps">warps</a> or open it with a <a href="#s-cube">cube recipe</a>. Set the DS1 header to Act 5 (the check offers it), so the map's object numbers are read as Act 5 objects.</p>
 
   <h3 id="s-lvltype">Changing a level's level type</h3>
+  <figure class="medium"><img src="img/change-level-type.png" alt="Change level type" /><figcaption>Game → Change level type…: the type list, why a type can only be used as a copy, and every change before Apply.</figcaption></figure>
   <p><b>Game → Change level type…</b> gives the map's level another level type (Levels.txt <code>LevelType</code>): the LvlTypes.txt row that lists the tile libraries the level can load, and whose AutoMap.txt pieces it draws. Pick the new type from the list; the dialog lists every change before anything is written, then the map reopens with its new type and the Compatibility check runs. What it does, following the game's own code:</p>
   <ul>
     <li>The new type lists every tile library the map uses (free <code>File</code> slots are filled from File 1, without gaps), and the map's <code>Dt1Mask</code> selects exactly those slots.</li>
