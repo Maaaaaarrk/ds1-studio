@@ -270,6 +270,28 @@ export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: import(
           </span>
         </span>
       </label>
+      <label className="pref-row">
+        <input type="checkbox" checked={prefs.act0View} onChange={(e) => onChange({ act0View: e.target.checked })} />
+        <span>
+          <b>Show maps in the Act 0 colours</b>
+          <span className="muted small">
+            {' '}
+            (on by default). Every map is drawn with the colours that look the same in every act, unless you picked a palette for it in View → Colours.
+            Off: each map opens in its own act&apos;s colours.
+          </span>
+        </span>
+      </label>
+      <label className="pref-row">
+        <input type="checkbox" checked={prefs.act0Magenta} onChange={(e) => onChange({ act0Magenta: e.target.checked })} />
+        <span>
+          <b>Mark colours that change between acts in magenta</b>
+          <span className="muted small">
+            {' '}
+            (off by default). Off: in the Act 0 colours, those pixels show as they look in the map&apos;s own act, so nothing is magenta. On: they turn
+            magenta, to find tiles that still need Map → Make act-safe.
+          </span>
+        </span>
+      </label>
       <div className="modal-actions">
         <button className="btn primary" onClick={onClose}>
           Done

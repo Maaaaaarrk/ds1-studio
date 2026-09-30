@@ -62,6 +62,20 @@ jobs:
           $conf.bundle.windows | Add-Member -NotePropertyName timestampUrl -NotePropertyValue 'http://timestamp.digicert.com' -Force
           $conf | ConvertTo-Json -Depth 20 | Set-Content src-tauri/tauri.conf.json
 
+      # Release notes: .github/release-notes/<tag>.md (written with each version), then how to install. They become the
+      # GitHub release text and the notes the in-app updater shows.
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          f=".github/release-notes/${GITHUB_REF_NAME}.md"
+          {
+            echo 'body<<NOTES_EOF'
+            if [ -f "$f" ]; then cat "$f"; echo; echo; fi
+            echo 'Windows users run the `-setup.exe`; Linux users take the `.AppImage` (self-updating), `.deb` or `.rpm`.'
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,7 +85,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: DS1 Studio ${{ github.ref_name }}
-          releaseBody: See the notes below for what changed. Windows users run the `-setup.exe`; Linux users take the `.AppImage` (self-updating), `.deb` or `.rpm`.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

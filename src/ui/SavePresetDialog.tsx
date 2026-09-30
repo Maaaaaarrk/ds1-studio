@@ -4,6 +4,7 @@ import { CLIP_PARTS, countParts, filterClipboard, type Clipboard, type ClipPart 
 import type { TileLibrary } from '../game/GameData';
 import { presetFromClipboard, type Preset } from '../game/presets';
 import { Modal } from './Dialogs';
+import { CategoryPicker } from './CategoryPicker';
 import { PresetThumb } from './PresetsPanel';
 
 /**
@@ -74,15 +75,10 @@ export function SavePresetDialog({
             <span>Name</span>
             <input value={name} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} />
           </label>
-          <label className="form-row">
+          <div className="form-row">
             <span>Category</span>
-            <input value={category} list="preset-categories" onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} />
-            <datalist id="preset-categories">
-              {categories.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-          </label>
+            <CategoryPicker categories={categories} value={category} onChange={setCategory} onEnter={() => void save()} />
+          </div>
           <div className="field-label">
             Keep <span className="muted small">{clip.width}×{clip.height} cells</span>
           </div>

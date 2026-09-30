@@ -74,7 +74,7 @@ import { checkMap, type CheckResult, type Fix } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef, type FileHistoryChange } from '../game/MapDocument';
-import { guessDrawnAct, openMap, rememberPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
+import { guessDrawnAct, openMap, refreshPalette, rememberPalette, setViewPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
@@ -228,12 +228,18 @@ export function App() {
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
   useEffect(() => { try { localStorage.setItem('ds1studio.wallCategories', JSON.stringify(visibility.wallCategories ?? {})); } catch { /* preferences may be unavailable */ } }, [visibility.wallCategories]);
   const viewMode: ViewMode = tool === 'object' ? 'objects' : modeOf(visibility);
-  // Changing view drops a selected object (and a double-clicked group): it belongs to the Objects view.
+  // Changing view (Tiles, Objects, Walkability…) drops what was selected: tiles, a tile picked from a stack, objects.
+  const firstView = useRef(true);
   useEffect(() => {
-    if (viewMode === 'objects') return;
+    if (firstView.current) {
+      firstView.current = false;
+      return;
+    }
     setSelectedObject(null);
     setObjectGroup(null);
-  }, [viewMode]);
+    setSelection(null);
+    setStack(null);
+  }, [viewMode]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Switches to a view mode, or back to editing tiles when it is already on. */
   const toggleMode = useCallback((m: ViewMode) => {
     const next = viewMode === m ? 'tiles' : m;
@@ -545,6 +551,16 @@ export function App() {
   const [unsavedAsk, setUnsavedAsk] = useState<{ closing: boolean; resolve: (c: 'save' | 'discard' | 'cancel') => void } | null>(null);
   const askUnsaved = useCallback((closing: boolean) => new Promise<'save' | 'discard' | 'cancel'>((resolve) => setUnsavedAsk({ closing, resolve })), []);
   const [prefs, setPrefs] = usePrefs();
+  // Maps open in the colours the preferences ask for (set before any map opens).
+  setViewPalette({ act0: prefs.act0View, magenta: prefs.act0Magenta });
+  const firstPrefs = useRef(true);
+  useEffect(() => {
+    if (firstPrefs.current) {
+      firstPrefs.current = false;
+      return;
+    }
+    if (data.status === 'ready' && map) void refreshPalette(data.gd, map).then(setMap);
+  }, [prefs.act0View, prefs.act0Magenta]); // eslint-disable-line react-hooks/exhaustive-deps
   const [prefsOpen, setPrefsOpen] = useState(false);
   /**
    * Before leaving the open map (opening another, or closing it): saves it when the preference says so, else asks.
@@ -898,7 +914,12 @@ export function App() {
   }, [stack, scene, hittable]);
   /** An area selection narrowed to one layer with Shift+scroll: Copy, Cut and Delete act on that layer only. */
   const [areaLayer, setAreaLayer] = useState<LayerRef | null>(null);
-  useEffect(() => setAreaLayer(null), [selection]);
+  /** A layer to narrow the next selection to (a double-clicked tile's layer), applied when it arrives. */
+  const pendingAreaLayer = useRef<LayerRef | null>(null);
+  useEffect(() => {
+    setAreaLayer(pendingAreaLayer.current);
+    pendingAreaLayer.current = null;
+  }, [selection]);
   const onlyLayer = focus ? layerOfItem(focus.item) : areaLayer;
   const cycleStack = useCallback(
     (dir: 1 | -1, world: [number, number]) => {
@@ -1207,9 +1228,40 @@ export function App() {
   );
 
   /** Double-clicking an object selects every object of the same kind on the map. */
+  /** Double-clicking a tile selects every cell with the same tile on that layer (Delete / Ctrl+C / Ctrl+X act on them). */
+  const selectSameTiles = useCallback(
+    (world: [number, number]) => {
+      if (!doc || !scene || viewMode !== 'tiles') return;
+      const item = hitTest(scene, world[0], world[1], hittable);
+      if (!item) return;
+      const layer = layerOfItem(item);
+      const here = doc.cell(layer, item.cellX, item.cellY);
+      if (isEmptyCell(here)) return;
+      const same = (c: TileCell | WallCell) =>
+        !isEmptyCell(c) && c.mainIndex === here.mainIndex && c.subIndex === here.subIndex && (layer.kind !== 'wall' || (c as WallCell).orientation === (here as WallCell).orientation);
+      const cells = new Set<number>();
+      let [x0, y0, x1, y1] = [Infinity, Infinity, -1, -1];
+      for (let y = 0; y < doc.ds1.height; y++)
+        for (let x = 0; x < doc.ds1.width; x++)
+          if (same(doc.cell(layer, x, y))) {
+            cells.add(cellKey(x, y));
+            [x0, y0, x1, y1] = [Math.min(x0, x), Math.min(y0, y), Math.max(x1, x), Math.max(y1, y)];
+          }
+      if (!cells.size) return;
+      setTool('select');
+      setStack(null);
+      pendingAreaLayer.current = layer;
+      setSelection({ x0, y0, x1, y1, cells });
+      notify(`Selected ${cells.size} × tile ${here.mainIndex}/${here.subIndex} on ${layerLabel(layer)} · Delete removes them, Ctrl+C / Ctrl+X copies or cuts them, Esc deselects`);
+    },
+    [doc, scene, hittable, notify, viewMode],
+  );
+
   const selectSameObjects = useCallback(
     (world: [number, number]) => {
       if (!doc) return;
+      // Outside object editing, a double-click selects tiles.
+      if (tool !== 'object' && viewMode !== 'objects') return selectSameTiles(world);
       const objs = doc.ds1.objects;
       let hit = -1;
       for (let i = objs.length - 1; i >= 0 && hit < 0; i--) {
@@ -1224,7 +1276,7 @@ export function App() {
       setObjectGroup(group.size > 1 ? group : null);
       notify(`Selected ${group.size} × ${objectLabel(objs[hit])}${group.size > 1 ? ' · Delete removes them, Ctrl+C / Ctrl+X copies or cuts them, Esc deselects' : ''}`);
     },
-    [doc, notify, objectLabel],
+    [doc, notify, objectLabel, tool, viewMode, selectSameTiles],
   );
 
   // Selection commands.
@@ -4086,7 +4138,7 @@ export function App() {
           onClose={() => setPresetSave(null)}
         />
       )}
-      {presetBuilder && map && gd && <PresetBuilder source={map} gd={gd} onSave={savePreset} onClose={() => setPresetBuilder(false)} />}
+      {presetBuilder && map && gd && <PresetBuilder source={map} gd={gd} categories={[...new Set(presets.map((p) => p.category))].sort()} onSave={savePreset} onClose={() => setPresetBuilder(false)} />}
       {commandsOpen && <CommandPalette commands={ribbonCommands(ribbonTabs)} onClose={() => setCommandsOpen(false)} />}
       {mapMenu && map && doc && scene && (
         <ContextMenu

@@ -1,7 +1,7 @@
 import { parseDs1, type Ds1 } from '../formats/ds1';
 import { decodeTile, type Dt1Tile } from '../formats/dt1';
 import { ACT0_PALETTE, OLD_ACT5_PALETTE, type Palette } from '../formats/palette';
-import { loadAct0Palette } from './act0Palette';
+import { act0Display, loadAct0Palette } from './act0Palette';
 import { BUILTIN_SPECIALS_PATH, builtinSpecialTiles } from './specialTiles';
 
 const SPECIALS = builtinSpecialTiles();
@@ -15,6 +15,8 @@ export interface OpenMap {
   /** 0-based act whose palette the map is drawn with, and how it was chosen. */
   paletteAct: number;
   paletteSource: PaletteSource;
+  /** The act the map would be drawn in without Act 0: its colours fill Act 0's act-specific slots. */
+  homeAct?: number;
   resolution: Dt1Resolution;
   lib: TileLibrary;
   palette: Palette;
@@ -33,14 +35,34 @@ export async function openMap(gd: GameData, path: string, override?: MapOverride
   resolution.paths.forEach((p, i) => lib.add(p, dt1s[i]));
   lib.addFallback(BUILTIN_SPECIALS_PATH, SPECIALS);
   const chosen = chosenPalette(path);
-  const [paletteAct, paletteSource] = chosen !== null ? [chosen, 'manual' as const] : await choosePaletteAct(gd, ds1, resolution, lib);
-  const palette = await mapPalette(gd, paletteAct);
-  return { path, ds1, resolution, lib, palette, paletteAct, paletteSource };
+  const [homeAct, autoSource] = await choosePaletteAct(gd, ds1, resolution, lib);
+  const [paletteAct, paletteSource] = chosen !== null ? [chosen, 'manual' as const] : viewPrefs.act0 ? [ACT0_PALETTE, autoSource] : [homeAct, autoSource];
+  const palette = await mapPalette(gd, paletteAct, homeAct);
+  return { path, ds1, resolution, lib, palette, paletteAct, paletteSource, homeAct };
 }
 
-/** A palette choice's colours: an act's, or Act 0 (act-safe colours, the rest magenta). */
-export async function mapPalette(gd: GameData, act: number): Promise<Palette> {
-  return act === ACT0_PALETTE ? (await loadAct0Palette(gd.fs)).palette : gd.palette(act);
+/** How maps are shown (Preferences): in the Act 0 colours by default, and whether act-specific colours show magenta. */
+const viewPrefs = { act0: true, magenta: false };
+export function setViewPalette(p: { act0: boolean; magenta: boolean }): void {
+  Object.assign(viewPrefs, p);
+}
+export const viewPalette = (): Readonly<typeof viewPrefs> => viewPrefs;
+
+/**
+ * A palette choice's colours: an act's, or Act 0 — the colours that look the same in every act, with the others in
+ * `homeAct`'s colours (how those pixels look in the map's own act) or magenta when that preference is on.
+ */
+export async function mapPalette(gd: GameData, act: number, homeAct?: number): Promise<Palette> {
+  if (act !== ACT0_PALETTE) return gd.palette(act);
+  const a0 = await loadAct0Palette(gd.fs);
+  return act0Display(a0, viewPrefs.magenta || homeAct === undefined ? null : await gd.palette(homeAct), viewPrefs.magenta);
+}
+
+/** The open map redrawn after the view preferences changed (a palette picked by hand is kept). */
+export async function refreshPalette(gd: GameData, map: OpenMap): Promise<OpenMap> {
+  const home = map.homeAct ?? (map.paletteAct === ACT0_PALETTE ? Math.min(4, map.ds1.act) : map.paletteAct);
+  const act = map.paletteSource === 'manual' ? map.paletteAct : viewPrefs.act0 ? ACT0_PALETTE : home;
+  return { ...map, paletteAct: act, homeAct: home, palette: await mapPalette(gd, act, home) };
 }
 
 /** Palettes picked by hand, per map, remembered on this computer so the map opens in them again. */
@@ -171,5 +193,5 @@ export function guessDrawnAct(tiles: Dt1Tile[], palettes: Palette[]): number | n
 /** Redraws an open map with another act's palette. */
 export async function withPalette(gd: GameData, map: OpenMap, act: number): Promise<OpenMap> {
   rememberPalette(map.path, act);
-  return { ...map, paletteAct: act, paletteSource: 'manual', palette: await mapPalette(gd, act) };
+  return { ...map, paletteAct: act, paletteSource: 'manual', palette: await mapPalette(gd, act, map.homeAct) };
 }

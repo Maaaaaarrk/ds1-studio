@@ -1,3 +1,4 @@
+import { viewPalette } from '../game/openMap';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, type WallCell } from '../formats/ds1';
 import { decodeTile, Orientation, type Dt1, type TileImage } from '../formats/dt1';
@@ -96,7 +97,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   });
   const [pal, setPal] = useState<{ palette: Palette; act: number; usable: boolean[] | null; source?: string; act0?: Act0Palette }>({ palette: map.palette, act: -2, usable: null });
   /** Show colours that change between acts as magenta (else in the tile's own act colours). */
-  const [highlightUnsafe, setHighlightUnsafe] = useState(false);
+  const [highlightUnsafe, setHighlightUnsafe] = useState(() => viewPalette().magenta);
   // The act the DT1 was made for (from its folder): the real colours behind Act 0's magenta slots, for conversions.
   const homeAct = useMemo(() => {
     const m = /tiles\/(?:act(\d)|(expansion))\//i.exec(path);

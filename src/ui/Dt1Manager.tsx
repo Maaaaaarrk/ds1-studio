@@ -1,3 +1,4 @@
+import { viewPalette } from '../game/openMap';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { tileKey } from '../game/dt1Review';
 import type { Dt1, Dt1Tile } from '../formats/dt1';
@@ -5,7 +6,7 @@ import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { normalizePath } from '../vfs/vfs';
 import { Thumb, TilePreview, tilePicture, usePreview } from './TilePalette';
-import { act0Remap, dt1Act, loadAct0Palette } from '../game/act0Palette';
+import { act0Display, act0Remap, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { ACT0_PALETTE, type Palette } from '../formats/palette';
 import { ORIENTATION_NAMES } from './state';
 import { isBuiltinPath } from '../game/specialTiles';
@@ -293,7 +294,11 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
     const act = palMode === 'own' ? (ownAct ?? map.ds1.act) : map.ds1.act;
     const load =
       palMode === 'act0'
-        ? loadAct0Palette(gd.fs).then((a) => ({ palette: a.palette, note: 'Act 0 palette (magenta = changes between acts)' }))
+        ? Promise.all([loadAct0Palette(gd.fs), gd.palette(ownAct ?? map.ds1.act)]).then(([a, home]) =>
+            viewPalette().magenta
+              ? { palette: a.palette, note: 'Act 0 palette (magenta = changes between acts)' }
+              : { palette: act0Display(a, home, false), note: 'Act 0 palette (colours that change between acts in this library’s own act)' },
+          )
         : gd.palette(act).then((palette) => ({ palette, note: `Act ${act + 1} palette` }));
     void load.then((p) => live && setPal(p)).catch(() => live && setPal(null));
     return () => {

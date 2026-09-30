@@ -1,3 +1,4 @@
+import { CategoryPicker } from './CategoryPicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { act0Remap, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { decodeTile } from '../formats/dt1';
@@ -23,8 +24,10 @@ import { TilePalette } from './TilePalette';
 import { DEFAULT_VISIBILITY, type Tool } from './state';
 
 /** An isolated scratch document. Closing it never changes the map underneath. */
-export function PresetBuilder({ source, gd, onSave, onClose }: {
+export function PresetBuilder({ source, gd, onSave, onClose, categories = [] }: {
   source: OpenMap; gd: GameData;
+  /** The saved presets' categories, to pick from. */
+  categories?: string[];
   onSave: (p: Preset, files: { path: string; bytes: Uint8Array }[]) => Promise<void>;
   onClose: () => void;
 }) {
@@ -41,7 +44,7 @@ export function PresetBuilder({ source, gd, onSave, onClose }: {
   const anchor = useRef<[number, number] | null>(null);
   const [fit, setFit] = useState(0);
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('My presets');
+  const [category, setCategory] = useState(categories.includes('My presets') || !categories.length ? 'My presets' : categories[0]);
   const [trim, setTrim] = useState(true);
   const [query, setQuery] = useState('');
   const [dt1Path, setDt1Path] = useState('');
@@ -225,7 +228,7 @@ export function PresetBuilder({ source, gd, onSave, onClose }: {
       <p className="muted small">Choose a layer and tile, then paint. Scroll to zoom; right-drag to pan. Saved presets are available to every map in this asset library.</p>
       <div className="builder-tools">
         <label>Name <input aria-label="Preset name" value={name} onChange={e => setName(e.target.value)} /></label>
-        <label>Category <input value={category} onChange={e => setCategory(e.target.value)} /></label>
+        <label>Category <CategoryPicker categories={categories} value={category} onChange={setCategory} /></label>
         <label><input type="checkbox" checked={trim} onChange={e => setTrim(e.target.checked)} /> Trim empty edges</label>
       </div>
       {error && <p className="error-text" role="alert">{error}</p>}
