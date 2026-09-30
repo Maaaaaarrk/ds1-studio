@@ -17,6 +17,7 @@ import {
   Expand,
   FilePlus2,
   FolderCog,
+  FileText,
   Footprints,
   Grid3x3,
   RefreshCw,
@@ -127,7 +128,7 @@ import { ObjectGallery } from './ObjectGallery';
 import type { SpriteAnimation } from '../game/spriteAnim';
 import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
-import { bugReportUrl, checkForUpdate, featureRequestUrl, openExternal, REPO_URL, type UpdateInfo } from '../app/updates';
+import { bugReportUrl, checkForUpdate, featureRequestUrl, GUIDE_URL, MANUAL_PDF_URL, openExternal, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
 import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
@@ -3552,7 +3553,8 @@ export function App() {
           label: 'Support',
           items: [
             { label: 'Find a command', icon: <Search />, onClick: () => setCommandsOpen(true), shortcut: kb['app.commands'], title: 'Type any command\u2019s name and run it' },
-            { label: 'User guide', icon: <BookOpen />, onClick: () => void openExternal(`${REPO_URL}#readme`), title: 'Features, shortcuts and how-tos' },
+            { label: 'User guide', icon: <BookOpen />, onClick: () => void openExternal(GUIDE_URL), title: 'The interactive guide: quick start, every tool, searchable shortcuts' },
+            { label: 'Manual (PDF)', icon: <FileText />, onClick: () => void openExternal(MANUAL_PDF_URL), size: 'sm', title: 'The printable manual' },
             { label: 'Shortcuts', icon: <Keyboard />, onClick: () => setDialog('shortcuts'), title: 'View and change keyboard shortcuts' },
             { label: 'Suggest a feature', icon: <Lightbulb />, onClick: () => void openExternal(featureRequestUrl({ map: map?.path })), size: 'sm', title: 'Open a pre-filled feature request on GitHub' },
             { label: 'Report a bug', icon: <Bug />, onClick: () => void openExternal(bugReportUrl({ map: map?.path })), size: 'sm', title: 'Open a pre-filled bug report on GitHub' },

@@ -3,6 +3,9 @@ import { isTauri } from '../vfs/tauri';
 /** Where releases, the update feed and bug reports live. */
 export const REPO = 'RoofooEvazan/ds1-studio';
 export const REPO_URL = `https://github.com/${REPO}`;
+/** The interactive guide and the PDF manual (GitHub Pages, built from docs/ by .github/workflows/pages.yml). */
+export const GUIDE_URL = 'https://roofooevazan.github.io/ds1-studio/';
+export const MANUAL_PDF_URL = `${GUIDE_URL}DS1-Studio-Manual.pdf`;
 export const APP_VERSION = __APP_VERSION__;
 export const GIT_COMMIT = __GIT_COMMIT__;
 export const BUILD_DATE = __BUILD_DATE__;

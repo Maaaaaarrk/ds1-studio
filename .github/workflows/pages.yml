@@ -1,0 +1,54 @@
+name: Guide site
+
+# Publishes the interactive guide (docs/guide) with its pictures and the PDF manual to GitHub Pages:
+# https://roofooevazan.github.io/ds1-studio/ (Help → User guide in the app opens it).
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The guide expects img/, media/ and posters/ next to it (as when it's published as an artifact).
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/img _site/media _site/posters
+          {
+            echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>'
+            cat docs/guide/index.html
+            echo '</body></html>'
+          } > _site/index.html
+          cp docs/manual/img/* _site/img/
+          cp docs/media/* _site/media/
+          cp docs/guide/posters/* _site/posters/
+          cp docs/manual/DS1-Studio-Manual.pdf _site/
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
