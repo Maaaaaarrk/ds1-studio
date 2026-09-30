@@ -188,9 +188,19 @@ function cellLine([x0, y0]: [number, number], [x1, y1]: [number, number]): [numb
 export function MapView(props: Props) {
   const { map, scene, visibility, hover, tool, ghost, selection, pasteRect, objectLabel, selectedObject, sprites, fitSignal, focus } = props;
   const popsInside = props.pops?.inside ? props.pops.hidden : null;
-  const previewCell = useMemo(() => hover ? (tool === 'select' && hover.world
-    ? combinedCellAt(scene, hover.world, [hover.cellX, hover.cellY], props.hittable)
-    : [hover.cellX, hover.cellY] as [number, number]) : null, [scene, hover, tool, props.hittable]);
+  const lastPreview = useRef<[number, number] | null>(null);
+  const previewCell = useMemo(() => {
+    const next = hover
+      ? tool === 'select' && hover.world
+        ? combinedCellAt(scene, hover.world, [hover.cellX, hover.cellY], props.hittable)
+        : ([hover.cellX, hover.cellY] as [number, number])
+      : null;
+    // The same array while the pointer stays in one cell, so moving within it redraws nothing.
+    const prev = lastPreview.current;
+    if (next && prev && next[0] === prev[0] && next[1] === prev[1]) return prev;
+    lastPreview.current = next;
+    return next;
+  }, [scene, hover, tool, props.hittable]);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
@@ -352,9 +362,72 @@ export function MapView(props: Props) {
     dirty.current = true;
   }, [props.gameView?.on, props.gameView?.width, props.gameView?.height]);
 
-  // Rebuild instances when the scene, layer visibility, hover or brush preview changes.
+  /**
+   * The map's instances as last built, with each scene tile's instance index: hovering and selecting only change
+   * flags (see the emphasis effect), and the brush preview is spliced in without rebuilding (see uploadWithGhosts).
+   */
+  const built = useRef<{ instances: Instance[]; slotIdx: number[]; slotItems: DrawItem[]; slotBase: number[] } | null>(null);
+  /** Emphasis (selected / hovered) for a scene tile with the current selection, focus, hover and tool. */
+  const emphasisOf = (it: DrawItem): number => {
+    if (tool === 'object' || props.walkBrush || ghost.length) return 0;
+    const e = tileEmphasis(it, tool === 'select' ? selection : null, tool === 'select' ? focus?.item ?? null : null, previewCell, tool === 'select' ? props.areaLayer ?? null : null);
+    return e === 'selected' ? InstanceFlag.Highlight : e === 'hover' ? InstanceFlag.Preview : 0;
+  };
+  /** Uploads the built instances plus the brush / paste preview ("ghost") tiles. */
+  const uploadWithGhosts = () => {
+    const b = built.current;
+    if (!b || !renderer.current) return;
+    const a = atlas.current;
+    const ghostInstance = (g: GhostTile): Instance | null => {
+      const e = a.get(g.tile);
+      return e ? { x: g.x + e.image.offsetX, y: g.y + e.image.offsetY, w: e.image.width, h: e.image.height, u: e.u, v: e.v, layer: e.layer, flags: InstanceFlag.Ghost } : null;
+    };
+    if (!ghost.length) {
+      renderer.current.syncAtlas(a);
+      renderer.current.setInstances(b.instances);
+      dirty.current = true;
+      return;
+    }
+    // A wall placed on a lower layer goes behind the higher layers' tiles at its cell: insert it before the first of them.
+    const inserts: { at: number; inst: Instance }[] = [];
+    const tail: Instance[] = [];
+    for (const g of ghost) {
+      const inst = ghostInstance(g);
+      if (!inst) continue;
+      let at = -1;
+      if (g.depth) {
+        const d = g.depth;
+        for (let k = 0; k < b.slotItems.length; k++) {
+          const it = b.slotItems[k];
+          if (it.kind !== 'floor' && it.kind !== 'shadow' && it.cellX === d.cellX && it.cellY === d.cellY && it.layer > d.wallLayer) {
+            at = b.slotIdx[k];
+            break;
+          }
+        }
+      }
+      if (at >= 0) inserts.push({ at, inst });
+      else tail.push(inst);
+    }
+    inserts.sort((p, q) => p.at - q.at);
+    const out: Instance[] = [];
+    let from = 0;
+    for (const ins of inserts) {
+      for (; from < ins.at; from++) out.push(b.instances[from]);
+      out.push(ins.inst);
+    }
+    for (; from < b.instances.length; from++) out.push(b.instances[from]);
+    out.push(...tail);
+    renderer.current.syncAtlas(a);
+    renderer.current.setInstances(out);
+    dirty.current = true;
+  };
+
+  // Rebuild instances when the scene, layer visibility, tool, objects or animation frame changes.
   useEffect(() => {
     const instances: Instance[] = [];
+    const slotIdx: number[] = [];
+    const slotItems: DrawItem[] = [];
+    const slotBase: number[] = [];
     const a = atlas.current;
     const push = (tile: Dt1Tile, x: number, y: number, flags: number) => {
       const e = a.get(tile);
@@ -389,36 +462,58 @@ export function MapView(props: Props) {
         }
       }
     };
-    // A wall being placed on a lower layer goes behind the higher layers' tiles at its cell (the layer shows).
-    const pendingGhosts = ghost.filter((g) => g.depth);
     for (const it of scene.items) {
-      if (pendingGhosts.length && it.kind !== 'floor' && it.kind !== 'shadow')
-        for (let k = pendingGhosts.length - 1; k >= 0; k--) {
-          const d = pendingGhosts[k].depth!;
-          if (d.cellX === it.cellX && d.cellY === it.cellY && it.layer > d.wallLayer) {
-            push(pendingGhosts[k].tile, pendingGhosts[k].x, pendingGhosts[k].y, InstanceFlag.Ghost);
-            pendingGhosts.splice(k, 1);
-          }
-        }
       if (it.kind === 'wall') flushObjects(it.cellX + it.cellY - 1);
       else if (it.kind === 'roof' || it.kind === 'special') flushObjects(Infinity);
       if (!isVisible(it, visibility)) continue;
       if (popsInside && (it.kind === 'wall' || it.kind === 'roof' || it.kind === 'lowerWall') && popsInside.has(`${it.layer}:${it.cellX}:${it.cellY}`)) continue;
-      let flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
-      if (tool !== 'object' && !props.walkBrush && !ghost.length) {
-        const emphasis = tileEmphasis(it, tool === 'select' ? selection : null, tool === 'select' ? focus?.item ?? null : null, previewCell, tool === 'select' ? props.areaLayer ?? null : null);
-        if (emphasis === 'selected') flags |= InstanceFlag.Highlight;
-        else if (emphasis === 'hover') flags |= InstanceFlag.Preview;
-      }
+      const flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
       const tile = it.frames && visibility.animate ? it.frames[floorFrame % it.frames.length] : it.tile;
-      push(tile, it.x, it.y, flags);
+      const before = instances.length;
+      push(tile, it.x, it.y, flags | emphasisOf(it));
+      if (instances.length > before) {
+        slotIdx.push(before);
+        slotItems.push(it);
+        slotBase.push(flags);
+      }
     }
     flushObjects(Infinity);
-    for (const g of ghost) if (!g.depth || pendingGhosts.includes(g)) push(g.tile, g.x, g.y, InstanceFlag.Ghost);
-    renderer.current!.syncAtlas(a);
-    renderer.current!.setInstances(instances);
+    built.current = { instances, slotIdx, slotItems, slotBase };
+    uploadWithGhosts();
+  }, [scene, visibility, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, props.selectedObjects, popsInside, !!props.walkBrush]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The brush / paste preview moved: splice it in (no rebuild).
+  const hadGhost = useRef(false);
+  useEffect(() => {
+    if (!ghost.length && !hadGhost.current) return; // still no preview: nothing to do
+    // Emphasis is off while a preview shows; put it back (or take it away) in the flags first.
+    if (hadGhost.current !== ghost.length > 0) {
+      hadGhost.current = ghost.length > 0;
+      const b = built.current;
+      if (b) for (let k = 0; k < b.slotIdx.length; k++) b.instances[b.slotIdx[k]].flags = b.slotBase[k] | emphasisOf(b.slotItems[k]);
+    }
+    uploadWithGhosts();
+  }, [ghost]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hover and selection: only the tiles whose emphasis changed get new flags.
+  useEffect(() => {
+    const b = built.current;
+    if (!b || !renderer.current) return;
+    const changes = new Map<number, number>();
+    for (let k = 0; k < b.slotIdx.length; k++) {
+      const inst = b.instances[b.slotIdx[k]];
+      const f = b.slotBase[k] | emphasisOf(b.slotItems[k]);
+      if (inst.flags !== f) {
+        inst.flags = f;
+        changes.set(b.slotIdx[k], f);
+      }
+    }
+    if (!changes.size) return;
+    // With a preview spliced in, the indices are shifted: upload the lot.
+    if (ghost.length) uploadWithGhosts();
+    else renderer.current.setFlags(changes);
     dirty.current = true;
-  }, [scene, visibility, previewCell, selection, ghost, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, props.selectedObjects, focus, props.areaLayer, popsInside, !!props.walkBrush]);
+  }, [previewCell, selection, focus, props.areaLayer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     dirty.current = true;

@@ -282,12 +282,25 @@ export function sameItem(a: DrawItem, b: DrawItem): boolean {
  * Every tile with an opaque pixel under a world point, frontmost first (overlapping trees, a wall over a floor…).
  * The two halves of a north-corner wall count once.
  */
-export function hitTestAll(scene: Scene, wx: number, wy: number, visible: (it: DrawItem) => boolean, limit = Infinity): DrawItem[] {
-  const out: DrawItem[] = [];
-  for (let i = scene.items.length - 1; i >= 0 && out.length < limit; i--) {
+/** World-space grid cell size of the hit-test index. */
+const HIT_CELL = 128;
+interface HitIndex {
+  /** Per item: its blocks' bounding box relative to the item (minX, minY, maxX, maxY). */
+  boxes: Float32Array;
+  /** Grid bucket "gx,gy" → item indices, in draw order. */
+  grid: Map<number, number[]>;
+}
+const hitIndexes = new WeakMap<Scene, HitIndex>();
+const bucketKey = (gx: number, gy: number) => (gx + 32768) * 65536 + (gy + 32768);
+/** Built once per scene: the bounding box of every tile, and which grid cells it touches. */
+function hitIndex(scene: Scene): HitIndex {
+  let idx = hitIndexes.get(scene);
+  if (idx) return idx;
+  const n = scene.items.length;
+  const boxes = new Float32Array(n * 4);
+  const grid = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
     const it = scene.items[i];
-    if (it.kind === 'shadow' || !visible(it)) continue;
-    // Cheap reject on the block bounding box before decoding pixels.
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const b of it.tile.blocks) {
       minX = Math.min(minX, b.x);
@@ -295,9 +308,36 @@ export function hitTestAll(scene: Scene, wx: number, wy: number, visible: (it: D
       maxX = Math.max(maxX, b.x + 32);
       maxY = Math.max(maxY, b.y + (b.format === 1 ? 15 : 32));
     }
+    boxes.set([minX, minY, maxX, maxY], i * 4);
+    if (it.kind === 'shadow' || !Number.isFinite(minX)) continue;
+    const gx0 = Math.floor((it.x + minX) / HIT_CELL), gx1 = Math.floor((it.x + maxX) / HIT_CELL);
+    const gy0 = Math.floor((it.y + minY) / HIT_CELL), gy1 = Math.floor((it.y + maxY) / HIT_CELL);
+    for (let gy = gy0; gy <= gy1; gy++)
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const k = bucketKey(gx, gy);
+        const list = grid.get(k);
+        if (list) list.push(i);
+        else grid.set(k, [i]);
+      }
+  }
+  idx = { boxes, grid };
+  hitIndexes.set(scene, idx);
+  return idx;
+}
+
+export function hitTestAll(scene: Scene, wx: number, wy: number, visible: (it: DrawItem) => boolean, limit = Infinity): DrawItem[] {
+  const out: DrawItem[] = [];
+  const { boxes, grid } = hitIndex(scene);
+  // Only the tiles whose bounding box touches this spot's grid cell, front to back.
+  const candidates = grid.get(bucketKey(Math.floor(wx / HIT_CELL), Math.floor(wy / HIT_CELL))) ?? [];
+  for (let c = candidates.length - 1; c >= 0 && out.length < limit; c--) {
+    const i = candidates[c];
+    const it = scene.items[i];
+    // Cheap reject on the block bounding box before anything else.
     const lx = Math.floor(wx - it.x);
     const ly = Math.floor(wy - it.y);
-    if (lx < minX || ly < minY || lx >= maxX || ly >= maxY) continue;
+    if (lx < boxes[i * 4] || ly < boxes[i * 4 + 1] || lx >= boxes[i * 4 + 2] || ly >= boxes[i * 4 + 3]) continue;
+    if (!visible(it)) continue;
     const img = decodeTile(it.tile);
     if (!img) continue;
     const px = lx - img.offsetX;

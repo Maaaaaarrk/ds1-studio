@@ -250,15 +250,61 @@ export class MapRenderer {
   }
 
   setInstances(instances: Instance[]): void {
-    const data = new Float32Array(instances.length * FLOATS_PER_INSTANCE);
-    instances.forEach((it, i) => {
-      data.set([it.x, it.y, it.w, it.h, it.u, it.v, it.layer, it.flags], i * FLOATS_PER_INSTANCE);
-    });
+    const n = instances.length;
+    // Reuse the array while it's big enough (rebuilds happen every animation frame on maps with animated objects).
+    if (!this.data || this.data.length < n * FLOATS_PER_INSTANCE) this.data = new Float32Array(Math.max(n, 1024) * FLOATS_PER_INSTANCE * 1.25);
+    const data = this.data;
+    for (let i = 0, o = 0; i < n; i++, o += FLOATS_PER_INSTANCE) {
+      const it = instances[i];
+      data[o] = it.x;
+      data[o + 1] = it.y;
+      data[o + 2] = it.w;
+      data[o + 3] = it.h;
+      data[o + 4] = it.u;
+      data[o + 5] = it.v;
+      data[o + 6] = it.layer;
+      data[o + 7] = it.flags;
+    }
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-    this.instanceCount = instances.length;
+    if (n * FLOATS_PER_INSTANCE <= this.bufferFloats) gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * FLOATS_PER_INSTANCE);
+    else {
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      this.bufferFloats = data.length;
+    }
+    this.instanceCount = n;
   }
+
+  /**
+   * Changes the flags (highlight, hover…) of some instances without rebuilding the rest: hovering and selecting only
+   * touch the tiles whose emphasis changed. `changes` maps instance index → new flags.
+   */
+  setFlags(changes: Map<number, number>): void {
+    const data = this.data;
+    if (!data || !changes.size) return;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
+    let lo = Infinity;
+    let hi = -1;
+    for (const [i, f] of changes) {
+      if (i >= this.instanceCount) continue;
+      data[i * FLOATS_PER_INSTANCE + 7] = f;
+      lo = Math.min(lo, i);
+      hi = Math.max(hi, i);
+    }
+    if (hi < 0) return;
+    // Few scattered changes: one small upload each; else one upload of the span.
+    if (changes.size <= 64)
+      for (const i of changes.keys()) {
+        if (i < this.instanceCount) gl.bufferSubData(gl.ARRAY_BUFFER, (i * FLOATS_PER_INSTANCE + 7) * 4, data, i * FLOATS_PER_INSTANCE + 7, 1);
+      }
+    else gl.bufferSubData(gl.ARRAY_BUFFER, lo * FLOATS_PER_INSTANCE * 4, data, lo * FLOATS_PER_INSTANCE, (hi - lo + 1) * FLOATS_PER_INSTANCE);
+  }
+
+  /** The instance data last uploaded (reused between rebuilds). */
+  private data: Float32Array | null = null;
+  /** Size of the GPU buffer, in floats. */
+  private bufferFloats = 0;
 
   /** Multiplies every drawn colour: the level's light when previewing it, else 1 (tiles as stored). */
   light: [number, number, number] = [1, 1, 1];

@@ -48,8 +48,22 @@ function Toggle({ label, checked, onChange, count, swatch, hotkey }: { label: st
 
 export function LayersPanel({ map, scene, visibility: v, onChange, keys }: { map: OpenMap; scene: Scene; visibility: Visibility; onChange: (v: Visibility) => void; keys: Bindings }) {
   const { ds1 } = map;
-  const count = (kind: string, layer?: number) => scene.items.filter((i) => i.kind === kind && (layer === undefined || i.layer === layer)).length;
-  const wallCount = (category: 'upper' | 'lower') => scene.items.filter(i => (i.kind === 'wall' || i.kind === 'lowerWall') && wallCategory(i.tile.orientation, i.sourcePath, v.wallCategories) === category).length;
+  // One pass over the scene (it has every tile on the map), redone only when the scene or wall categories change.
+  const counts = useMemo(() => {
+    const byKind = new Map<string, number>();
+    const walls = { upper: 0, lower: 0 };
+    for (const i of scene.items) {
+      byKind.set(i.kind, (byKind.get(i.kind) ?? 0) + 1);
+      byKind.set(`${i.kind}:${i.layer}`, (byKind.get(`${i.kind}:${i.layer}`) ?? 0) + 1);
+      if (i.kind === 'wall' || i.kind === 'lowerWall') {
+        const c = wallCategory(i.tile.orientation, i.sourcePath, v.wallCategories);
+        if (c === 'upper' || c === 'lower') walls[c]++;
+      }
+    }
+    return { byKind, walls };
+  }, [scene, v.wallCategories]);
+  const count = (kind: string, layer?: number) => counts.byKind.get(layer === undefined ? kind : `${kind}:${layer}`) ?? 0;
+  const wallCount = (category: 'upper' | 'lower') => counts.walls[category];
   const set = (patch: Partial<Visibility>) => onChange({ ...v, ...patch });
   const setIdx = (key: 'floors' | 'walls', i: number, val: boolean) => {
     const arr = [...v[key]];

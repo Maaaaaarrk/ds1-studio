@@ -221,7 +221,10 @@ interface Entry {
 
 const shortPath = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
-export function TilePalette({ lib, palette, layerKind, onLayerKindChange, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
+/** Re-renders only when its own props change: hovering the map re-renders the app, not the palette. */
+export const TilePalette = memo(TilePaletteImpl);
+
+function TilePaletteImpl({ lib, palette, layerKind, onLayerKindChange, brush, mix = [], focus, onPick, recent = [], favourites = [], onToggleFavourite }: Props) {
   const [filter, setFilter] = useState<TileCategory>('walls');
   const category = layerKind === 'floor' ? 'floors' : layerKind === 'shadow' ? 'shadows' : ['floors', 'shadows'].includes(filter) ? 'walls' : filter;
   const [query, setQuery] = useState('');

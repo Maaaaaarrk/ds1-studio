@@ -1,11 +1,13 @@
 import type { Ds1 } from '../formats/ds1';
 import type { Visibility } from './state';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import type { TileLibrary } from '../game/GameData';
 import { wallCategory, wallLibraryKey, type WallCategory } from '../game/wallCategories';
 
 /** Always available above the map, including when the side panels are folded. */
-export function MapLayerBar({ ds1, lib, visibility: v, onChange }: { ds1: Ds1; lib: TileLibrary; visibility: Visibility; onChange: (v: Visibility) => void }) {
+export const MapLayerBar = memo(MapLayerBarImpl);
+
+function MapLayerBarImpl({ ds1, lib, visibility: v, onChange }: { ds1: Ds1; lib: TileLibrary; visibility: Visibility; onChange: (v: Visibility) => void }) {
   const libraries = useMemo(() => lib.loaded.map(source => {
     const tiles = lib.tilesOf(source.path).filter(t => wallCategory(t.orientation));
     return {path:source.path,tiles};

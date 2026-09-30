@@ -172,6 +172,9 @@ interface Toast {
 }
 
 /** The editable layer a drawn item belongs to. */
+/** No brush or paste preview (one array, so the map view sees nothing changed while hovering). */
+const NO_GHOSTS: GhostTile[] = [];
+
 function layerOfItem(it: DrawItem): LayerRef {
   return it.kind === 'floor' ? { kind: 'floor', index: it.layer } : it.kind === 'shadow' ? { kind: 'shadow', index: it.layer } : { kind: 'wall', index: it.layer };
 }
@@ -568,6 +571,20 @@ export function App() {
   /** The preferences for callbacks that shouldn't be rebuilt when one changes. */
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
+  // The Tiles panel's callbacks stay the same functions across renders (it only re-renders when its props change);
+  // paletteState is filled in further down, once the layers and tile set are known.
+  const paletteState = useRef<{ layers: LayerRef[]; tileSet: string }>({ layers: [], tileSet: '' });
+  const paletteLayerKind = useCallback((kind: LayerRef['kind']) => {
+    const next = paletteState.current.layers.find((l) => l.kind === kind);
+    if (next) {
+      setActiveLayer(next);
+      setPaletteFocus(null);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const paletteToggleFavourite = useCallback((b: Brush) => {
+    const set = paletteState.current.tileSet;
+    if (set) setPinned(togglePinned(set, b));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Maps open in the colours the preferences ask for (set before any map opens).
   setViewPalette({ act0: prefs.act0View, magenta: prefs.act0Magenta });
   const firstPrefs = useRef(true);
@@ -913,7 +930,7 @@ export function App() {
     return [...out.values()];
   }, [pasting, clipboard, hover, doc, revision, prefs.pasteStack]); // eslint-disable-line react-hooks/exhaustive-deps
   const ghost = useMemo((): GhostTile[] => {
-    if (!map || !hover) return [];
+    if (!map || !hover) return NO_GHOSTS;
     if (pasting && clipboard) {
       return clipboard.layers.flatMap(({ layer, cells }) =>
         layer.kind === 'shadow'
@@ -925,7 +942,7 @@ export function App() {
             }),
       );
     }
-    if (tool !== 'paint' || !brush) return [];
+    if (tool !== 'paint' || !brush) return NO_GHOSTS;
     const depth = activeLayer.kind === 'wall' ? { cellX: hover.cellX, cellY: hover.cellY, wallLayer: activeLayer.index } : undefined;
     return tilesAt(map.lib, brushOrientation(activeLayer, brush), brush.main, brush.sub, hover.cellX, hover.cellY).map((g) => ({ ...g, depth }));
   }, [map, hover, tool, brush, activeLayer, pasting, clipboard]);
@@ -3317,6 +3334,7 @@ export function App() {
   }
 
   const layers = doc?.layers() ?? [];
+  paletteState.current = { layers, tileSet };
   const title = map?.path.split('/').pop();
   const noMap = !doc || !map;
   const canWrite = !!data.saveTarget;
@@ -4116,17 +4134,14 @@ export function App() {
                 lib={map.lib}
                 palette={map.palette}
                 layerKind={activeLayer.kind}
-                onLayerKindChange={(kind) => {
-                  const next = layers.find((l) => l.kind === kind);
-                  if (next) { setActiveLayer(next); setPaletteFocus(null); }
-                }}
+                onLayerKindChange={paletteLayerKind}
                 brush={brush}
                 mix={mix}
                 focus={paletteFocus}
                 onPick={pickBrush}
                 recent={recentTileList}
                 favourites={pinned}
-                onToggleFavourite={(b) => tileSet && setPinned(togglePinned(tileSet, b))}
+                onToggleFavourite={paletteToggleFavourite}
               />
             </section>
             {selection && !isSingleCell(selection) && (
