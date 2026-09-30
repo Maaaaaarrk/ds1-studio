@@ -238,7 +238,7 @@
 
 <header class="top">
   <button class="menu-btn" id="menuBtn" aria-controls="toc" aria-expanded="false">Contents</button>
-  <div class="brand"><b>DS1 Studio</b><span>Field guide · v0.2.27</span></div>
+  <div class="brand"><b>DS1 Studio</b><span>Field guide</span></div>
   <div class="search">
     <input id="q" type="search" placeholder="Search the guide (e.g. warp, Act 0, paste)" aria-label="Search the guide" autocomplete="off" />
     <span class="hint"><kbd>/</kbd></span>
@@ -902,6 +902,14 @@
       }
     }
   }
+
+  // A link to a section (#quick-start…) lands before the pictures above it have loaded: go there again once they have.
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  window.addEventListener('load', () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    const el = id && document.getElementById(id);
+    if (el) el.scrollIntoView();
+  });
 
   // ---- Contents, built from the chapters and topics
   const toc = $('#toc');
