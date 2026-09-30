@@ -232,7 +232,6 @@ export function MapView(props: Props) {
     const t = setInterval(() => setFrame((f) => f + ms / 40), ms);
     return () => clearInterval(t);
   }, [scene.animated, visibility.animate, hasObjectAnims]);
-  const floorFrame = Math.floor(frame / 2.5);
 
   // One renderer per canvas; redraw on demand.
   useEffect(() => {
@@ -366,7 +365,19 @@ export function MapView(props: Props) {
    * The map's instances as last built, with each scene tile's instance index: hovering and selecting only change
    * flags (see the emphasis effect), and the brush preview is spliced in without rebuilding (see uploadWithGhosts).
    */
-  const built = useRef<{ instances: Instance[]; slotIdx: number[]; slotItems: DrawItem[]; slotBase: number[] } | null>(null);
+  const built = useRef<{
+    instances: Instance[];
+    slotIdx: number[];
+    slotItems: DrawItem[];
+    slotBase: number[];
+    /** Animated objects: a fixed run of instances each (the most parts any frame has; unused ones drawn empty). */
+    animObjs: { start: number; count: number; i: number; anim: NonNullable<Props['animations']> extends Map<string, infer A> ? A : never; wx: number; wy: number; flags: number }[];
+    /** Animated floor tiles (water, lava): one instance each. */
+    animFloors: { index: number; it: DrawItem; slot: number }[];
+  } | null>(null);
+  /** The animation frame, read by the rebuild (which must not rerun on every frame). */
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
   /** Emphasis (selected / hovered) for a scene tile with the current selection, focus, hover and tool. */
   const emphasisOf = (it: DrawItem): number => {
     if (tool === 'object' || props.walkBrush || ghost.length) return 0;
@@ -422,12 +433,31 @@ export function MapView(props: Props) {
     dirty.current = true;
   };
 
-  // Rebuild instances when the scene, layer visibility, tool, objects or animation frame changes.
+  /** The instances of an animated object at animation frame `f`: its parts, then empty ones up to its run length. */
+  const objectFrame = (slot: NonNullable<typeof built.current>['animObjs'][number], f: number): Instance[] => {
+    const a = atlas.current;
+    const parts = slot.anim.parts[Math.floor((f / 25) * slot.anim.fps + slot.i * 7) % slot.anim.parts.length];
+    const out: Instance[] = [];
+    for (const part of parts) {
+      const e = a.getImage(part.image, part.image);
+      if (!e) continue;
+      const img = part.image;
+      out.push({ x: slot.wx + img.offsetX, y: slot.wy + 4 + img.offsetY, w: img.width, h: img.height, u: e.u, v: e.v, layer: e.layer, flags: slot.flags | blendFlag(part.blend) });
+    }
+    while (out.length < slot.count) out.push({ x: slot.wx, y: slot.wy, w: 0, h: 0, u: 0, v: 0, layer: 0, flags: 0 });
+    return out;
+  };
+
+  // Rebuild instances when the scene, layer visibility, tool or objects change (animation frames only patch, below).
   useEffect(() => {
     const instances: Instance[] = [];
     const slotIdx: number[] = [];
     const slotItems: DrawItem[] = [];
     const slotBase: number[] = [];
+    const animObjs: NonNullable<typeof built.current>['animObjs'] = [];
+    const animFloors: NonNullable<typeof built.current>['animFloors'] = [];
+    const frameNow = frameRef.current;
+    const floorFrameNow = Math.floor(frameNow / 2.5);
     const a = atlas.current;
     const push = (tile: Dt1Tile, x: number, y: number, flags: number) => {
       const e = a.get(tile);
@@ -451,9 +481,17 @@ export function MapView(props: Props) {
         const anim = animations?.get(`${o.type}:${o.id}`);
         const [wx, wy] = subTileToWorld(o.x, o.y);
         const flags = i === selectedObject || props.selectedObjects?.has(i) ? InstanceFlag.Highlight : 0;
-        const parts = anim?.parts.length
-          ? anim.parts[visibility.animate ? Math.floor((frame / 25) * anim.fps + i * 7) % anim.parts.length : 0]
-          : [{ image: sprite, blend: -1 }];
+        if (anim && anim.parts.length > 1 && visibility.animate) {
+          // A fixed run of instances, patched frame by frame; every frame's images go into the atlas now.
+          const count = Math.max(...anim.parts.map((p) => p.length));
+          for (const f of anim.parts) for (const part of f) a.getImage(part.image, part.image);
+          const start = instances.length;
+          const slot = { start, count, i, anim, wx, wy, flags };
+          instances.push(...objectFrame(slot, frameNow));
+          animObjs.push(slot);
+          continue;
+        }
+        const parts = anim?.parts.length ? anim.parts[0] : [{ image: sprite, blend: -1 }];
         for (const part of parts) {
           const e = a.getImage(part.image, part.image);
           if (!e) continue;
@@ -468,19 +506,56 @@ export function MapView(props: Props) {
       if (!isVisible(it, visibility)) continue;
       if (popsInside && (it.kind === 'wall' || it.kind === 'roof' || it.kind === 'lowerWall') && popsInside.has(`${it.layer}:${it.cellX}:${it.cellY}`)) continue;
       const flags = it.kind === 'shadow' ? InstanceFlag.Shadow : it.kind === 'floor' ? InstanceFlag.Floor : 0;
-      const tile = it.frames && visibility.animate ? it.frames[floorFrame % it.frames.length] : it.tile;
+      const animated = !!it.frames && visibility.animate;
+      if (animated) for (const f of it.frames!) a.get(f);
+      const tile = animated ? it.frames![floorFrameNow % it.frames!.length] : it.tile;
       const before = instances.length;
       push(tile, it.x, it.y, flags | emphasisOf(it));
       if (instances.length > before) {
+        if (animated) animFloors.push({ index: before, it, slot: slotIdx.length });
         slotIdx.push(before);
         slotItems.push(it);
         slotBase.push(flags);
       }
     }
     flushObjects(Infinity);
-    built.current = { instances, slotIdx, slotItems, slotBase };
+    built.current = { instances, slotIdx, slotItems, slotBase, animObjs, animFloors };
     uploadWithGhosts();
-  }, [scene, visibility, hasObjectAnims ? frame : floorFrame, tool, sprites, animations, selectedObject, props.selectedObjects, popsInside, !!props.walkBrush]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scene, visibility, tool, sprites, animations, selectedObject, props.selectedObjects, popsInside, !!props.walkBrush]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A new animation frame: only the animated objects' and floors' instances change.
+  useEffect(() => {
+    const b = built.current;
+    if (!b || !renderer.current || (!b.animObjs.length && !b.animFloors.length)) return;
+    const a = atlas.current;
+    const updates: { index: number; inst: Instance }[] = [];
+    for (const slot of b.animObjs) {
+      const insts = objectFrame(slot, frame);
+      insts.forEach((inst, k) => {
+        const index = slot.start + k;
+        const cur = b.instances[index];
+        if (cur.u === inst.u && cur.v === inst.v && cur.layer === inst.layer && cur.x === inst.x && cur.w === inst.w) return;
+        b.instances[index] = inst;
+        updates.push({ index, inst });
+      });
+    }
+    const ff = Math.floor(frame / 2.5);
+    for (const f of b.animFloors) {
+      const tile = f.it.frames![ff % f.it.frames!.length];
+      const e = a.get(tile);
+      if (!e) continue;
+      const cur = b.instances[f.index];
+      if (cur.u === e.u && cur.v === e.v && cur.layer === e.layer) continue;
+      const inst = { ...cur, x: f.it.x + e.image.offsetX, y: f.it.y + e.image.offsetY, w: e.image.width, h: e.image.height, u: e.u, v: e.v, layer: e.layer };
+      b.instances[f.index] = inst;
+      updates.push({ index: f.index, inst });
+    }
+    if (!updates.length) return;
+    // With a preview spliced in, the indices are shifted: upload the lot.
+    if (ghost.length) uploadWithGhosts();
+    else renderer.current.patchInstances(updates);
+    dirty.current = true;
+  }, [frame]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The brush / paste preview moved: splice it in (no rebuild).
   const hadGhost = useRef(false);

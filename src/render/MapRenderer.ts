@@ -301,6 +301,35 @@ export class MapRenderer {
     else gl.bufferSubData(gl.ARRAY_BUFFER, lo * FLOATS_PER_INSTANCE * 4, data, lo * FLOATS_PER_INSTANCE, (hi - lo + 1) * FLOATS_PER_INSTANCE);
   }
 
+  /**
+   * Replaces some instances in place (animation frames: an object's parts or an animated floor tile), uploading only
+   * the span they cover.
+   */
+  patchInstances(updates: { index: number; inst: Instance }[]): void {
+    const data = this.data;
+    if (!data || !updates.length) return;
+    let lo = Infinity;
+    let hi = -1;
+    for (const { index, inst } of updates) {
+      if (index >= this.instanceCount) continue;
+      const o = index * FLOATS_PER_INSTANCE;
+      data[o] = inst.x;
+      data[o + 1] = inst.y;
+      data[o + 2] = inst.w;
+      data[o + 3] = inst.h;
+      data[o + 4] = inst.u;
+      data[o + 5] = inst.v;
+      data[o + 6] = inst.layer;
+      data[o + 7] = inst.flags;
+      lo = Math.min(lo, index);
+      hi = Math.max(hi, index);
+    }
+    if (hi < 0) return;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, lo * FLOATS_PER_INSTANCE * 4, data, lo * FLOATS_PER_INSTANCE, (hi - lo + 1) * FLOATS_PER_INSTANCE);
+  }
+
   /** The instance data last uploaded (reused between rebuilds). */
   private data: Float32Array | null = null;
   /** Size of the GPU buffer, in floats. */
