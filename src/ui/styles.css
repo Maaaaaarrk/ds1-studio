@@ -1032,3 +1032,10 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .shorten-table .good { color: var(--muted); }
 .paste-doomed { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 5; padding: 4px 10px; font-size: 12px; background: rgba(8, 9, 12, 0.85); border: 1px solid var(--border); border-radius: 6px; pointer-events: none; color: var(--muted); }
 .paste-doomed.bad { color: #ff8a9a; border-color: rgba(255, 70, 90, 0.7); }
+.pref-section { margin: 14px 0 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.pref-section:first-of-type { margin-top: 0; }
+.pref-slider { flex-wrap: wrap; align-items: center; }
+.pref-slider input[type=range] { flex: 1 1 200px; min-width: 160px; }
+.pref-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; align-items: center; }
+.pref-grid .text-input { flex: 1; min-width: 160px; }
+.category-picker { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }

@@ -103,6 +103,8 @@ interface Props {
   onUpdate: (p: Preset, change: { name?: string; category?: string }) => void;
   onDuplicate: (p: Preset) => void;
   onDelete: (p: Preset) => void;
+  /** Ask before deleting a preset (Preferences). */
+  confirmDelete?: boolean;
 }
 
 function Card({ p, lib, gd, palette, missing, onPlace, onSave, onAddDt1s, onMenu }: { p: Preset; lib: TileLibrary; gd: GameData; palette: Palette; missing: string[]; onPlace: () => void; onSave?: () => void; onAddDt1s: () => void; onMenu?: (x: number, y: number) => void }) {
@@ -188,7 +190,7 @@ export function PresetsPanel(props: Props) {
             disabled: !canSave,
             title: 'Removes the preset from the mod (its file is kept aside as a backup)',
             onClick: () => {
-              if (window.confirm(`Delete the preset "${m.p.name}"?`)) props.onDelete(m.p);
+              if (props.confirmDelete === false || window.confirm(`Delete the preset "${m.p.name}"?`)) props.onDelete(m.p);
             },
           },
         ]

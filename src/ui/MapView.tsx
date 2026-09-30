@@ -96,6 +96,8 @@ interface Props {
   automap?: { pieces: AutomapPiece[]; cels: SpriteFrame[]; palette: Uint8Array; style: AutomapStyle; kindOf: (orientation: number, main: number, sub: number) => AutomapKind } | null;
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
+  /** Input and label preferences: wheel-zoom and arrow-key speeds (1 = normal), what Shift+wheel does, object names. */
+  input?: { zoomSpeed: number; arrowSpeed: number; shiftWheel: 'layers' | 'zoom'; objectLabels: boolean };
   /** When `signal` changes, centre the view on this world point (zooming in if far out). */
   centerOn?: { x: number; y: number; signal: number } | null;
   /** Label of a special tile (e.g. where a warp leads); defaults to what the tile is. */
@@ -239,7 +241,7 @@ export function MapView(props: Props) {
       const dx = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0);
       const dy = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0);
       if (dx || dy) {
-        const speed = (k.has('Shift') ? 1800 : 700) * dpr * dt / camera.current.zoom;
+        const speed = (k.has('Shift') ? 1800 : 700) * (latest.current.input?.arrowSpeed ?? 1) * dpr * dt / camera.current.zoom;
         camera.current.x += dx * speed;
         camera.current.y += dy * speed;
         dirty.current = true;
@@ -420,7 +422,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, props.selectedObjects, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost, props.doomed]);
+  }, [selection, pasteRect, selectedObject, props.selectedObjects, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost, props.doomed, props.input?.objectLabels]);
 
   // Input.
   useEffect(() => {
@@ -555,13 +557,17 @@ export function MapView(props: Props) {
       const cam = camera.current;
       const [wx, wy] = toWorld(ev);
       const s = latest.current;
-      if (cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey, ev.deltaX, ev.deltaY)) {
+      const shiftZooms = s.input?.shiftWheel === 'zoom';
+      // Preferences can swap it: Shift+wheel zooms and Alt+wheel steps through the stack.
+      if (shiftZooms ? ev.altKey && !(ev.ctrlKey || ev.metaKey) : cycleWithWheel(ev.shiftKey, shiftHeld, ev.ctrlKey || ev.metaKey, ev.deltaX, ev.deltaY)) {
         // Shift+wheel picks one tile out of a stack instead of zooming (Windows turns it into a horizontal scroll).
         const d = ev.deltaY || ev.deltaX;
         if (d) s.onCycle(d > 0 ? 1 : -1, [wx, wy]);
         return;
       }
-      const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015));
+      // Windows turns Shift+wheel into a horizontal scroll.
+      const dy = ev.deltaY || (ev.shiftKey ? ev.deltaX : 0);
+      const factor = Math.exp(-dy * (ev.ctrlKey ? 0.01 : 0.0015) * (s.input?.zoomSpeed ?? 1));
       const zoom = Math.min(Math.max(cam.zoom * factor, 0.05), 8 * dpr());
       // Keep the world point under the cursor fixed.
       cam.x = wx - (wx - cam.x) * (cam.zoom / zoom);
@@ -1300,7 +1306,7 @@ function drawOverlay(canvas: HTMLCanvasElement, cam: Camera, s: OverlayState) {
       const hovered = !!hover && Math.floor(o.x / 5) === hover.cellX && Math.floor(o.y / 5) === hover.cellY;
       if (drawn && tool !== 'object' && !selected && !hovered) return;
       const r = drawn && !selected ? full * 0.6 : full;
-      const showLabel = selected || hovered || (cam.zoom > 0.45 && (!drawn || tool === 'object'));
+      const showLabel = selected || hovered || (s.input?.objectLabels !== false && cam.zoom > 0.45 && (!drawn || tool === 'object'));
       ctx.beginPath();
       ctx.arc(x, y, selected ? r * 1.5 : r, 0, Math.PI * 2);
       ctx.fillStyle = o.type === 1 ? 'rgba(240, 80, 80, 0.9)' : 'rgba(80, 160, 255, 0.9)';

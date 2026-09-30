@@ -70,8 +70,8 @@ export function recentMaps(): RecentMap[] {
   return read<RecentMap[]>(RECENT_MAPS, []);
 }
 
-export function addRecentMap(path: string): RecentMap[] {
-  const list = [{ path, time: Date.now() }, ...recentMaps().filter((m) => m.path.toLowerCase() !== path.toLowerCase())].slice(0, MAX_RECENT_MAPS);
+export function addRecentMap(path: string, max = MAX_RECENT_MAPS): RecentMap[] {
+  const list = [{ path, time: Date.now() }, ...recentMaps().filter((m) => m.path.toLowerCase() !== path.toLowerCase())].slice(0, Math.max(1, max));
   write(RECENT_MAPS, list);
   return list;
 }

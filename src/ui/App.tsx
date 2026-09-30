@@ -90,7 +90,7 @@ import { DEFAULT_AUTOMAP_STYLE, kindClassifier, normalizeAutomapStyle, type Auto
 import { ClipboardPanel } from './ClipboardPanel';
 import { SavePresetDialog } from './SavePresetDialog';
 import { PresetBuilder } from './PresetBuilder';
-import { usePrefs } from './prefs';
+import { loadPrefs, usePrefs } from './prefs';
 import { preparePresetLibrary, resolvePresetSources } from '../game/presetLibrary';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
@@ -218,7 +218,8 @@ export function App() {
   const [visibility, setVisibilityRaw] = useState<Visibility>(() => {
     try {
       const saved = localStorage.getItem('ds1studio.viewMode');
-      const initial = { ...DEFAULT_VISIBILITY, wallCategories: readWallCategories(localStorage.getItem('ds1studio.wallCategories')) };
+      const start = loadPrefs();
+      const initial = { ...DEFAULT_VISIBILITY, grid: start.showGrid, minimap: start.showMinimap, wallCategories: readWallCategories(localStorage.getItem('ds1studio.wallCategories')) };
       return saved && ['walk', 'automap', 'light', 'roofs'].includes(saved) ? withMode(initial, saved as ViewMode) : initial;
     } catch {
       return DEFAULT_VISIBILITY;
@@ -551,6 +552,9 @@ export function App() {
   const [unsavedAsk, setUnsavedAsk] = useState<{ closing: boolean; resolve: (c: 'save' | 'discard' | 'cancel') => void } | null>(null);
   const askUnsaved = useCallback((closing: boolean) => new Promise<'save' | 'discard' | 'cancel'>((resolve) => setUnsavedAsk({ closing, resolve })), []);
   const [prefs, setPrefs] = usePrefs();
+  /** The preferences for callbacks that shouldn't be rebuilt when one changes. */
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   // Maps open in the colours the preferences ask for (set before any map opens).
   setViewPalette({ act0: prefs.act0View, magenta: prefs.act0Magenta });
   const firstPrefs = useRef(true);
@@ -612,7 +616,7 @@ export function App() {
         if (request !== mapRequest.current) return;
         setMap(m);
         setDoc(new MapDocument(path, m.ds1));
-        setRecentMapList(addRecentMap(path));
+        setRecentMapList(addRecentMap(path, prefsRef.current.recentCount));
         // Autosaved changes from a session that ended without saving: offer them.
         void getRecovery(path).then((r) => setRecoveryOffer(r));
         setHover(null);
@@ -688,9 +692,10 @@ export function App() {
     [brush, tileSet, doc, selection, tool, activeLayer, notify],
   );
 
-  // Autosave: every 20 s, keep a copy of a map with unsaved changes (in the app's own storage) for recovery.
+  // Autosave: every 20 s (Preferences), keep a copy of a map with unsaved changes (in the app's own storage) for recovery.
   const autosaved = useRef<{ doc: MapDocument | null; revision: number }>({ doc: null, revision: -1 });
   useEffect(() => {
+    if (prefs.autosaveSeconds <= 0) return;
     const t = setInterval(() => {
       if (!doc) return;
       if (!doc.dirty) {
@@ -706,9 +711,9 @@ export function App() {
       } catch {
         // an unsavable state (mid-edit) is caught on the next tick
       }
-    }, 20_000);
+    }, Math.max(5, prefs.autosaveSeconds) * 1000);
     return () => clearInterval(t);
-  }, [doc]);
+  }, [doc, prefs.autosaveSeconds]);
 
   // On start: list autosaved work, and reopen the last map if asked to.
   const started = useRef(false);
@@ -868,9 +873,13 @@ export function App() {
         : paintRect,
     [pasting, clipboard, hover, paintRect],
   );
+  const mapInput = useMemo(
+    () => ({ zoomSpeed: prefs.zoomSpeed, arrowSpeed: prefs.arrowSpeed, shiftWheel: prefs.shiftWheel, objectLabels: prefs.objectLabels }),
+    [prefs.zoomSpeed, prefs.arrowSpeed, prefs.shiftWheel, prefs.objectLabels],
+  );
   /** While pasting: the cells whose existing tiles the paste would replace (shown red before clicking). */
   const pasteDoomed = useMemo(() => {
-    if (!pasting || !clipboard || !hover || !doc) return null;
+    if (!pasting || !clipboard || !hover || !doc || prefs.pasteStack) return null;
     const have = new Set(doc.layers().map(layerKey));
     const out = new Map<number, { x: number; y: number; n: number }>();
     for (const e of pasteEdits(doc, clipboard, hover.cellX, hover.cellY, true)) {
@@ -885,7 +894,7 @@ export function App() {
       else out.set(k, { x: e.x, y: e.y, n: 1 });
     }
     return [...out.values()];
-  }, [pasting, clipboard, hover, doc, revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pasting, clipboard, hover, doc, revision, prefs.pasteStack]); // eslint-disable-line react-hooks/exhaustive-deps
   const ghost = useMemo((): GhostTile[] => {
     if (!map || !hover) return [];
     if (pasting && clipboard) {
@@ -1124,8 +1133,9 @@ export function App() {
       if (pasting) {
         if (phase === 'start' && cells[0] && clipboard) {
           const [x, y] = cells[0];
-          // Alt: stack onto the tiles already there (next free wall/floor layer) instead of replacing them.
-          const overlap = mods?.alt ? overlapEdits(doc, clipboard, x, y) : null;
+          // Stack onto the tiles already there (next free wall/floor layer) instead of replacing them: Alt, or the
+          // other way round when Preferences make stacking the default.
+          const overlap = prefsRef.current.pasteStack !== !!mods?.alt ? overlapEdits(doc, clipboard, x, y) : null;
           const edits = overlap ? overlap.edits : pasteEdits(doc, clipboard, x, y, true);
           const objects = pasteObjects(doc, clipboard, x, y);
           const walls = overlap?.walls ?? edits.reduce((n, e) => e.layer.kind === 'wall' ? Math.max(n, e.layer.index + 1) : n, doc.ds1.walls.length);
@@ -1479,6 +1489,7 @@ export function App() {
   const deleteSelectedObject = useCallback(() => {
     if (!doc || selectedObject === null) return false;
     const drop = objectGroup ?? new Set([selectedObject]);
+    if (drop.size > 1 && prefsRef.current.confirmBulkDelete && !window.confirm(`Delete ${drop.size} objects? (Ctrl+Z undoes it)`)) return true;
     setObjects(doc.ds1.objects.filter((_, i) => !drop.has(i)));
     if (drop.size > 1) notify(`Deleted ${drop.size} objects (Ctrl+Z to undo)`);
     setSelectedObject(null);
@@ -2721,10 +2732,13 @@ export function App() {
     }
   }, [gd, map]);
 
-  const runCheck = useCallback(async () => {
+  /** The compatibility check. `quiet` (after saving / Add to game): opens only when it finds a problem. */
+  const runCheck = useCallback(async (quiet = false) => {
     if (!gd || !map || !scene) return;
-    setCheckResults(null);
-    setDialog('check');
+    if (!quiet) {
+      setCheckResults(null);
+      setDialog('check');
+    }
     // The automap part needs AutoMap.txt (read here, so the automap view needn't be open).
     let automap: { pieces: AutomapPiece[] } | undefined;
     try {
@@ -2738,8 +2752,14 @@ export function App() {
       // the automap check is optional
     }
     const kept = keptAnswers();
-    setCheckResults(await checkMap(gd, map, scene, automap, (key) => kept.has(`${normalizePath(map.path)}|${key}`)));
-  }, [gd, map, scene, automapData, automapLevel]);
+    const results = await checkMap(gd, map, scene, automap, (key) => kept.has(`${normalizePath(map.path)}|${key}`));
+    if (quiet) {
+      const problems = results.filter((r) => r.severity === 'error' || r.severity === 'warning').length;
+      if (!problems) return notify('Compatibility check: no problems found');
+      setDialog((d) => d ?? 'check');
+    }
+    setCheckResults(results);
+  }, [gd, map, scene, automapData, automapLevel, notify]);
   const runCheckRef = useRef(runCheck);
 
   const openCrashLog = () => {
@@ -3030,6 +3050,7 @@ export function App() {
       // Saved: the autosaved copy isn't needed any more.
       if (doc.revision === savedRevision && doc.path === savedPath) void deleteRecovery(savedPath).then(() => listRecoveries().then(setRecoveries));
       bump();
+      if (prefsRef.current.checkAfterSave) setTimeout(() => void runCheckRef.current(true), 400);
     } catch (e) {
       notify(`Save failed: ${errorMessage(e)}`, true);
     } finally { savingMap.current = false; }
@@ -3399,6 +3420,7 @@ export function App() {
         {
           label: 'Show',
           items: [
+            { label: 'Walkable area', icon: <Footprints />, onClick: () => setPrefs({ showWalkArea: !prefs.showWalkArea }), active: prefs.showWalkArea, disabled: noMap, size: 'sm', title: 'The walkable area box in the corner of the map (tiles² a player can stand on)' },
             { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, disabled: noMap, size: 'sm', shortcut: kb['view.grid'] },
             { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, disabled: noMap, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
             { label: 'Minimap', icon: <MapPinned />, onClick: () => setVisibility((v) => ({ ...v, minimap: !v.minimap })), active: visibility.minimap, disabled: noMap, size: 'sm', shortcut: kb['view.minimap'], title: 'Overview of the whole map in the corner: click it to move there' },
@@ -3693,7 +3715,7 @@ export function App() {
         <div className="stage-map">
         {modeAlert && <div className="mode-alert" role="status" aria-live="polite">{modeAlert}</div>}
         {map && scene && visibility.walkable && <WalkLegend floating />}
-        {map && scene && walkArea !== null && (() => {
+        {map && scene && walkArea !== null && prefs.showWalkArea && (() => {
           const { rgb, band } = areaColour(walkArea);
           const c = `rgb(${rgb.join(',')})`;
           return (
@@ -3715,6 +3737,11 @@ export function App() {
             {pasteDoomed.length
               ? `Placing here replaces ${pasteDoomed.reduce((n, c) => n + c.n, 0)} existing tile${pasteDoomed.reduce((n, c) => n + c.n, 0) === 1 ? '' : 's'} (red cells) · hold Alt when clicking to stack instead`
               : 'Placing here replaces no existing tiles'}
+          </div>
+        )}
+        {pasting && prefs.pasteStack && (
+          <div className="paste-doomed" role="status">
+            Placing stacks onto existing tiles (the next free layer) · hold Alt when clicking to replace them instead
           </div>
         )}
         {map && !rightCollapsed && (
@@ -3747,6 +3774,7 @@ export function App() {
             animations={animations}
             marks={marks}
             doomed={pasteDoomed}
+            input={mapInput}
             resizeMode={resizeMode}
             onResize={(d) => {
               resize(d);
@@ -4023,6 +4051,7 @@ export function App() {
                 onUpdate={(p, change) => void updatePreset(p, change)}
                 onDuplicate={(p) => void duplicatePreset(p)}
                 onDelete={(p) => void deletePreset(p)}
+                confirmDelete={prefs.confirmBulkDelete}
                 onSuggest={() => void suggest()}
               />
             )}
@@ -4150,7 +4179,7 @@ export function App() {
         />
       )}
 
-      {dialog === 'new' && <NewMapDialog types={data.status === 'ready' ? data.gd.lvlTypes : []} onCreate={createMap} onClose={() => setDialog(null)} />}
+      {dialog === 'new' && <NewMapDialog types={data.status === 'ready' ? data.gd.lvlTypes : []} defaults={prefs.newMap} onCreate={createMap} onClose={() => setDialog(null)} />}
       {shortenPaths && (
         <ShortenPathsDialog
           paths={shortenPaths}
@@ -4585,7 +4614,10 @@ export function App() {
                 }
               : null;
           })()}
-          onApply={applyTableWrites}
+          onApply={async (writes) => {
+            await applyTableWrites(writes);
+            if (prefsRef.current.checkAfterAddToGame) setTimeout(() => void runCheckRef.current(true), 600);
+          }}
           onFix={async (writes) => {
             await writeFiles(writes);
             await reloadTables();

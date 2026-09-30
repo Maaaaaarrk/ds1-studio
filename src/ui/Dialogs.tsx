@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { ResizeDelta } from '../formats/ds1ops';
 import type { LvlTypeInfo } from '../game/GameData';
 import { HelpTip } from './HelpTip';
+import { DEFAULT_PREFS, type Prefs } from './prefs';
 
 export function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
@@ -57,15 +58,15 @@ export interface NewMapChoice {
  * colours so tiles from every act look as they will anywhere. The act is the one the game will give the level: Add
  * to game makes new levels Act 5 levels.
  */
-export function NewMapDialog({ types, onCreate, onClose }: { types: LvlTypeInfo[]; onCreate: (c: NewMapChoice) => void; onClose: () => void }) {
+export function NewMapDialog({ types, onCreate, onClose, defaults = DEFAULT_PREFS.newMap }: { types: LvlTypeInfo[]; onCreate: (c: NewMapChoice) => void; onClose: () => void; defaults?: Prefs['newMap'] }) {
   const [typeMode, setTypeMode] = useState<'new' | 'existing'>('new');
   const [typeId, setTypeId] = useState<number | null>(null);
-  const [act, setAct] = useState(4);
-  const [path, setPath] = useState('data/global/tiles/expansion/Custom/newmap.ds1');
-  const [width, setWidth] = useState(150);
-  const [height, setHeight] = useState(150);
-  const [floorLayers, setFloorLayers] = useState(1);
-  const [wallLayers, setWallLayers] = useState(2);
+  const [act, setAct] = useState(defaults.act);
+  const [path, setPath] = useState(`data/global/tiles/${defaults.folder || ACT_DIRS[defaults.act]}/newmap.ds1`);
+  const [width, setWidth] = useState(defaults.width);
+  const [height, setHeight] = useState(defaults.height);
+  const [floorLayers, setFloorLayers] = useState(defaults.floorLayers);
+  const [wallLayers, setWallLayers] = useState(defaults.wallLayers);
   const [tag, setTag] = useState(false);
   const valid = /^data\/global\/tiles\/.+\.ds1$/i.test(path) && (typeMode === 'new' || typeId !== null);
   const pickType = (id: number) => {
@@ -257,42 +258,105 @@ export function UnsavedPrompt({ name, dirty, closing, onChoose }: { name: string
 }
 
 /** Preferences, remembered on this computer. */
-export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: import('./prefs').Prefs; onChange: (patch: Partial<import('./prefs').Prefs>) => void; onClose: () => void }) {
+export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: Prefs; onChange: (patch: Partial<Prefs>) => void; onClose: () => void }) {
+  const check = (key: { [K in keyof Prefs]: Prefs[K] extends boolean ? K : never }[keyof Prefs], title: string, note: string) => (
+    <label className="pref-row">
+      <input type="checkbox" checked={prefs[key] as boolean} onChange={(e) => onChange({ [key]: e.target.checked } as Partial<Prefs>)} />
+      <span>
+        <b>{title}</b>
+        <span className="muted small"> {note}</span>
+      </span>
+    </label>
+  );
+  const speed = (key: 'zoomSpeed' | 'arrowSpeed', title: string, note: string) => (
+    <label className="pref-row pref-slider">
+      <span>
+        <b>{title}</b> <span className="mono small">{prefs[key].toFixed(2)}×</span>
+        <span className="muted small"> {note}</span>
+      </span>
+      <input type="range" min={0.25} max={3} step={0.05} value={prefs[key]} onChange={(e) => onChange({ [key]: Number(e.target.value) } as Partial<Prefs>)} />
+      <button className="link small" onClick={() => onChange({ [key]: 1 } as Partial<Prefs>)}>
+        reset
+      </button>
+    </label>
+  );
+  const nm = prefs.newMap;
+  const setNm = (patch: Partial<Prefs['newMap']>) => onChange({ newMap: { ...nm, ...patch } });
   return (
-    <Modal title="Preferences" onClose={onClose}>
+    <Modal title="Preferences" wide onClose={onClose}>
+      <div className="pref-section">Maps and saving</div>
+      {check('saveOnSwitch', 'Save automatically before opening another map', '(on by default). Off: opening another map with unsaved changes asks you to save or discard them.')}
       <label className="pref-row">
-        <input type="checkbox" checked={prefs.saveOnSwitch} onChange={(e) => onChange({ saveOnSwitch: e.target.checked })} />
         <span>
-          <b>Save automatically before opening another map</b>
-          <span className="muted small">
-            {' '}
-            (on by default). Off: opening another map with unsaved changes asks you to save or discard them.
-          </span>
+          <b>Autosave unsaved work every</b>{' '}
+          <IntInput value={prefs.autosaveSeconds} onChange={(v) => onChange({ autosaveSeconds: v })} min={0} max={600} /> seconds
+          <span className="muted small"> (20 by default; 0 = off). A copy is kept for recovery if the app closes unexpectedly; your map file is only written when you save.</span>
         </span>
       </label>
       <label className="pref-row">
-        <input type="checkbox" checked={prefs.act0View} onChange={(e) => onChange({ act0View: e.target.checked })} />
         <span>
-          <b>Show maps in the Act 0 colours</b>
-          <span className="muted small">
-            {' '}
-            (on by default). Every map is drawn with the colours that look the same in every act, unless you picked a palette for it in View → Colours.
-            Off: each map opens in its own act&apos;s colours.
-          </span>
+          <b>Recent maps to remember</b> <IntInput value={prefs.recentCount} onChange={(v) => onChange({ recentCount: v })} min={1} max={50} />
+          <span className="muted small"> (12 by default).</span>
         </span>
       </label>
+      {check('checkAfterSave', 'Run the Compatibility check after saving', '(off by default). It opens only when it finds problems.')}
+      {check('checkAfterAddToGame', 'Run the Compatibility check after Add to game', '(off by default). It opens only when it finds problems.')}
+
+      <div className="pref-section">Colours</div>
+      {check('act0View', 'Show maps in the Act 0 colours', '(on by default). Every map is drawn with the colours that look the same in every act, unless you picked a palette for it in View → Colours. Off: each map opens in its own act’s colours.')}
+      {check('act0Magenta', 'Mark colours that change between acts in magenta', '(off by default). Off: in the Act 0 colours those pixels show as they look in the map’s own act. On: they turn magenta, to find tiles that still need Map → Make act-safe.')}
+
+      <div className="pref-section">Editing</div>
+      {check('pasteStack', 'Paste onto existing tiles (stack) by default', '(off by default). On: a paste goes into the next free layer where tiles are already there, and Alt replaces them instead. Off: a paste replaces them, and Alt stacks.')}
+      {check('confirmBulkDelete', 'Ask before deleting in bulk', '(on by default): several objects at once, or a preset.')}
+
+      <div className="pref-section">What a map opens with</div>
+      {check('showWalkArea', 'Walkable area box', '(on by default). Also in View → Walkable area.')}
+      {check('showGrid', 'Grid', '(off by default).')}
+      {check('showMinimap', 'Minimap', '(on by default).')}
+      {check('objectLabels', 'Object names on the map', '(on by default). Off: only the object under the cursor or selected is named.')}
+
+      <div className="pref-section">Mouse and keyboard</div>
+      {speed('zoomSpeed', 'Mouse-wheel zoom speed', '')}
+      {speed('arrowSpeed', 'Arrow-key scrolling speed', '(Shift still scrolls faster).')}
       <label className="pref-row">
-        <input type="checkbox" checked={prefs.act0Magenta} onChange={(e) => onChange({ act0Magenta: e.target.checked })} />
         <span>
-          <b>Mark colours that change between acts in magenta</b>
-          <span className="muted small">
-            {' '}
-            (off by default). Off: in the Act 0 colours, those pixels show as they look in the map&apos;s own act, so nothing is magenta. On: they turn
-            magenta, to find tiles that still need Map → Make act-safe.
-          </span>
+          <b>Shift+wheel</b>{' '}
+          <select value={prefs.shiftWheel} onChange={(e) => onChange({ shiftWheel: e.target.value as Prefs['shiftWheel'] })}>
+            <option value="layers">steps through layers (Alt+wheel zooms)</option>
+            <option value="zoom">zooms (Alt+wheel steps through layers)</option>
+          </select>
         </span>
       </label>
+
+      <div className="pref-section">New map starts with</div>
+      <div className="pref-row pref-grid">
+        <span>Size</span>
+        <span>
+          <IntInput value={nm.width} onChange={(v) => setNm({ width: v })} min={1} max={256} /> × <IntInput value={nm.height} onChange={(v) => setNm({ height: v })} min={1} max={256} /> tiles
+        </span>
+        <span>Act</span>
+        <select value={nm.act} onChange={(e) => setNm({ act: Number(e.target.value), folder: nm.folder.replace(/^[^/]*/, ACT_DIRS[Number(e.target.value)]) })}>
+          {[0, 1, 2, 3, 4].map((a) => (
+            <option key={a} value={a}>
+              Act {a + 1}
+            </option>
+          ))}
+        </select>
+        <span>Layers</span>
+        <span>
+          <IntInput value={nm.floorLayers} onChange={(v) => setNm({ floorLayers: v })} min={1} max={2} /> floor <IntInput value={nm.wallLayers} onChange={(v) => setNm({ wallLayers: v })} min={1} max={4} /> wall
+        </span>
+        <span>Folder</span>
+        <span className="inline">
+          <span className="mono small muted">data/global/tiles/</span>
+          <input className="text-input mono" value={nm.folder} spellCheck={false} onChange={(e) => setNm({ folder: e.target.value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') })} />
+        </span>
+      </div>
       <div className="modal-actions">
+        <button className="btn" onClick={() => onChange({ ...DEFAULT_PREFS })}>
+          Reset all
+        </button>
         <button className="btn primary" onClick={onClose}>
           Done
         </button>
