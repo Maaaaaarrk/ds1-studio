@@ -1,0 +1,1160 @@
+<title>DS1 Studio Field Guide</title>
+<meta name="description" content="An interactive guide to DS1 Studio, the Diablo II map editor: quick start, every tool, and the game rules it handles for you." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus+SC&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" />
+<style>
+  :root {
+    --bg: #eef0f2;
+    --surface: #ffffff;
+    --surface-2: #f5f6f7;
+    --ink: #1c1f24;
+    --ink-2: #4a505a;
+    --ink-3: #6f7682;
+    --line: #d9dde2;
+    --accent: #8a6414;
+    --accent-ink: #ffffff;
+    --accent-soft: #f4ead3;
+    --mark: #f7dc8d;
+    --ok: #2f7d4a;
+    --warn: #a6620c;
+    --bad: #b23a3a;
+    --key-bg: #ffffff;
+    --key-edge: #c3c8cf;
+    --shadow: 0 1px 2px rgba(20, 24, 30, 0.06), 0 6px 20px rgba(20, 24, 30, 0.06);
+    --display: 'Marcellus SC', 'Palatino Linotype', Palatino, Georgia, serif;
+    --body: 'Source Sans 3', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    --header-h: 56px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      color-scheme: dark;
+      --bg: #111317;
+      --surface: #181b21;
+      --surface-2: #1f232a;
+      --ink: #e7e3da;
+      --ink-2: #b9b5ad;
+      --ink-3: #8d8a84;
+      --line: #2c3139;
+      --accent: #d9ad55;
+      --accent-ink: #1a1408;
+      --accent-soft: #2e2615;
+      --mark: #6b5418;
+      --ok: #6cc28a;
+      --warn: #e9a94a;
+      --bad: #ef7a7a;
+      --key-bg: #23272f;
+      --key-edge: #3a404a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #111317;
+    --surface: #181b21;
+    --surface-2: #1f232a;
+    --ink: #e7e3da;
+    --ink-2: #b9b5ad;
+    --ink-3: #8d8a84;
+    --line: #2c3139;
+    --accent: #d9ad55;
+    --accent-ink: #1a1408;
+    --accent-soft: #2e2615;
+    --mark: #6b5418;
+    --ok: #6cc28a;
+    --warn: #e9a94a;
+    --bad: #ef7a7a;
+    --key-bg: #23272f;
+    --key-edge: #3a404a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: calc(var(--header-h) + 16px); }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  code, .path { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 0.3em; overflow-wrap: anywhere; }
+  kbd { font-family: var(--mono); font-size: 0.8em; font-weight: 600; background: var(--key-bg); border: 1px solid var(--key-edge); border-bottom-width: 2px; border-radius: 5px; padding: 0.05em 0.4em; white-space: nowrap; color: var(--ink); }
+  mark { background: var(--mark); color: inherit; border-radius: 2px; }
+
+  /* Header */
+  .top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; height: var(--header-h); display: flex; align-items: center; gap: 12px; padding-inline: 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .brand b { font: 400 21px/1 var(--display); letter-spacing: 0.02em; color: var(--ink); white-space: nowrap; }
+  .brand span { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+  .search { margin-left: auto; position: relative; flex: 0 1 340px; min-width: 0; }
+  .search input { width: 100%; font: inherit; font-size: 15px; padding: 7px 34px 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); }
+  .search input::placeholder { color: var(--ink-3); }
+  .search .hint { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+  .search .clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--ink-3); font-size: 18px; cursor: pointer; padding: 2px 6px; }
+  .menu-btn { display: none; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 14px; cursor: pointer; }
+
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); max-width: 1320px; margin-inline: auto; }
+  nav.toc { position: sticky; top: calc(var(--header-h) + env(safe-area-inset-top, 0px)); align-self: start; height: calc(100vh - var(--header-h)); overflow-y: auto; padding: 20px 12px 40px 16px; border-right: 1px solid var(--line); }
+  .toc h4 { font: 400 13px/1.2 var(--display); letter-spacing: 0.08em; color: var(--ink-3); margin: 18px 8px 6px; }
+  .toc h4:first-child { margin-top: 0; }
+  .toc a { display: block; text-decoration: none; color: var(--ink-2); font-size: 14.5px; padding: 4px 8px; border-radius: 6px; line-height: 1.35; }
+  .toc a.sub { padding-left: 20px; font-size: 13.5px; color: var(--ink-3); }
+  .toc a:hover { background: var(--surface-2); color: var(--ink); }
+  .toc a.active { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+  .toc a.dim { opacity: 0.35; }
+  main { padding: 28px 16px 80px; min-width: 0; }
+  .col { max-width: 760px; margin-inline: auto; }
+
+  /* Hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 28px; align-items: center; max-width: 1060px; margin: 0 auto 36px; }
+  .hero h1 { font: 400 clamp(32px, 4.4vw, 50px)/1.05 var(--display); margin: 0 0 14px; text-wrap: balance; letter-spacing: 0.01em; }
+  .hero p { color: var(--ink-2); margin: 0 0 12px; max-width: 52ch; }
+  .hero .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .fact { font-size: 13px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; }
+  .hero figure { margin: 0; }
+  .hero img { display: block; width: 100%; border-radius: 10px; border: 1px solid var(--line); box-shadow: var(--shadow); cursor: zoom-in; }
+
+  /* Sections */
+  section.chapter { margin: 0 auto 56px; }
+  .eyebrow { font: 400 13px/1 var(--display); letter-spacing: 0.12em; color: var(--accent); margin: 0 0 6px; }
+  h2 { font: 400 30px/1.15 var(--display); margin: 0 0 14px; text-wrap: balance; }
+  h3 { font-size: 20px; line-height: 1.3; margin: 30px 0 8px; text-wrap: balance; }
+  h3 .num { color: var(--ink-3); font-weight: 400; font-size: 15px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  p, li { max-width: 68ch; }
+  ul, ol { padding-left: 1.25em; }
+  li { margin: 4px 0; }
+  li::marker { color: var(--ink-3); }
+  .topic.hidden, section.chapter.hidden, .hero.hidden { display: none; }
+  .lede { font-size: 17.5px; color: var(--ink-2); }
+
+  .callout { border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; padding: 10px 14px; margin: 14px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout > b:first-child { display: block; margin-bottom: 2px; }
+  .callout p { margin: 4px 0; }
+
+  /* Figures */
+  figure.shot, figure.anim { margin: 16px 0; }
+  figure.shot img, figure.anim .frame img { display: block; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--surface-2); }
+  figure.shot img { cursor: zoom-in; }
+  figure.small img { max-width: min(100%, 460px); }
+  figure.medium img { max-width: min(100%, 620px); }
+  figcaption { font-size: 14px; color: var(--ink-3); margin-top: 6px; max-width: 68ch; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pair figure { margin: 8px 0; }
+  .frame { position: relative; display: inline-block; max-width: 100%; }
+  .play { position: absolute; left: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 999px; padding: 7px 14px 7px 10px; font: 600 14px/1 var(--body); color: var(--accent-ink); background: var(--accent); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); cursor: pointer; }
+  .play svg { width: 14px; height: 14px; fill: currentColor; }
+  .anim.playing .play { background: rgba(10, 12, 16, 0.72); color: #fff; }
+
+  /* Quick start stepper */
+  .steps { list-style: none; padding: 0; margin: 18px 0; counter-reset: step; display: grid; gap: 12px; }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 12px; max-width: none; }
+  .step::before { counter-increment: step; content: counter(step); grid-row: span 3; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font: 400 17px/1 var(--display); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+  .step.done::before { content: '✓'; background: var(--ok); border-color: var(--ok); color: #fff; }
+  .step h4 { margin: 4px 0 0; font-size: 17px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .step p { margin: 4px 0; }
+  .step label { margin-left: auto; font-size: 13.5px; font-weight: 400; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .progress { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--ink-3); }
+  .bar { flex: 1; height: 6px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width 0.3s; }
+
+  /* Tables */
+  .tablewrap { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); background: var(--surface-2); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { white-space: nowrap; }
+
+  /* Accordions */
+  details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin: 8px 0; }
+  details > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '▸'; color: var(--accent); transition: transform 0.15s; display: inline-block; }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > .body { padding: 0 14px 12px 34px; }
+  details > .body p:first-child { margin-top: 0; }
+
+  /* Tools inside the guide */
+  .tool { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 16px 0; }
+  .tool h4 { margin: 0 0 8px; font: 400 16px/1.2 var(--display); letter-spacing: 0.04em; }
+  .tool .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .tool input[type='text'] { flex: 1 1 260px; min-width: 0; font: 14px var(--mono); padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); }
+  .tool input[type='range'] { flex: 1 1 220px; accent-color: var(--accent); }
+  .meter { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .ok { color: var(--ok); }
+  .warn-t { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .area-box { display: inline-flex; flex-direction: column; align-items: flex-end; padding: 6px 12px; border-radius: 6px; background: #0b0c10; border: 1px solid; min-width: 150px; }
+  .area-box small { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: #8a93a3; }
+  .area-box strong { font: 700 20px/1.1 var(--body); font-variant-numeric: tabular-nums; }
+
+  /* Shortcuts */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+  .chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .keytry { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .keytry input { width: 220px; max-width: 100%; font: 14px var(--body); padding: 7px 10px; border-radius: 6px; border: 1px dashed var(--key-edge); background: var(--surface-2); color: var(--ink); }
+  tr.hit td { background: var(--accent-soft); }
+  #shortcuts tr[hidden] { display: none; }
+
+  /* Glossary */
+  dl.gloss { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 14px 0; }
+  dl.gloss dt { font-weight: 600; }
+  dl.gloss dd { margin: 0; color: var(--ink-2); max-width: 62ch; }
+
+  .nores { display: none; padding: 16px; border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-3); }
+  .nores.show { display: block; }
+  .searchinfo { font-size: 14px; color: var(--ink-3); margin: 0 0 16px; min-height: 1.2em; }
+
+  /* Lightbox */
+  .lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(6, 7, 10, 0.88); display: grid; place-items: center; padding: 24px 16px; cursor: zoom-out; }
+  .lightbox img { max-width: 100%; max-height: calc(100vh - 90px); border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); }
+  .lightbox p { color: #d6d2c8; font-size: 14px; margin: 10px 0 0; text-align: center; max-width: 80ch; }
+
+  footer { max-width: 760px; margin: 40px auto 0; font-size: 13.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 16px; }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    nav.toc { position: fixed; z-index: 30; top: calc(var(--header-h) + env(safe-area-inset-top, 0px)); left: 0; width: min(320px, 86vw); background: var(--surface); box-shadow: var(--shadow); transform: translateX(-105%); transition: transform 0.2s; border-right: 1px solid var(--line); }
+    nav.toc.open { transform: none; }
+    .menu-btn { display: inline-block; }
+    .hero { grid-template-columns: minmax(0, 1fr); }
+    .brand span { display: none; }
+  }
+  @media (max-width: 560px) {
+    .pair { grid-template-columns: minmax(0, 1fr); }
+    dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+    dl.gloss dd { margin-bottom: 8px; }
+    .search .hint { display: none; }
+    h2 { font-size: 26px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<header class="top">
+  <button class="menu-btn" id="menuBtn" aria-controls="toc" aria-expanded="false">Contents</button>
+  <div class="brand"><b>DS1 Studio</b><span>Field guide · v0.2.27</span></div>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search the guide (e.g. warp, Act 0, paste)" aria-label="Search the guide" autocomplete="off" />
+    <span class="hint"><kbd>/</kbd></span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" id="toc" aria-label="Contents"></nav>
+
+  <main>
+    <p class="searchinfo col" id="searchinfo" aria-live="polite"></p>
+
+    <div class="hero" id="top">
+      <div>
+        <p class="eyebrow">A Diablo II map editor</p>
+        <h1>Build maps the game can actually load</h1>
+        <p>DS1 Studio opens the map presets (<b>DS1</b> files) of classic Diablo II and your mod straight from the game's files, draws them the way the game does, and lets you edit their tiles, objects, the automap, the level tables and the tile libraries (<b>DT1</b> files) themselves.</p>
+        <p>This guide starts with a ten-minute Quick start, then covers every tool. Search at the top finds any feature; click a picture to enlarge it, and press <b>Play</b> on the moving ones.</p>
+        <div class="facts">
+          <span class="fact">Windows &amp; Linux</span>
+          <span class="fact">Reads the game, writes only your mod</span>
+          <span class="fact">Every edit can be undone</span>
+          <span class="fact">Updates itself</span>
+        </div>
+      </div>
+      <figure><img src="media/overview.png" alt="DS1 Studio with Act 1's Rogue Encampment open" data-caption="Act 1's Rogue Encampment open in DS1 Studio." /></figure>
+    </div>
+
+    <!-- ====================================================== QUICK START -->
+    <section class="chapter col" id="quick-start" data-chapter="Start here">
+      <p class="eyebrow">Start here</p>
+      <h2>Quick start</h2>
+      <p class="lede">From opening DS1 Studio to a map in game. Tick each step off as you go; your progress stays in this browser.</p>
+      <div class="progress"><span id="qsCount">0 of 6 done</span><span class="bar"><i id="qsBar"></i></span><button class="chip" id="qsReset" type="button">Reset</button></div>
+      <ol class="steps" id="steps">
+        <li class="step" data-step="open">
+          <h4>Open a map <label><input type="checkbox" id="qs-open" /> Done</label></h4>
+          <p>Type part of its name in the filter above the file list on the left and click it. <kbd>F</kbd> fits the whole map in view. Scroll to zoom; right-drag or the arrow keys move around. <a href="#opening">More about opening maps</a></p>
+          <figure class="anim medium"><div class="frame"><img src="posters/quick-open.png" data-gif="img/quick-open.gif" alt="Filtering the file list and opening townN1.ds1" /></div><figcaption>Filter the list, click a map, press <kbd>F</kbd>.</figcaption></figure>
+        </li>
+        <li class="step" data-step="paint">
+          <h4>Paint <label><input type="checkbox" id="qs-paint" /> Done</label></h4>
+          <p>Press <kbd>B</kbd> (Paint), click a tile in the <b>Tiles</b> panel on the right, and drag over the map. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes. The <b>Active layer</b> on the Home tab is the layer you paint on. <a href="#painting">More about painting</a></p>
+          <figure class="anim medium"><div class="frame"><img src="posters/quick-paint.png" data-gif="img/quick-paint.gif" alt="Painting a row of fence posts" /></div><figcaption>Pick a tile (here a fence post) and drag.</figcaption></figure>
+        </li>
+        <li class="step" data-step="select">
+          <h4>Select, copy and move <label><input type="checkbox" id="qs-select" /> Done</label></h4>
+          <p>Press <kbd>V</kbd> and drag to select. <kbd>Ctrl</kbd>+<kbd>C</kbd> copies, and the copy follows the mouse: click to paste. Red cells show what a paste would replace. Double-click a tile to select every copy of it. <a href="#selecting">More about selecting</a></p>
+        </li>
+        <li class="step" data-step="objects">
+          <h4>Place objects and NPCs <label><input type="checkbox" id="qs-objects" /> Done</label></h4>
+          <p>Press <kbd>O</kbd>, pick one in the gallery on the right, and click the map. Keep clicking to place more; <kbd>Esc</kbd> stops. <a href="#objects">More about objects</a></p>
+        </li>
+        <li class="step" data-step="save">
+          <h4>Save <label><input type="checkbox" id="qs-save" /> Done</label></h4>
+          <p><kbd>Ctrl</kbd>+<kbd>S</kbd> writes the map into your mod folder. The file it replaces is kept as <code>.bak</code>. <a href="#saving">More about saving</a></p>
+        </li>
+        <li class="step" data-step="game">
+          <h4>Put it in the game <label><input type="checkbox" id="qs-game" /> Done</label></h4>
+          <p><b>Game → Add to game</b> writes the rows the game needs (Levels, LvlPrest, LvlTypes). Then <b>Diagnostics → Compatibility</b> checks everything and offers one-click fixes. Connect the level with a <a href="#warps">warp</a> or a <a href="#cube">cube recipe</a> so players can reach it. <a href="#add-to-game">More about Add to game</a></p>
+        </li>
+      </ol>
+      <p>Set things up the way you like in <b>Home → Preferences…</b> (<a href="#preferences">see Preferences</a>).</p>
+    </section>
+
+    <!-- ====================================================== GETTING STARTED -->
+    <section class="chapter col" id="getting-started" data-chapter="Getting started">
+      <p class="eyebrow">Chapter 1</p>
+      <h2>Getting started</h2>
+
+      <article class="topic" id="installing">
+        <h3><span class="num">1.1</span>Installing</h3>
+        <p>Download the latest version from the <a href="https://github.com/RoofooEvazan/ds1-studio/releases/latest" target="_blank" rel="noopener">Releases page</a> on GitHub.</p>
+        <div class="tablewrap"><table>
+          <tr><th>System</th><th>File</th><th>Notes</th></tr>
+          <tr><td>Windows 10/11</td><td><code>…_x64-setup.exe</code></td><td>Recommended. Installs for your user and updates itself.</td></tr>
+          <tr><td>Windows</td><td><code>…_x64_en-US.msi</code></td><td>For managed installs.</td></tr>
+          <tr><td>Linux</td><td><code>….AppImage</code></td><td>Runs on most distributions; make it executable and double-click. Updates itself.</td></tr>
+          <tr><td>Linux</td><td><code>….deb</code> / <code>….rpm</code></td><td>Debian/Ubuntu and Fedora/openSUSE packages.</td></tr>
+        </table></div>
+        <div class="callout"><b>Windows protected your PC?</b>The installer isn't code-signed yet. Click <b>More info → Run anyway</b>.</div>
+      </article>
+
+      <article class="topic" id="first-start">
+        <h3><span class="num">1.2</span>First start: choosing your folders</h3>
+        <ul>
+          <li><b>Diablo II</b>: the folder with <code>d2data.mpq</code>, <code>d2exp.mpq</code> and <code>patch_d2.mpq</code>. It is only ever read.</li>
+          <li><b>Mod folder</b> (optional): your mod's folder with its <code>data/</code> tree. Everything you save goes here. Tick <i>Also read the mod folder's own .mpq files</i> if your mod ships its data in MPQs.</li>
+        </ul>
+        <p>On Linux, point it at the Diablo II folder inside your Wine prefix. Change the folders later with <b>Home → File → Folders…</b></p>
+      </article>
+
+      <article class="topic" id="window">
+        <h3><span class="num">1.3</span>A tour of the window</h3>
+        <figure class="shot"><img src="img/window.png" alt="The DS1 Studio window" /><figcaption>The main window with Act 1's Rogue Encampment open.</figcaption></figure>
+        <ul>
+          <li><b>Tabs</b>: Home (files and editing), View (how the map is shown, and the view modes), Map (the map and its tile libraries), Game (tables and cube recipes), Diagnostics (checks and crash logs) and Help switch the ribbon below.</li>
+          <li><b>Ribbon</b>: commands in labelled groups. Hover any button for what it does and its shortcut.</li>
+          <li><b>File list</b> (left): every DS1 in the game and your mod. Type in the box to filter. The button left of its title folds it away for more room.</li>
+          <li><b>Map view</b>: the map as the game draws it, with the <b>minimap</b> in the corner and the <b>walkable area</b> box.</li>
+          <li><b>Side panels</b> (right): Tiles/Presets, Selection, Cell, History, Layers, Map. A view mode (Walkability, Automap, Level light, Roof hiding) swaps them for its own panel.</li>
+          <li><b>Status bar</b>: data sources, tool and layer, the cell under the mouse, zoom, size, act and palette.</li>
+        </ul>
+        <figure class="shot"><img src="img/ribbon-home-full.png" alt="The Home ribbon" /><figcaption>The Home ribbon: File, Edit, Tools, Paint / erase and Layer.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="opening">
+        <h3><span class="num">1.4</span>Opening a map</h3>
+        <ol>
+          <li>Type part of the path in the box above the file list, e.g. <code>act1/town</code> or <code>arcane</code>.</li>
+          <li>Click a map. It opens with the tile libraries the game would use for it (LvlPrest → Levels → LvlTypes).</li>
+          <li>Press <kbd>F</kbd> to fit the whole map in the view.</li>
+        </ol>
+        <p>You can also reopen a <a href="#recent">recent map</a>, create a <a href="#new-map">new one</a> or <a href="#import-ds1">import one</a>.</p>
+      </article>
+
+      <article class="topic" id="saving">
+        <h3><span class="num">1.5</span>Saving, switching and closing</h3>
+        <p><b>Save</b> (<kbd>Ctrl</kbd>+<kbd>S</kbd>) writes the map into your mod folder at the same path it has in the game. A replaced file is kept as <code>&lt;name&gt;.bak</code> the first time, so the true original survives. <b>Save as…</b> saves under a new path. Your Diablo II install is never written to. Everything else DS1 Studio writes (DT1s, tables, presets) goes into the mod folder with the same safety.</p>
+        <p>Opening another map saves the one you're leaving first; turn that off in Preferences to be asked instead. <kbd>Esc</kbd> with nothing selected asks to close the map.</p>
+        <figure class="shot small"><img src="img/close-prompt.png" alt="The close map prompt" /><figcaption><kbd>Esc</kbd> with nothing selected: Save and close, Discard and close, or Cancel.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="preferences">
+        <h3><span class="num">1.6</span>Preferences</h3>
+        <p><b>Home → Preferences…</b> holds your settings, remembered on this computer. <b>Reset all</b> puts every one back.</p>
+        <details open><summary>Maps and saving</summary><div class="body"><ul>
+          <li>Save automatically before opening another map (on by default).</li>
+          <li>Autosave unsaved work every N seconds for crash recovery (20 by default; 0 = off).</li>
+          <li>How many recent maps to remember.</li>
+          <li>Run the Compatibility check after saving, and/or after Add to game. It opens only when it finds problems.</li>
+        </ul></div></details>
+        <details><summary>Colours</summary><div class="body"><ul>
+          <li><b>Show maps in the Act 0 colours</b> (on): the colours that look the same in every act, with the others as they look in the map's own act. Nothing turns magenta.</li>
+          <li><b>Mark colours that change between acts in magenta</b> (off): turn on to find tiles that still need <a href="#act-safe">Make act-safe</a>.</li>
+        </ul></div></details>
+        <details><summary>Editing</summary><div class="body"><ul>
+          <li>Paste onto existing tiles (stack) by default; <kbd>Alt</kbd> then replaces instead.</li>
+          <li>Ask before deleting several objects at once, or a preset.</li>
+        </ul></div></details>
+        <details><summary>What a map opens with</summary><div class="body"><ul>
+          <li>Walkable area box (also <b>View → Walkable area</b>), grid, minimap, and object names on the map.</li>
+        </ul></div></details>
+        <details><summary>Mouse and keyboard</summary><div class="body"><ul>
+          <li>Mouse-wheel zoom speed and arrow-key scrolling speed.</li>
+          <li><kbd>Shift</kbd>+wheel steps through layers (<kbd>Alt</kbd>+wheel zooms), or zooms (<kbd>Alt</kbd>+wheel steps through layers).</li>
+        </ul></div></details>
+        <details><summary>New map starts with</summary><div class="body"><ul>
+          <li>Size, act, floor and wall layers, and the folder under <code>data/global/tiles/</code>.</li>
+        </ul></div></details>
+        <figure class="shot medium"><img src="img/preferences.png" alt="The Preferences window" /><figcaption>Home → Preferences…</figcaption></figure>
+      </article>
+
+      <article class="topic" id="autosave">
+        <h3><span class="num">1.7</span>Autosave, recent maps and updates</h3>
+        <p>While a map has unsaved changes, a copy is kept in the app's own storage (never your folders). After a crash, the start page lists <b>Unsaved work</b>, and opening that map offers <b>Restore</b> or <b>Discard</b>.</p>
+        <p id="recent"><b>Home → File → Recent ▾</b> lists the maps you opened last. Tick <i>Reopen the last map on start</i> to open it automatically.</p>
+        <p>The app checks GitHub once a day for a new version. <b>Help → Check for updates</b> shows what changed, installs it and restarts.</p>
+      </article>
+    </section>
+
+    <!-- ====================================================== VIEWING -->
+    <section class="chapter col" id="viewing" data-chapter="Viewing maps">
+      <p class="eyebrow">Chapter 2</p>
+      <h2>Viewing maps</h2>
+
+      <article class="topic" id="navigating">
+        <h3><span class="num">2.1</span>Moving around</h3>
+        <div class="tablewrap"><table>
+          <tr><th>To</th><th>Do this</th></tr>
+          <tr><td>Zoom</td><td>Mouse wheel (around the mouse)</td></tr>
+          <tr><td>Pan</td><td>Arrow keys (<kbd>Shift</kbd> = faster), <kbd>Space</kbd>+drag, or middle/right drag</td></tr>
+          <tr><td>Fit the map</td><td><kbd>F</kbd></td></tr>
+          <tr><td>Jump anywhere</td><td>Click or drag on the minimap (<kbd>K</kbd> toggles it)</td></tr>
+        </table></div>
+        <figure class="anim"><div class="frame"><img src="posters/arrow-pan.png" data-gif="media/arrow-pan.gif" alt="Panning with the arrow keys" /></div><figcaption>Arrow keys pan smoothly at any zoom. Their speed is in Preferences.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="layers">
+        <h3><span class="num">2.2</span>Layers</h3>
+        <p>A map has up to 2 floor layers, 4 wall layers (walls, roofs, lower walls, special tiles, trees and objects that are tiles), shadows, and sometimes a tag layer. The <b>Layers</b> panel shows or hides each one. Number keys toggle them: <kbd>1</kbd>/<kbd>2</kbd> floors, <kbd>3</kbd>–<kbd>6</kbd> walls, <kbd>7</kbd> shadows, <kbd>8</kbd> roofs, <kbd>9</kbd> lower walls, <kbd>0</kbd> special tiles. Hiding only affects the view.</p>
+        <figure class="shot small"><img src="img/layers-panel.png" alt="The Layers panel" /><figcaption>The Layers panel with how many cells each layer uses.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="view-modes">
+        <h3><span class="num">2.3</span>View modes and overlays</h3>
+        <p>The View tab's <b>Mode</b> group switches what the right-hand panel is for, one mode at a time: <b>Tiles</b>, <b>Walkability</b> (<kbd>W</kbd>), <b>Automap</b> (<kbd>A</kbd>), <b>Level light</b> (<kbd>Shift</kbd>+<kbd>L</kbd>) and <b>Roof hiding</b> (<kbd>H</kbd>). <kbd>Tab</kbd> steps through them. Overlays in the <b>Show</b> group (grid, rooms, minimap, sprites, markers, As if inside) work in any mode. Switching view clears the selection.</p>
+        <figure class="shot"><img src="img/ribbon-view.png" alt="The View ribbon" /><figcaption>The View ribbon: Navigate, Mode, Show, Colours and Picture.</figcaption></figure>
+        <div class="pair">
+          <figure class="shot"><img src="media/walkability.png" alt="Walkability view" /><figcaption>Walkability (<kbd>W</kbd>): amber blocks walking, red blocks jumping and teleporting too.</figcaption></figure>
+          <figure class="shot"><img src="media/rooms.png" alt="Rooms and grid" /><figcaption>Rooms 8×8 (<kbd>R</kbd>) and Grid (<kbd>G</kbd>).</figcaption></figure>
+        </div>
+        <p><b>Level light</b> draws the map as brightly and in the colour the game lights the level (Levels.txt Intensity and Red/Green/Blue), and the Map panel changes them.</p>
+        <figure class="shot"><img src="img/mode-light.png" alt="Level light mode" /><figcaption>Level light on the Worldstone Chamber (Intensity 40).</figcaption></figure>
+
+        <p><b>Walkable area.</b> The box at the bottom right counts the tiles² a player can stand on, updated as you edit. Its colour tells you roughly how big the level feels:</p>
+        <div class="tool" id="areaTool">
+          <h4>Try the walkable area colours</h4>
+          <div class="row">
+            <input type="range" id="areaIn" min="2000" max="6000" step="10" value="3600" aria-label="Walkable area in tiles squared" />
+            <span class="area-box" id="areaBox"><small>Walkable area</small><strong id="areaVal">3,600 <span style="font-size:11px;font-weight:500;opacity:.8">tiles²</span></strong></span>
+          </div>
+          <p class="small" id="areaNote" style="margin:8px 0 0;font-size:14px;color:var(--ink-3)"></p>
+        </div>
+      </article>
+
+      <article class="topic" id="game-view">
+        <h3><span class="num">2.4</span>Game view, sprites and special tiles</h3>
+        <p><b>Game view</b> (<kbd>Z</kbd>) zooms to exactly what the character sees in game (640×480, 800×600, PD2's widescreen sizes or custom) and shades the rest.</p>
+        <figure class="shot"><img src="media/game-view.png" alt="Game view" /><figcaption>Game view: the 800×600 screen around the selection.</figcaption></figure>
+        <p>Objects and NPCs are drawn with their real, animated sprites. <kbd>N</kbd> toggles sprites, <kbd>M</kbd> object markers, <kbd>P</kbd> NPC paths.</p>
+        <p><b>Special tiles</b> are invisible in game: warps, where players arrive, the corpse and town-portal spots. DS1 Studio labels each one (e.g. <i>Town entry 1</i>, <i>Warp · link 1 → Catacombs Level 1</i>). Right-click a cell → <b>Place a special tile here</b> to add one.</p>
+        <div class="callout warn"><b>Where map portals arrive</b>A player who comes in through a map item's portal lands at a waypoint if the level has one, else in a room with a warp tile, else in the room at the centre of the level. If that room has no floor, the game stops. Place a waypoint where players should arrive; the Compatibility check asks for one.</div>
+      </article>
+
+      <article class="topic" id="roof-hiding">
+        <h3><span class="num">2.5</span>Roof and wall hiding</h3>
+        <p>When a player walks into a building, the game fades its roof. A <b>hide area</b> is two special tiles at opposite corners of the inside; every wall-layer tile with the named main index in the area (plus one cell around it) fades while the player stands inside. LvlPrest's <code>Pops</code> must count the areas and <code>PopPad</code> grows or shrinks the trigger (the game's houses use −4).</p>
+        <ul>
+          <li><b>View → Roof hiding</b> (<kbd>H</kbd>) shows the areas; <b>As if inside</b> (<kbd>Shift</kbd>+<kbd>H</kbd>) hides their tiles.</li>
+          <li><b>Map → Roof hiding…</b>: select the inside of a building, tick what should fade (roofs are ticked for you), and click <b>Add hide area</b>. DS1 Studio places the markers and sets Pops/PopPad.</li>
+          <li><b>Map → Wall hiding…</b> is the same with the walls ticked: the walls in front of a room fade so they don't block the view.</li>
+        </ul>
+        <figure class="shot medium"><img src="img/wall-hiding.png" alt="Wall hiding dialog" /><figcaption>Map → Wall hiding… with the walls ticked.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="stacked">
+        <h3><span class="num">2.6</span>Overlapping tiles</h3>
+        <p>When tiles overlap under the mouse (trees over trees, a wall over a floor), hold <kbd>Shift</kbd> and turn the wheel to step through them. Only that tile's layer is selected, so Copy, Cut and Delete leave the others alone. <kbd>Esc</kbd> selects all layers again.</p>
+        <figure class="anim"><div class="frame"><img src="posters/stacked-tiles.png" data-gif="media/stacked-tiles.gif" alt="Stepping through stacked tiles" /></div><figcaption><kbd>Shift</kbd>+wheel through stacked tiles; the chosen one is outlined.</figcaption></figure>
+      </article>
+    </section>
+
+    <!-- ====================================================== EDITING -->
+    <section class="chapter col" id="editing" data-chapter="Editing tiles">
+      <p class="eyebrow">Chapter 3</p>
+      <h2>Editing tiles</h2>
+
+      <article class="topic" id="tools">
+        <h3><span class="num">3.1</span>The tools</h3>
+        <div class="tablewrap"><table>
+          <tr><th>Tool</th><th>Key</th><th>What it does</th></tr>
+          <tr><td>Select</td><td><kbd>V</kbd></td><td>Click a cell to edit it in the Cell panel; drag to select; <kbd>Shift</kbd> adds to the selection.</td></tr>
+          <tr><td>Paint</td><td><kbd>B</kbd></td><td>Paints the chosen tile on the active layer.</td></tr>
+          <tr><td>Erase</td><td><kbd>E</kbd></td><td>Clears cells on the active layer.</td></tr>
+          <tr><td>Pick</td><td><kbd>I</kbd></td><td>Click a tile on the map to paint with it.</td></tr>
+          <tr><td>Objects</td><td><kbd>O</kbd></td><td>Select, move, add and delete objects and NPCs.</td></tr>
+        </table></div>
+        <p>The <b>Active layer</b> list chooses which layer Paint, Erase, Fill and Clear work on. Floors take floor tiles; wall layers take walls, roofs, lower walls, trees, objects and special tiles.</p>
+      </article>
+
+      <article class="topic" id="tiles-panel">
+        <h3><span class="num">3.2</span>The Tiles panel</h3>
+        <figure class="shot small"><img src="img/tiles-panel.png" alt="The Tiles panel" /><figcaption>Pinned and recent tiles on top; a brush plus two mixed tiles (dashed).</figcaption></figure>
+        <ul>
+          <li>Click a tile to paint with it. <kbd>Ctrl</kbd>+click more tiles to paint a random mix.</li>
+          <li>Right-click a tile to pin it (★). <b>Recent</b> lists what you used last.</li>
+          <li>The drop-down shows one DT1 at a time; chips filter walls, objects, roofs, lower walls and special tiles; the box finds a tile by main/sub number.</li>
+          <li>Rest the pointer on a tile for an enlarged view with its variants and source DT1.</li>
+        </ul>
+      </article>
+
+      <article class="topic" id="painting">
+        <h3><span class="num">3.3</span>Painting: freehand, rectangle, fill</h3>
+        <div class="tablewrap"><table>
+          <tr><th>Mode</th><th>Key</th><th>How</th></tr>
+          <tr><td>Freehand</td><td><kbd>B</kbd></td><td>Paints the cells the mouse passes over.</td></tr>
+          <tr><td>Rectangle</td><td><kbd>U</kbd></td><td>Drag a rectangle; all of it is painted when you let go.</td></tr>
+          <tr><td>Fill area</td><td><kbd>L</kbd></td><td>Fills the connected area of the same tile (inside the selection, if you click in one).</td></tr>
+        </table></div>
+        <p><b>Which layer a tile goes on:</b> with a tile ready to paint, <kbd>Shift</kbd>+scroll moves it to the next or previous layer of its kind. The preview shows it in front of or behind the tile already at that spot.</p>
+        <figure class="shot medium"><img src="img/rect-fill.png" alt="A rectangle of floor painted with a mix" /><figcaption>A rectangle of floor painted with a random mix of two tiles.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="selecting">
+        <h3><span class="num">3.4</span>Selecting, copying and moving</h3>
+        <p>With Select (<kbd>V</kbd>), drag to select or press <kbd>Ctrl</kbd>+<kbd>A</kbd> for the whole map. <kbd>Shift</kbd>+click and <kbd>Shift</kbd>+drag add to the selection, for any shape. The Selection panel offers Fill, Clear, Clear everything, Copy, Cut, Re-roll and Find &amp; replace.</p>
+        <figure class="shot"><img src="img/selection.png" alt="A selection with the Selection panel" /><figcaption>A selection with the Selection panel on the right.</figcaption></figure>
+        <p><b>Copy</b> (<kbd>Ctrl</kbd>+<kbd>C</kbd>) and <b>Cut</b> (<kbd>Ctrl</kbd>+<kbd>X</kbd>) take what you see; hidden layers stay put. The copy then follows the mouse: click to paste, <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste again later. Objects in the selection come along, so Cut then Paste moves an area with everything in it.</p>
+        <div class="pair">
+          <figure class="anim"><div class="frame"><img src="posters/same-tiles.png" data-gif="img/same-tiles.gif" alt="Double-clicking a fence post" /></div><figcaption><b>Double-click</b> a tile to select every copy of it on its layer.</figcaption></figure>
+          <figure class="anim"><div class="frame"><img src="posters/layer-scroll.png" data-gif="img/layer-scroll.gif" alt="Shift+scroll through a selection's layers" /></div><figcaption><kbd>Shift</kbd>+scroll narrows a selection to one layer at a time.</figcaption></figure>
+        </div>
+        <p><b>One layer of a selection:</b> select 10×10 cells, <kbd>Shift</kbd>+scroll to Wall 1, and Delete removes only the Wall 1 tiles.</p>
+        <figure class="shot"><img src="img/paste-preview.png" alt="Paste preview with red cells" /><figcaption>Before you click, red cells show the tiles a paste would replace.</figcaption></figure>
+        <p>Hold <kbd>Alt</kbd> when you click to <b>stack</b> the paste onto what's there (the next free layer) instead of replacing. Pasting into a map that lacks the copied tiles' DT1s offers to add them, and asks for a new name if one clashes with a DT1 the map already loads.</p>
+      </article>
+
+      <article class="topic" id="replace">
+        <h3><span class="num">3.5</span>Find &amp; replace, re-roll, undo</h3>
+        <p><b>Find &amp; replace</b> (<kbd>Ctrl</kbd>+<kbd>H</kbd>) swaps every use of one tile for another, on one layer or all of its kind, in the map or the selection. <b>Re-roll</b> mixes up the tiles inside a selection with other variants already used there.</p>
+        <div class="pair">
+          <figure class="shot"><img src="img/replace.png" alt="Find and replace" /><figcaption>Find &amp; replace tiles.</figcaption></figure>
+          <figure class="shot"><img src="img/history.png" alt="History panel" /><figcaption>History: click any step to go back or forward to it.</figcaption></figure>
+        </div>
+        <p><kbd>Ctrl</kbd>+<kbd>Z</kbd> and <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo and redo without limit.</p>
+      </article>
+
+      <article class="topic" id="cell-panel">
+        <h3><span class="num">3.6</span>The Cell panel and walkability</h3>
+        <p>Click a single cell with Select to edit every layer in it: kind, main and sub index, hidden, raw bytes and tag, each with a <b>?</b> explaining it.</p>
+        <div class="pair">
+          <figure class="shot"><img src="img/cell-panel.png" alt="Cell panel" /><figcaption>The Cell panel.</figcaption></figure>
+          <figure class="shot"><img src="img/cell-flags.png" alt="Sub-tile flags" /><figcaption>Painting a tile's sub-tile flags.</figcaption></figure>
+        </div>
+        <p><b>Walkability for this map only:</b> in <b>View → Walkability</b> (<kbd>W</kbd>), paint blocked or walkable sub-tiles straight onto the map. DS1 Studio adds a small <code>&lt;map&gt;_walk.dt1</code> for it, so no other map changes.</p>
+        <p><b>For a tile everywhere:</b> paint its flags under the card in the Cell panel and <b>Save DT1s to mod</b>. Every map using that tile changes.</p>
+      </article>
+
+      <article class="topic" id="new-map">
+        <h3><span class="num">3.7</span>New maps and resizing</h3>
+        <p><b>Map → New map</b> creates an empty map (defaults in Preferences). <b>Level type</b> chooses where its tiles come from:</p>
+        <ul>
+          <li><b>(New Lvltype)</b>: starts empty; you pick tile libraries from any act, and Add to game gives it a level type of its own.</li>
+          <li><b>(Choose Existing)</b>: starts with an existing level type's tile libraries, and Add to game starts from a level of that type.</li>
+        </ul>
+        <div class="pair">
+          <figure class="shot"><img src="img/new-map-type.png" alt="New map dialog" /><figcaption>New map, starting from an existing level type.</figcaption></figure>
+          <figure class="shot"><img src="img/resize.png" alt="Resizing a map" /><figcaption>Map → Resize: drag the edges.</figcaption></figure>
+        </div>
+        <p>Saving a resized level also updates its SizeX/SizeY in Levels.txt; the game stops building a level whose map isn't its size.</p>
+      </article>
+    </section>
+
+    <!-- ====================================================== OBJECTS -->
+    <section class="chapter col" id="objects" data-chapter="Objects and NPCs">
+      <p class="eyebrow">Chapter 4</p>
+      <h2>Objects and NPCs</h2>
+      <figure class="shot"><img src="img/objects-mode.png" alt="Object mode" /><figcaption>Object mode (<kbd>O</kbd>): preview, “In this map” and the gallery.</figcaption></figure>
+      <article class="topic" id="placing-objects">
+        <h3><span class="num">4.1</span>Placing and editing</h3>
+        <ol>
+          <li>Switch to Objects (<kbd>O</kbd>, or <kbd>Shift</kbd>+<kbd>O</kbd> from a tile tool).</li>
+          <li>Filter by NPCs or Objects, or type a name.</li>
+          <li>Click one, then click the map to place it. <kbd>Esc</kbd> stops.</li>
+        </ol>
+        <p>Drag an object to move it; <kbd>Delete</kbd> removes it. <kbd>Ctrl</kbd>+<kbd>C</kbd> puts a copy on the cursor (green), <kbd>Ctrl</kbd>+<kbd>X</kbd> cuts it (red). The Object panel edits type, id, position, flags and an NPC's path.</p>
+        <figure class="shot"><img src="img/same-objects.png" alt="Every torch selected" /><figcaption><b>Double-click</b> a torch: every torch on the map is selected, ready to delete, copy or cut.</figcaption></figure>
+      </article>
+      <article class="topic" id="in-this-map">
+        <h3><span class="num">4.2</span>“In this map”</h3>
+        <p>Lists everything placed, grouped by name with a count. Type to search; click a name to centre on it, again for the next one.</p>
+        <figure class="shot small"><img src="img/objects-list.png" alt="In this map list" /><figcaption>Every object and NPC placed, with counts.</figcaption></figure>
+      </article>
+    </section>
+
+    <!-- ====================================================== PRESETS -->
+    <section class="chapter col" id="presets" data-chapter="Presets">
+      <p class="eyebrow">Chapter 5</p>
+      <h2>Presets</h2>
+      <p class="lede">A preset is a reusable piece of map: a building, a wall run, a group of trees. Presets are saved in your mod folder, so they travel with the mod.</p>
+      <article class="topic" id="saving-presets">
+        <h3><span class="num">5.1</span>Saving and placing</h3>
+        <ul>
+          <li><b>Save selection</b> (Presets panel, Map → Presets, or <b>Save as preset…</b> after a copy) asks for a name and a category (one of yours, or <b>New category…</b>) and lets you choose what to keep: floors, walls, roofs, shadows, markers, objects.</li>
+          <li><b>Suggest</b> finds structures that recur across maps that share this map's tiles.</li>
+          <li>Click a preset, then click the map to place it. Red cells show what it would replace; <kbd>Alt</kbd> stacks it.</li>
+          <li><b>Right-click</b> a saved preset to place, rename, move to another category, duplicate or delete it.</li>
+        </ul>
+        <div class="pair">
+          <figure class="shot"><img src="img/save-preset.png" alt="Save as preset" /><figcaption>Save as preset with the category list.</figcaption></figure>
+          <figure class="shot"><img src="img/preset-menu.png" alt="Preset right-click menu" /><figcaption>Right-click a saved preset.</figcaption></figure>
+        </div>
+      </article>
+      <article class="topic" id="preset-builder">
+        <h3><span class="num">5.2</span>The Preset builder</h3>
+        <p>Build a preset on a 20×20 grid from this map's tile libraries, or add any DT1. Tiles from a library that isn't in the Act 0 colours yet are copied in converted to Act 0, so the preset looks right in any act.</p>
+        <figure class="shot"><img src="img/preset-builder.png" alt="Preset builder" /><figcaption>The Preset builder.</figcaption></figure>
+      </article>
+    </section>
+
+    <!-- ====================================================== WARPS -->
+    <section class="chapter col" id="warps" data-chapter="Warps">
+      <p class="eyebrow">Chapter 6</p>
+      <h2>Warps: connecting maps</h2>
+      <p>Each map preset is its own level, and levels are joined by warps. A warp special tile with main index N (0–7) uses its level's link N: Levels.txt <code>VisN</code> is the level it leads to and <code>WarpN</code> the kind of warp.</p>
+      <article class="topic" id="warp-links">
+        <h3><span class="num">6.1</span>Seeing and changing where a warp leads</h3>
+        <ul>
+          <li>Warp markers read e.g. <i>Warp · link 1 → Catacombs Level 1</i>, or <i>(not set)</i>.</li>
+          <li>Select the warp and click <b>Change where it leads…</b>, pick the level and the kind of warp, and tick <i>also add the way back</i> if you want one.</li>
+          <li><b>Apply</b> writes Levels.txt in your mod.</li>
+        </ul>
+        <div class="pair">
+          <figure class="shot"><img src="img/warp.png" alt="A warp in the Cathedral" /><figcaption>A warp and where it leads.</figcaption></figure>
+          <figure class="shot"><img src="img/warp-dialog.png" alt="Warp link dialog" /><figcaption>Choosing the level a link leads to.</figcaption></figure>
+        </div>
+        <div class="callout"><b>Add to game first</b>A map must be tied to a level before its warps lead anywhere. If your mod ships compiled <code>.bin</code> tables, rebuild them afterwards.</div>
+      </article>
+    </section>
+
+    <!-- ====================================================== IMPORT -->
+    <section class="chapter col" id="importing" data-chapter="Importing">
+      <p class="eyebrow">Chapter 7</p>
+      <h2>Importing DS1 and DT1 files</h2>
+      <article class="topic" id="import-ds1">
+        <h3><span class="num">7.1</span>Import a map</h3>
+        <ol>
+          <li><b>Home → File → Import ▾ → Map…</b> and pick the <code>.ds1</code> (or a map package <code>.zip</code>).</li>
+          <li>Name it; it's saved as <code>expansion/Map/&lt;name&gt;.ds1</code>.</li>
+          <li>Each tile library the map names shows as ✓ found, ＋ provided by a file you picked, or ✗ missing. Add the missing DT1 files or folders.</li>
+          <li><b>Import</b>, then Add to game opens pre-filled with a level that uses the same tiles.</li>
+        </ol>
+        <figure class="shot"><img src="img/import-ds1.png" alt="Import DS1" /><figcaption>Two libraries provided, one still missing.</figcaption></figure>
+        <div class="callout warn"><b>Maps from someone not using DS1 Studio</b>A map usually comes as the DS1, the DT1s the maker changed, and rows of their AutoMap.txt. Use <b>Import → AutoMap rows…</b> to bring those rows in under your level type, and run the Compatibility check: it tells you when their DT1s differ from yours.</div>
+      </article>
+      <article class="topic" id="dt1-library">
+        <h3><span class="num">7.2</span>The DT1 library</h3>
+        <p><b>Map → DT1 library…</b> lists every DT1 the game and your mod have. Browse any of them, bring in your own (<b>+ Add DT1 files…</b>), add whole libraries to the map, or <b>Build a custom DT1</b> from single tiles of any others. Libraries are converted to the Act 0 colours as they come in, unless you untick it.</p>
+        <figure class="shot"><img src="img/import-dt1.png" alt="Import DT1s" /><figcaption>DT1s ready to import.</figcaption></figure>
+        <p>A custom DT1 copies each tile exactly (pixels, walkability, sound), keeps whole pieces together, gives clashing tile numbers new ones, and copies each tile's automap pieces. Keep its name short: the whole path must fit the game's 41-character limit.</p>
+      </article>
+    </section>
+
+    <!-- ====================================================== TILE LIBRARIES -->
+    <section class="chapter col" id="tile-libraries" data-chapter="Tile libraries">
+      <p class="eyebrow">Chapter 8</p>
+      <h2>Tile libraries and the DT1 editor</h2>
+      <article class="topic" id="libraries">
+        <h3><span class="num">8.1</span>Tile libraries</h3>
+        <p><b>Map → Tile libraries</b> reviews the DT1s the map uses: how many of each library's tiles the map places, and which tiles. Show one on the map, remove a tile from a DT1, <b>Rename…</b> a DT1 (level types are updated), or take a library off the map.</p>
+        <figure class="shot"><img src="media/tile-libraries.png" alt="Tile libraries window" /><figcaption>Map → Tile libraries.</figcaption></figure>
+      </article>
+      <article class="topic" id="dt1-editor">
+        <h3><span class="num">8.2</span>The DT1 editor</h3>
+        <p><b>Map → DT1 editor</b> edits a copy of any DT1: recolour tiles, paint pixels, and change tile settings. Save writes a copy under a new name or overwrites your mod's file, and can switch the map to it.</p>
+        <figure class="shot"><img src="media/dt1-editor.png" alt="DT1 editor" /><figcaption>The DT1 editor.</figcaption></figure>
+        <div class="pair">
+          <figure class="anim"><div class="frame"><img src="posters/recolor.png" data-gif="media/recolor.gif" alt="Recolouring tiles" /></div><figcaption>Recolour: hue, saturation, brightness, tint, replace a colour.</figcaption></figure>
+          <figure class="anim"><div class="frame"><img src="posters/pixel-paint.png" data-gif="media/pixel-paint.gif" alt="Pixel painting" /></div><figcaption>Double-click a tile to paint it pixel by pixel.</figcaption></figure>
+        </div>
+        <p>The <b>Tile settings</b> tab edits everything a DT1 Tools <code>.ini</code> holds (kind, index, rarity, sound, roof height…) for one tile or many, and exchanges <code>.ini</code> files with DT1 Tools.</p>
+      </article>
+      <article class="topic" id="act-safe">
+        <h3><span class="num">8.3</span>Act 0 and Make act-safe</h3>
+        <p>About 30 of the palette's colours change between acts, so tiles drawn for one act can show red or purple patches in another. <b>Map → Make act-safe</b> lists each DT1 the map uses with a before/after preview; choose the act it was drawn for and <b>Convert</b>. Converted DT1s are saved into your mod with <code>.bak</code> copies.</p>
+        <div class="callout"><b>Random red cells?</b>If only some cells show odd colours in a random scatter, the map probably loads two copies of the same tiles (an original and an act-safe copy). Make act-safe and the Compatibility check both find this and remove the extra copy.</div>
+      </article>
+    </section>
+
+    <!-- ====================================================== GAME DATA -->
+    <section class="chapter col" id="game-data" data-chapter="Game data">
+      <p class="eyebrow">Chapter 9</p>
+      <h2>Game data</h2>
+      <article class="topic" id="data-tables">
+        <h3><span class="num">9.1</span>Data tables</h3>
+        <p>Browse and edit any <code>.txt</code> table in a spreadsheet view; every column header has a <b>?</b> explaining it. The LvlPrest, LvlTypes, Levels, Objects, MonPreset and CubeMain shortcuts jump to the open map's row.</p>
+        <figure class="shot"><img src="media/data-tables.png" alt="Data tables" /><figcaption>Game → Data tables.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="add-to-game">
+        <h3><span class="num">9.2</span>Add to game</h3>
+        <p>Makes the game load the open map. The dialog lists every field it will write, old and new value and why, before you click <b>Apply</b>.</p>
+        <ul>
+          <li><b>A new level</b> with settings copied from a level you choose. <b>Level type</b>: a new one of its own, or the one it copies from.</li>
+          <li><b>Replace the map of an existing preset level</b>.</li>
+        </ul>
+        <figure class="shot"><img src="img/add-to-game.png" alt="Add to game" /><figcaption>Game → Add to game.</figcaption></figure>
+        <details><summary>The rules it follows (and why)</summary><div class="body">
+          <div class="tablewrap"><table>
+            <tr><th>Rule</th><th>Why</th></tr>
+            <tr><td>New rows go at the end</td><td>The game reads Levels, LvlPrest and LvlTypes by row position; a row in the middle shifts every level after it.</td></tr>
+            <tr><td>New levels are Act 5</td><td>The game takes the act from the level number (109 and up is Act 5).</td></tr>
+            <tr><td>Layer stays ≤ 100</td><td>A higher automap Layer crashes the game when a player enters.</td></tr>
+            <tr><td>SizeX/SizeY = map size − 1</td><td>As in every preset level; the preset then fills the level.</td></tr>
+            <tr><td>A free Offset spot</td><td>Levels of one act share a world and must not overlap.</td></tr>
+            <tr><td>Paths ≤ 41 characters</td><td>The game copies tile paths into a 60-byte buffer after <code>DATA\GLOBAL\TILES\</code>.</td></tr>
+          </table></div>
+        </div></details>
+        <div class="tool" id="pathTool">
+          <h4>Check a tile path's length</h4>
+          <div class="row">
+            <span class="path">data/global/tiles/</span>
+            <input type="text" id="pathIn" value="PD2assets/custom/guild_house_interior.dt1" spellcheck="false" aria-label="Tile path under data/global/tiles" />
+          </div>
+          <p style="margin:8px 0 0;font-size:14.5px"><span class="meter" id="pathLen"></span> <span id="pathMsg"></span></p>
+        </div>
+      </article>
+
+      <article class="topic" id="cube">
+        <h3><span class="num">9.3</span>Cube recipe</h3>
+        <p><b>Game → Cube recipe</b> creates a new item and a Horadric Cube recipe for it, with icons for the template and ingredients. It adds the item at the end of Misc.txt, refuses duplicate recipes, and keeps the item out of random drops. Pick one of your mod's map items as the template and the new item opens the map you have open.</p>
+        <figure class="shot medium"><img src="media/cube-recipe.png" alt="Cube recipe" /><figcaption>Game → Cube recipe.</figcaption></figure>
+      </article>
+
+      <article class="topic" id="compatibility">
+        <h3><span class="num">9.4</span>Compatibility check</h3>
+        <p><b>Diagnostics → Compatibility</b> checks the map will load and play in game: missing tiles and DT1s, table wiring, entry markers, a missing waypoint, NPCs on unwalkable ground, walls missing from the automap, and more. Most results have one-click fixes, and <b>Show on map</b> marks the cells.</p>
+        <figure class="shot medium"><img src="media/compatibility.png" alt="Compatibility check" /><figcaption>The Compatibility check.</figcaption></figure>
+        <ul>
+          <li><b>Tile paths too long</b>: <b>Rename…</b> shortens every such path together and updates LvlTypes and LvlPrest.</li>
+          <li><b>AutoMap rows with no picture</b> (Cel1 −1) stop the game while it loads; one click removes them, with a backup.</li>
+          <li><b>Colours</b>: libraries not drawn for the level's act can be converted to Act 0.</li>
+          <li><b>Ways out</b>: a level with no working warp and no waypoint can only be left by town portal; <b>Add an exit warp…</b> sets one up.</li>
+        </ul>
+      </article>
+
+      <article class="topic" id="automap">
+        <h3><span class="num">9.5</span>The automap</h3>
+        <p><b>View → Automap</b> (<kbd>A</kbd>) shows the in-game automap over the map. Walls outlined in pink have no AutoMap.txt entry (a hole). Click a cell to see each tile's piece: <b>Change piece…</b> or <b>Clear piece</b>, for <b>Only this cell</b> by default. Where a tree or roof stands in a wall's place, <b>choose a wall piece…</b> draws one anyway.</p>
+        <div class="pair">
+          <figure class="anim"><div class="frame"><img src="posters/automap-toggle.png" data-gif="media/automap-toggle.gif" alt="Automap on and off" /></div><figcaption>The automap on and off.</figcaption></figure>
+          <figure class="shot"><img src="media/automap-suggest.png" alt="Suggested automap pieces" /><figcaption>Suggested pieces previewed in cyan.</figcaption></figure>
+        </div>
+        <p>The <b>Automap editor</b> sorts tiles into walls, floors, water, roofs, objects and shadows; pick a category to see and set its pieces, <b>Suggest</b> fills holes from look-alike tiles, and nothing is written until <b>Save to AutoMap.txt</b>.</p>
+        <figure class="shot"><img src="media/automap-editor.png" alt="Automap editor" /><figcaption>The Automap editor.</figcaption></figure>
+      </article>
+    </section>
+
+    <!-- ====================================================== SHARING -->
+    <section class="chapter col" id="sharing" data-chapter="Sharing">
+      <p class="eyebrow">Chapter 10</p>
+      <h2>Sharing and exporting</h2>
+      <article class="topic" id="packages">
+        <h3><span class="num">10.1</span>Map packages</h3>
+        <p><b>Export ▾ → Map package…</b> puts the DS1, its DT1s, modded sprites and every table row the map needs into one <code>.zip</code>. <b>Import ▾ → Map…</b> merges such a zip into another mod safely: clashing ids get new numbers, and nothing is added twice. Each package also has a <code>for-developers</code> folder with the rows ready to paste by hand.</p>
+        <figure class="shot medium"><img src="img/export-package.png" alt="Export map package" /><figcaption>Export ▾ → Map package.</figcaption></figure>
+      </article>
+      <article class="topic" id="pictures">
+        <h3><span class="num">10.2</span>Pictures</h3>
+        <p><b>View → Export picture</b> saves the whole map or the selection as a PNG at 100%, 50%, 25% or 12.5%. <b>Copy view</b> (or Print Screen) copies the map pane as it is on screen, to paste anywhere.</p>
+      </article>
+    </section>
+
+    <!-- ====================================================== SHORTCUTS -->
+    <section class="chapter col" id="shortcuts-ref" data-chapter="Reference">
+      <p class="eyebrow">Reference</p>
+      <h2>Keyboard shortcuts</h2>
+      <p>Default keys; change any of them in <b>Help → Shortcuts</b>. Filter the list, or click the box and press a key to see what it does.</p>
+      <div class="keytry"><input id="keyTry" type="text" readonly placeholder="Click here, then press a key" aria-label="Press a key to find its shortcut" /><span id="keyTryOut" style="font-size:14px;color:var(--ink-3)"></span></div>
+      <div class="chips" id="keyChips" role="group" aria-label="Filter shortcuts">
+        <button class="chip" aria-pressed="true" data-cat="all">All</button>
+        <button class="chip" aria-pressed="false" data-cat="tools">Tools</button>
+        <button class="chip" aria-pressed="false" data-cat="edit">File &amp; edit</button>
+        <button class="chip" aria-pressed="false" data-cat="view">View</button>
+        <button class="chip" aria-pressed="false" data-cat="layers">Layers</button>
+        <button class="chip" aria-pressed="false" data-cat="mouse">Mouse</button>
+      </div>
+      <div class="tablewrap"><table id="shortcuts">
+        <tr><th>Action</th><th>Keys</th></tr>
+        <tr data-cat="tools" data-k="v"><td>Select tool</td><td><kbd>V</kbd></td></tr>
+        <tr data-cat="tools" data-k="b"><td>Paint (freehand)</td><td><kbd>B</kbd></td></tr>
+        <tr data-cat="tools" data-k="u"><td>Paint / erase a rectangle</td><td><kbd>U</kbd></td></tr>
+        <tr data-cat="tools" data-k="l"><td>Fill a connected area</td><td><kbd>L</kbd></td></tr>
+        <tr data-cat="tools" data-k="e"><td>Erase tool</td><td><kbd>E</kbd></td></tr>
+        <tr data-cat="tools" data-k="i"><td>Pick tool</td><td><kbd>I</kbd></td></tr>
+        <tr data-cat="tools" data-k="o"><td>Objects tool</td><td><kbd>O</kbd></td></tr>
+        <tr data-cat="tools" data-k="shift+o"><td>Switch tiles / objects editing</td><td><kbd>Shift</kbd>+<kbd>O</kbd></td></tr>
+        <tr data-cat="edit" data-k="ctrl+s"><td>Save</td><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td></tr>
+        <tr data-cat="edit" data-k="ctrl+z ctrl+y ctrl+shift+z"><td>Undo / redo</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td></tr>
+        <tr data-cat="edit" data-k="ctrl+c ctrl+x ctrl+v"><td>Copy / cut / paste</td><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd></td></tr>
+        <tr data-cat="edit" data-k="ctrl+a"><td>Select all</td><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td></tr>
+        <tr data-cat="edit" data-k="escape"><td>Cancel, drop what's on the cursor, deselect; with nothing selected, close the map</td><td><kbd>Esc</kbd></td></tr>
+        <tr data-cat="edit" data-k="delete"><td>Delete (active layer / object)</td><td><kbd>Delete</kbd></td></tr>
+        <tr data-cat="edit" data-k="shift+delete"><td>Delete everything in the selection</td><td><kbd>Shift</kbd>+<kbd>Delete</kbd></td></tr>
+        <tr data-cat="edit" data-k="ctrl+h"><td>Find &amp; replace tiles</td><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td></tr>
+        <tr data-cat="edit" data-k="ctrl+k"><td>Commands</td><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td></tr>
+        <tr data-cat="view" data-k="tab shift+tab"><td>Next / previous view</td><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td></tr>
+        <tr data-cat="view" data-k="f"><td>Fit the map</td><td><kbd>F</kbd></td></tr>
+        <tr data-cat="view" data-k="z"><td>Game view</td><td><kbd>Z</kbd></td></tr>
+        <tr data-cat="view" data-k="g"><td>Grid</td><td><kbd>G</kbd></td></tr>
+        <tr data-cat="view" data-k="r"><td>Rooms (8×8)</td><td><kbd>R</kbd></td></tr>
+        <tr data-cat="view" data-k="w"><td>Walkability</td><td><kbd>W</kbd></td></tr>
+        <tr data-cat="view" data-k="a"><td>Automap</td><td><kbd>A</kbd></td></tr>
+        <tr data-cat="view" data-k="shift+l"><td>Level light</td><td><kbd>Shift</kbd>+<kbd>L</kbd></td></tr>
+        <tr data-cat="view" data-k="m n p"><td>Object markers / sprites / NPC paths</td><td><kbd>M</kbd> / <kbd>N</kbd> / <kbd>P</kbd></td></tr>
+        <tr data-cat="view" data-k="k"><td>Minimap</td><td><kbd>K</kbd></td></tr>
+        <tr data-cat="view" data-k="h shift+h"><td>Roof hiding / As if inside</td><td><kbd>H</kbd> / <kbd>Shift</kbd>+<kbd>H</kbd></td></tr>
+        <tr data-cat="layers" data-k="1 2"><td>Floor 1 / Floor 2</td><td><kbd>1</kbd> / <kbd>2</kbd></td></tr>
+        <tr data-cat="layers" data-k="3 4 5 6"><td>Wall 1 – Wall 4</td><td><kbd>3</kbd> – <kbd>6</kbd></td></tr>
+        <tr data-cat="layers" data-k="7 8 9"><td>Shadows / roofs / lower walls</td><td><kbd>7</kbd> / <kbd>8</kbd> / <kbd>9</kbd></td></tr>
+        <tr data-cat="layers" data-k="0"><td>Special tiles</td><td><kbd>0</kbd></td></tr>
+        <tr data-cat="mouse" data-k="arrowleft arrowright arrowup arrowdown"><td>Pan the map</td><td>Arrow keys (<kbd>Shift</kbd> = faster), <kbd>Space</kbd>+drag, middle or right drag</td></tr>
+        <tr data-cat="mouse" data-k=""><td>Zoom</td><td>Mouse wheel</td></tr>
+        <tr data-cat="mouse" data-k=""><td>Step through stacked tiles / a selection's layers</td><td><kbd>Shift</kbd>+wheel</td></tr>
+        <tr data-cat="mouse" data-k=""><td>Select every copy of a tile or object</td><td>Double-click</td></tr>
+        <tr data-cat="mouse" data-k=""><td>Stack a paste or preset onto existing tiles</td><td><kbd>Alt</kbd>+click</td></tr>
+        <tr data-cat="mouse" data-k=""><td>Add a tile to the random paint mix</td><td><kbd>Ctrl</kbd>+click it in the Tiles panel</td></tr>
+        <tr data-cat="mouse" data-k=""><td>Pin a tile / preset menu</td><td>Right-click it</td></tr>
+      </table></div>
+    </section>
+
+    <!-- ====================================================== TROUBLESHOOTING -->
+    <section class="chapter col" id="troubleshooting" data-chapter="Reference">
+      <p class="eyebrow">Reference</p>
+      <h2>Safety and troubleshooting</h2>
+      <div class="callout warn"><b>Keep a backup</b>DS1 Studio is in beta. Back up your mod before editing.</div>
+      <article class="topic" id="what-it-writes">
+        <h3>What DS1 Studio writes</h3>
+        <ul>
+          <li>Only into your mod folder: maps, DT1s, tables, presets. The Diablo II install is only ever read.</li>
+          <li>A file it replaces is kept as <code>&lt;name&gt;.bak</code> the first time.</li>
+          <li>Autosaved copies live in the app's own storage.</li>
+          <li>After changing tables, start the game once with <code>-direct -txt</code> if your mod ships <code>.bin</code> files, so they're rebuilt.</li>
+        </ul>
+      </article>
+      <article class="topic" id="crash-log">
+        <h3>When the game crashes</h3>
+        <p>Diablo II writes each crash to <code>D2&lt;date&gt;.txt</code> in its folder. <b>Diagnostics → Crash log</b> reads the newest ones and says in plain words what they mean and what to do. When a map can cause the crash, <b>Run compatibility check</b> finds and fixes it.</p>
+      </article>
+      <article class="topic" id="faq">
+        <h3>Common questions</h3>
+        <details><summary>Tiles show as red “missing” diamonds.</summary><div class="body"><p>The map uses tiles no loaded DT1 provides. Run the Compatibility check (it offers to add the DT1s that contain them) or add them in Tile libraries.</p></div></details>
+        <details><summary>My new map doesn't appear in game.</summary><div class="body"><p>Use Add to game, connect it with a warp or a cube recipe, and rebuild the <code>.bin</code> tables.</p></div></details>
+        <details><summary>A warp leads nowhere.</summary><div class="body"><p>Its link isn't set in Levels.txt: select it and use <b>Connect it to a level…</b></p></div></details>
+        <details><summary>Tiles look different in another act.</summary><div class="body"><p>Convert them with <b>Map → Make act-safe</b> so they use the Act 0 colours.</p></div></details>
+        <details><summary>The game crashes the moment I enter my level.</summary><div class="body"><p>Check the Crash log. Common causes the Compatibility check fixes: a Levels.txt Layer above 100, an empty level centre with no waypoint for portal arrivals, or a tile path longer than 41 characters.</p></div></details>
+        <details><summary>Windows blocks the installer.</summary><div class="body"><p><b>More info → Run anyway</b>.</p></div></details>
+      </article>
+    </section>
+
+    <!-- ====================================================== GLOSSARY -->
+    <section class="chapter col" id="glossary" data-chapter="Reference">
+      <p class="eyebrow">Reference</p>
+      <h2>Glossary</h2>
+      <dl class="gloss">
+        <dt>DS1</dt><dd>A map preset: a grid of cells with floor, wall, shadow and tag layers, plus objects and NPCs. The game builds levels from them.</dd>
+        <dt>DT1</dt><dd>A tile library: the pictures and settings of the tiles DS1 cells refer to.</dd>
+        <dt>Cell</dt><dd>One diamond of the map grid; each layer holds at most one tile in it.</dd>
+        <dt>Main / sub index</dt><dd>A tile's number. A cell asks for kind + main + sub, and the game draws the DT1 tile with those numbers.</dd>
+        <dt>Orientation</dt><dd>What a tile is: floor, left/right wall, corner, door, pillar/tree, roof, shadow, lower wall, special tile.</dd>
+        <dt>Variant</dt><dd>Several tiles can share a number; the game picks one at random, weighted by rarity.</dd>
+        <dt>Sub-tile flags</dt><dd>A tile's 5×5 walkability grid: block walk, sight, missiles, teleport.</dd>
+        <dt>Special tile</dt><dd>An invisible marker: warps, entries, corpse and portal spots.</dd>
+        <dt>Level</dt><dd>A row of Levels.txt: one area of the game, built from DS1 presets or at random.</dd>
+        <dt>LvlPrest.txt</dt><dd>Lists the DS1 files, the level each belongs to, and its Dt1Mask.</dd>
+        <dt>LvlTypes.txt</dt><dd>Level types: up to 32 DT1 File slots each.</dd>
+        <dt>Dt1Mask</dt><dd>Which of its level type's DT1 slots a DS1 loads, one bit per slot.</dd>
+        <dt>Warp / link</dt><dd>How levels connect: Levels.txt Vis0–7 (target level) and Warp0–7 (kind of warp).</dd>
+        <dt>Preset</dt><dd>In DS1 Studio, a saved piece of map you can place again. Not the same as a DS1 “map preset”.</dd>
+        <dt>Act 0 palette</dt><dd>The colours that look the same in every act.</dd>
+        <dt>Mod folder</dt><dd>Your mod's folder; everything DS1 Studio saves goes here.</dd>
+      </dl>
+    </section>
+
+    <div class="nores col" id="nores">Nothing in the guide matches that. Try a shorter word, or a menu name such as <b>Add to game</b>.</div>
+
+    <footer>
+      Diablo II and its data are © Blizzard Entertainment. DS1 Studio reads your own game files and never ships them. Thanks to Paul Siramy (WinDS1, DT1 Tools), the Phrozen Keep community, and Gimli for the Act 0 palette. Pictures show the unmodded game. Source and downloads: <a href="https://github.com/RoofooEvazan/ds1-studio" target="_blank" rel="noopener">github.com/RoofooEvazan/ds1-studio</a>.
+    </footer>
+  </main>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* per-viewer convenience only */ } },
+  };
+
+  // Opened from the repository (docs/guide/index.html), the pictures live next door in docs/manual and docs/media.
+  if (location.protocol === 'file:') {
+    for (const el of $$('img[src], img[data-gif]')) {
+      for (const attr of ['src', 'data-gif']) {
+        const v = el.getAttribute(attr);
+        if (!v) continue;
+        if (v.startsWith('img/')) el.setAttribute(attr, '../manual/' + v);
+        else if (v.startsWith('media/')) el.setAttribute(attr, '../' + v);
+      }
+    }
+  }
+
+  // ---- Contents, built from the chapters and topics
+  const toc = $('#toc');
+  let group = null;
+  const links = [];
+  for (const sec of $$('section.chapter')) {
+    const g = sec.dataset.chapter;
+    if (g !== group) {
+      group = g;
+      const h = document.createElement('h4');
+      h.textContent = g;
+      toc.appendChild(h);
+    }
+    const a = document.createElement('a');
+    a.href = '#' + sec.id;
+    a.textContent = $('h2', sec).textContent;
+    a.dataset.target = sec.id;
+    toc.appendChild(a);
+    links.push(a);
+    for (const t of $$('article.topic', sec)) {
+      const s = document.createElement('a');
+      s.href = '#' + t.id;
+      s.className = 'sub';
+      s.textContent = $('h3', t).textContent.replace(/^[\d.]+/, '').trim();
+      s.dataset.target = t.id;
+      toc.appendChild(s);
+      links.push(s);
+    }
+  }
+  const menuBtn = $('#menuBtn');
+  const closeMenu = () => { toc.classList.remove('open'); menuBtn.setAttribute('aria-expanded', 'false'); };
+  menuBtn.addEventListener('click', () => {
+    const open = toc.classList.toggle('open');
+    menuBtn.setAttribute('aria-expanded', String(open));
+  });
+  toc.addEventListener('click', (e) => { if (e.target.closest('a')) closeMenu(); });
+
+  // Highlight where you are.
+  const targets = links.map((a) => document.getElementById(a.dataset.target)).filter(Boolean);
+  const setActive = () => {
+    const y = window.scrollY + 90;
+    let current = null;
+    for (const el of targets) if (!el.closest('.hidden') && el.getBoundingClientRect().top + window.scrollY <= y) current = el;
+    for (const a of links) a.classList.toggle('active', !!current && a.dataset.target === current.id);
+  };
+  window.addEventListener('scroll', () => requestAnimationFrame(setActive), { passive: true });
+  setActive();
+
+  // ---- Animated pictures: show the last frame, play on request
+  for (const fig of $$('figure.anim')) {
+    const img = $('img', fig);
+    const poster = img.getAttribute('src');
+    const gif = img.dataset.gif;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'play';
+    const label = (playing) => (btn.innerHTML = playing
+      ? '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="4" height="12"/><rect x="9" y="2" width="4" height="12"/></svg>Pause'
+      : '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l10 6-10 6z"/></svg>Play');
+    label(false);
+    btn.setAttribute('aria-label', 'Play: ' + img.alt);
+    $('.frame', fig).appendChild(btn);
+    btn.addEventListener('click', () => {
+      const playing = !fig.classList.contains('playing');
+      fig.classList.toggle('playing', playing);
+      img.src = playing ? gif : poster;
+      label(playing);
+      btn.setAttribute('aria-label', (playing ? 'Pause: ' : 'Play: ') + img.alt);
+    });
+  }
+
+  // ---- Enlarge pictures
+  const openBox = (src, caption) => {
+    const box = document.createElement('div');
+    box.className = 'lightbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', caption || 'Picture');
+    box.innerHTML = '<div><img alt=""><p></p></div>';
+    $('img', box).src = src;
+    $('p', box).textContent = caption || '';
+    const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    box.addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(box);
+  };
+  for (const img of $$('figure.shot img, .hero img')) {
+    img.addEventListener('click', () => openBox(img.src, img.dataset.caption || img.closest('figure')?.querySelector('figcaption')?.textContent || img.alt));
+  }
+
+  // ---- Quick start progress
+  const steps = $$('#steps .step');
+  const paintSteps = () => {
+    let n = 0;
+    for (const s of steps) {
+      const box = $('input', s);
+      s.classList.toggle('done', box.checked);
+      if (box.checked) n++;
+    }
+    $('#qsCount').textContent = `${n} of ${steps.length} done`;
+    $('#qsBar').style.width = `${(n / steps.length) * 100}%`;
+  };
+  let saved = {};
+  try { saved = JSON.parse(store.get('ds1guide.quickstart') || '{}'); } catch { saved = {}; }
+  for (const s of steps) {
+    const box = $('input', s);
+    box.checked = !!saved[s.dataset.step];
+    box.addEventListener('change', () => {
+      saved[s.dataset.step] = box.checked;
+      store.set('ds1guide.quickstart', JSON.stringify(saved));
+      paintSteps();
+    });
+  }
+  $('#qsReset').addEventListener('click', () => {
+    saved = {};
+    store.set('ds1guide.quickstart', '{}');
+    for (const s of steps) $('input', s).checked = false;
+    paintSteps();
+  });
+  paintSteps();
+
+  // ---- Walkable area colours (as the app's box: grey, green, orange, then redder)
+  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const GREY = [125, 132, 144], GREEN = [76, 190, 104], ORANGE = [240, 160, 48], RED = [226, 58, 58], DEEP = [170, 20, 30];
+  const areaColour = (v) => {
+    if (v < 3300) return [GREY, 'Below 3,300: a small level (greyed).'];
+    if (v < 3800) return [mix(GREEN, ORANGE, (v - 3300) / 500), '3,300–3,800: a comfortable size (green, turning orange).'];
+    if (v < 4300) return [mix(ORANGE, RED, (v - 3800) / 500), '3,800–4,300: large (orange, turning red).'];
+    return [mix(RED, DEEP, Math.min(1, (v - 4300) / 1700)), 'Above 4,300: very large, redder the bigger it gets.'];
+  };
+  const areaIn = $('#areaIn');
+  const paintArea = () => {
+    const v = Number(areaIn.value);
+    const [rgb, note] = areaColour(v);
+    const c = `rgb(${rgb.join(',')})`;
+    $('#areaVal').firstChild.textContent = v.toLocaleString('en-US') + ' ';
+    $('#areaVal').style.color = c;
+    $('#areaBox').style.borderColor = c;
+    $('#areaNote').textContent = note;
+  };
+  areaIn.addEventListener('input', paintArea);
+  paintArea();
+
+  // ---- Tile path length (41 characters after data/global/tiles/)
+  const MAX = 41;
+  const pathIn = $('#pathIn');
+  const paintPath = () => {
+    const v = pathIn.value.trim().replace(/\\/g, '/').replace(/^data\/global\/tiles\//i, '');
+    const n = v.length;
+    const len = $('#pathLen'), msg = $('#pathMsg');
+    len.textContent = `${n} / ${MAX}`;
+    len.className = 'meter ' + (n > MAX ? 'bad' : n > MAX - 4 ? 'warn-t' : 'ok');
+    msg.textContent = !n ? 'Type a path.' : n > MAX ? `${n - MAX} too many: the game can crash or fail to load it. Shorten the folder or file name.` : `Fits, with ${MAX - n} to spare.`;
+  };
+  pathIn.addEventListener('input', paintPath);
+  paintPath();
+
+  // ---- Shortcuts: category chips and press-a-key
+  const rows = $$('#shortcuts tr[data-cat]');
+  let cat = 'all';
+  const paintRows = () => { for (const r of rows) r.hidden = cat !== 'all' && r.dataset.cat !== cat; };
+  for (const chip of $$('#keyChips .chip')) {
+    chip.addEventListener('click', () => {
+      cat = chip.dataset.cat;
+      for (const c of $$('#keyChips .chip')) c.setAttribute('aria-pressed', String(c === chip));
+      paintRows();
+    });
+  }
+  const keyTry = $('#keyTry'), keyOut = $('#keyTryOut');
+  keyTry.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') return;
+    e.preventDefault();
+    if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
+    const k = (e.ctrlKey || e.metaKey ? 'ctrl+' : '') + (e.shiftKey ? 'shift+' : '') + e.key.toLowerCase();
+    keyTry.value = k.replace(/\b\w/g, (c) => c.toUpperCase()).replace('Escape', 'Esc');
+    cat = 'all';
+    for (const c of $$('#keyChips .chip')) c.setAttribute('aria-pressed', String(c.dataset.cat === 'all'));
+    paintRows();
+    let first = null;
+    for (const r of rows) {
+      const hit = r.dataset.k.split(' ').includes(k);
+      r.classList.toggle('hit', hit);
+      if (hit && !first) first = r;
+    }
+    keyOut.textContent = first ? first.cells[0].textContent : 'Not a default shortcut.';
+  });
+
+  // ---- Search: hide what doesn't match, mark what does
+  const q = $('#q');
+  const blocks = $$('article.topic, section.chapter');
+  // Marks are unwrapped again (not re-rendered), so buttons and checkboxes keep working.
+  const clearMarks = () => {
+    const parents = new Set();
+    for (const m of $$('main mark')) { parents.add(m.parentNode); m.replaceWith(document.createTextNode(m.textContent)); }
+    for (const p of parents) p.normalize();
+  };
+  const markIn = (root, re) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement.closest('script, style, kbd, .play') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const hits = [];
+    const has = new RegExp(re.source, 'i');
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (has.test(n.nodeValue)) hits.push(n);
+    for (const n of hits) {
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      n.nodeValue.replace(re, (m, at) => {
+        frag.append(n.nodeValue.slice(last, at));
+        const mk = document.createElement('mark');
+        mk.textContent = m;
+        frag.append(mk);
+        last = at + m.length;
+        return m;
+      });
+      frag.append(n.nodeValue.slice(last));
+      n.replaceWith(frag);
+    }
+  };
+  let timer = 0;
+  const runSearch = () => {
+    const term = q.value.trim();
+    clearMarks();
+    for (const b of [...blocks, $('.hero')]) b.classList.remove('hidden');
+    for (const a of links) a.classList.remove('dim');
+    $('#nores').classList.remove('show');
+    if (term.length < 2) { $('#searchinfo').textContent = ''; setActive(); return; }
+    const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(esc, 'gi');
+    const test = new RegExp(esc, 'i');
+    let found = 0;
+    $('.hero').classList.add('hidden');
+    for (const sec of $$('section.chapter')) {
+      const topics = $$('article.topic', sec);
+      const intro = [...sec.children].filter((c) => !c.matches('article.topic'));
+      const introHit = intro.some((c) => test.test(c.textContent));
+      let any = introHit;
+      for (const t of topics) {
+        const hit = test.test(t.textContent);
+        t.classList.toggle('hidden', !hit && !introHit);
+        if (hit) { any = true; found++; markIn(t, re); }
+      }
+      if (introHit && !topics.length) found++;
+      sec.classList.toggle('hidden', !any);
+      if (any) for (const c of intro) if (test.test(c.textContent)) markIn(c, re);
+    }
+    for (const a of links) a.classList.toggle('dim', !!document.getElementById(a.dataset.target)?.closest('.hidden'));
+    $('#nores').classList.toggle('show', !found);
+    $('#searchinfo').textContent = found ? `Showing ${found} ${found === 1 ? 'topic' : 'topics'} for “${term}”. Clear the search to see everything.` : '';
+    setActive();
+  };
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(runSearch, 160); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== q && !e.target.closest('input, textarea')) { e.preventDefault(); q.focus(); }
+    if (e.key === 'Escape' && document.activeElement === q) { q.value = ''; runSearch(); q.blur(); }
+  });
+})();
+</script>

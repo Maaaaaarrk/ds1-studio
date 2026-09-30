@@ -55,7 +55,7 @@ DS1 Studio's own labelled markers. On Linux, point it at the Diablo II folder in
 downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` packages get a link to the new release.)
 
 **Manual:** a full illustrated how-to guide with a linked table of contents is in
-[docs/manual/DS1-Studio-Manual.pdf](docs/manual/DS1-Studio-Manual.pdf). It starts with a **Quick start** (open a map, paint, select, place objects, save, add it to the game).
+[docs/manual/DS1-Studio-Manual.pdf](docs/manual/DS1-Studio-Manual.pdf). It starts with a **Quick start** (open a map, paint, select, place objects, save, add it to the game). An interactive version with playable GIFs, search and a shortcut finder is in [docs/guide/index.html](docs/guide/index.html) (open it from a downloaded copy of the repository).
 
 ---
 
