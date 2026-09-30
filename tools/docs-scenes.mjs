@@ -263,7 +263,7 @@ export function makeScenes(h) {
 
     async dataTables() {
       await town();
-      await ribbonTab('Data');
+      await ribbonTab('Game');
       await button('LvlPrest');
       await sleep(1500);
       await js(`document.querySelector('.col-help, [class*=help]')?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));`);
@@ -274,6 +274,7 @@ export function makeScenes(h) {
 
     async compatibility() {
       await town();
+      await ribbonTab('Diagnostics');
       await button('Compatibility');
       await sleep(2500);
       await shot('compatibility', await dialog());
@@ -306,7 +307,7 @@ export function makeScenes(h) {
 
     async cubeRecipe() {
       await town();
-      await ribbonTab('Data');
+      await ribbonTab('Game');
       await button('Cube recipe');
       await sleep(2500);
       // A template item picked, so the plan of what gets written shows.
@@ -329,10 +330,11 @@ export function makeScenes(h) {
 
     async ribbon() {
       await town();
-      for (const tab of ['Home', 'Map', 'Data']) {
+      // The Game tab keeps its old picture name (ribbon-data.png).
+      for (const [tab, file] of [['Home', 'home'], ['Map', 'map'], ['Game', 'data']]) {
         await ribbonTab(tab);
         await sleep(300);
-        await shot(`ribbon-${tab.toLowerCase()}`, { x: 0, y: 0, width: W, height: 125 });
+        await shot(`ribbon-${file}`, { x: 0, y: 0, width: W, height: 125 });
       }
       await ribbonTab('Home');
     },

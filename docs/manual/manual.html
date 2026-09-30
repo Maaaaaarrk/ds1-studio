@@ -95,6 +95,7 @@
         <ol>
           <li><a href="#s-install"><span class="num">1.1</span>Installing</a></li>
           <li><a href="#s-first"><span class="num">1.2</span>First start: choosing your folders</a></li>
+          <li><a href="#s-quick">Quick start: your first edits</a></li>
           <li><a href="#s-window"><span class="num">1.3</span>A tour of the window</a></li>
           <li><a href="#s-open"><span class="num">1.4</span>Opening a map</a></li>
           <li><a href="#s-save"><span class="num">1.5</span>Saving, and where files go</a></li>
@@ -194,6 +195,20 @@
   </ul>
   <p>On Linux, point it at the Diablo II folder inside your Wine prefix. You can change the folders later with <b>Home → File → Folders…</b> Nothing else is needed: object names and sprites come from the game's own files, and special tiles get DS1 Studio's own markers.</p>
 
+  <h2 id="s-quick">Quick start: your first edits</h2>
+  <p>Ten minutes from opening DS1 Studio to a map in game. Each step links to the section that explains it fully. (The pictures below move in the HTML version of this manual; the PDF shows their first frame.)</p>
+  <ol>
+    <li><b>Open a map.</b> Type part of its name in the filter above the file list on the left and click it; <kbd>F</kbd> fits the whole map in view. Scroll to zoom, right-drag or the arrow keys to move around. <a href="#s-open">More…</a>
+      <figure class="medium"><img src="img/quick-open.gif" alt="Opening a map" /><figcaption>Filter the file list, click a map, press <kbd>F</kbd>.</figcaption></figure></li>
+    <li><b>Paint.</b> Press <kbd>B</kbd> (Paint), click a tile in the <b>Tiles</b> panel on the right, and drag over the map. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes. The <b>Active layer</b> (Home tab) is the layer you paint on; <kbd>Shift</kbd>+scroll moves the tile to the layer in front or behind. <a href="#s-paint">More…</a>
+      <figure class="medium"><img src="img/quick-paint.gif" alt="Painting a fence" /><figcaption>Pick a tile (here a fence post) and drag.</figcaption></figure></li>
+    <li><b>Select, copy and move.</b> Press <kbd>V</kbd> and drag to select; <kbd>Ctrl</kbd>+<kbd>C</kbd> copies and the copy follows the mouse — click to paste. <b>Double-click</b> a tile to select every copy of it. <a href="#s-select">More…</a></li>
+    <li><b>Place objects and NPCs.</b> Press <kbd>O</kbd>, pick one in the gallery on the right, and click the map. <a href="#ch-objects">More…</a></li>
+    <li><b>Save.</b> <kbd>Ctrl</kbd>+<kbd>S</kbd> writes the map into your mod folder (the original is kept as <code>.bak</code>). <a href="#s-save">More…</a></li>
+    <li><b>Put it in the game.</b> <b>Game → Add to game</b> writes the rows the game needs (Levels, LvlPrest, LvlTypes), then <b>Diagnostics → Compatibility</b> checks everything and offers one-click fixes. <a href="#s-addgame">More…</a></li>
+  </ol>
+  <p>Set things up the way you like in <b>Home → Preferences…</b> (<a href="#s-save">1.5</a>): saving when you switch maps, the Act 0 colours, paste mode, what a map opens with, scroll speeds and New map defaults.</p>
+
   <h2 id="s-window"><span class="num">1.3</span>A tour of the window</h2>
   <figure>
     <div class="annot">
@@ -236,6 +251,7 @@
   <p><b>Save</b> (<kbd>Ctrl</kbd>+<kbd>S</kbd>) writes the map into your <b>mod folder</b>, under the same path it has in the game. If a file is replaced, the original is kept next to it as <code>&lt;name&gt;.bak</code> (only the first time, so the true original survives). <b>Save as…</b> saves under a new path. Your Diablo II install is never written to.</p>
   <p>Everything else DS1 Studio writes — edited DT1s, <code>.txt</code> tables, presets — also goes into the mod folder with the same <code>.bak</code> safety. See <a href="#ch-trouble">Safety and troubleshooting</a>.</p>
   <p><b>Switching and closing maps.</b> Opening another map saves the one you're leaving first (<b>Home → Preferences…</b> turns this off; then a map with unsaved changes asks whether to save or discard them). <kbd>Esc</kbd> with nothing selected asks to close the map: <b>Save and close</b>, <b>Discard and close</b> or <b>Cancel</b>.</p>
+  <figure class="small"><img src="img/close-prompt.png" alt="Closing a map" /><figcaption><kbd>Esc</kbd> with nothing selected: close the map.</figcaption></figure>
   <p><b>Preferences</b> (<b>Home → Preferences…</b>), remembered on this computer:</p>
   <ul>
     <li><b>Maps and saving:</b> save before opening another map; how often unsaved work is autosaved for recovery (0 = off); how many recent maps to keep; run the <a href="#s-check">Compatibility check</a> after saving and/or after Add to game (it opens only when it finds problems).</li>
@@ -245,6 +261,7 @@
     <li><b>Mouse and keyboard:</b> mouse-wheel zoom speed, arrow-key scrolling speed, and whether <kbd>Shift</kbd>+wheel steps through layers (<kbd>Alt</kbd>+wheel zooms) or zooms (<kbd>Alt</kbd>+wheel steps through layers).</li>
     <li><b>New map starts with:</b> size, act, layers and folder.</li>
   </ul>
+  <figure class="medium"><img src="img/preferences.png" alt="Preferences" /><figcaption>Home → Preferences…</figcaption></figure>
   <p><b>Colours.</b> Maps are shown in the <b>Act 0</b> colours by default (Preferences: <i>Show maps in the Act 0 colours</i>): the colours that look the same in every act, with the ones that change between acts shown as they look in the map's own act, so nothing turns magenta. Tick <i>Mark colours that change between acts in magenta</i> to see which pixels still need <a href="#s-actsafe">Make act-safe</a>. A palette picked in <b>View → Colours</b> for a map is kept for that map.</p>
 
   <h2 id="s-autosave"><span class="num">1.6</span>Autosave and recovery</h2>
@@ -320,7 +337,7 @@
     <li><b>View → Roof hiding</b> (<kbd>H</kbd>) fills the area the player must stand in, outlines the area whose tiles can fade, and marks those tiles.</li>
     <li><b>View → Show → As if inside</b> (<kbd>Shift</kbd>+<kbd>H</kbd>) hides those tiles, as the game shows the map while a player is inside.</li>
     <li><b>Map → Roof hiding…</b> (or <b>Change roof hiding…</b> in the Roof hiding panel): select the inside of a building (the floor players walk on), open it, tick what should fade (roofs are ticked for you), and click <b>Add hide area</b>. DS1 Studio places the corner markers and sets <code>Pops</code>/<code>PopPad</code>. The dialog also lists and removes existing areas.</li>
-    <li><b>Map → Wall hiding…</b> is the same with the <b>walls</b> ticked instead of the roof: the walls in front of a room (usually its south and east walls) fade while a player is inside, so they don't block the view. It uses the same hide areas and the same limits (at most 4 kinds of tile per area).</li>
+    <li><figure class="medium"><img src="img/wall-hiding.png" alt="Wall hiding" /><figcaption>Map → Wall hiding… with the walls ticked.</figcaption></figure><b>Map → Wall hiding…</b> is the same with the <b>walls</b> ticked instead of the roof: the walls in front of a room (usually its south and east walls) fade while a player is inside, so they don't block the view. It uses the same hide areas and the same limits (at most 4 kinds of tile per area).</li>
     <li>The <a href="#s-check">Compatibility check</a> reports hide areas the game would ignore (<code>Pops</code> 0 or too small) and markers it would merge into one rectangle, such as the same number used for two buildings.</li>
   </ul>
 
@@ -380,9 +397,14 @@
     <li><b>Copy</b> (<kbd>Ctrl</kbd>+<kbd>C</kbd>) and <b>Cut</b> (<kbd>Ctrl</kbd>+<kbd>X</kbd>) take what you see: layers switched off in Layers, and roofs hidden by <b>As if inside</b>, stay where they are, so copying the inside of a building takes its floor and walls, not its roof. Straight after, the copied block follows the mouse to show where it would go: click to paste (<kbd>Ctrl</kbd>+<kbd>V</kbd> starts pasting again later). A message at the bottom says what was copied, and the <b>Copied</b> panel on the right shows it, with <b>Paste again</b> and <b>Save as preset…</b>. <kbd>Esc</kbd> stops pasting, closes the panel and deselects. Objects and NPCs in the selection come along, so <b>Cut then Paste moves an area with everything in it</b> — even the whole map.</li>
     <li><b>Re-roll</b> and <b>Find &amp; replace…</b> (<a href="#s-replace">3.5</a>).</li>
   </ul>
+  <div class="pair">
+    <figure><img src="img/same-tiles.gif" alt="Double-click a tile" /><figcaption>Double-click a fence post: all of them are selected.</figcaption></figure>
+    <figure><img src="img/layer-scroll.gif" alt="Shift+scroll through layers" /><figcaption><kbd>Shift</kbd>+scroll narrows a selection to one layer at a time.</figcaption></figure>
+  </div>
   <p><b>Every copy of a tile.</b> Double-click a tile to select every cell with that same tile on its layer (all the fence posts, say): <kbd>Delete</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> and <kbd>Ctrl</kbd>+<kbd>X</kbd> act on just those tiles. Switching view (Tiles, Objects, Walkability…) clears the selection.</p>
   <p><b>One layer of a selection.</b> After selecting an area, <kbd>Shift</kbd>+scroll narrows it to one layer at a time (Floor 1, Wall 1, …, then all layers again): only that layer's tiles stay highlighted, and Copy, Cut and Delete act on just them. For example, select 10×10 cells, scroll to Wall 1, and <kbd>Delete</kbd> removes only the Wall 1 tiles.</p>
   <p><b>Which layer a tile goes on.</b> With a tile ready to paint, <kbd>Shift</kbd>+scroll moves it to the next or previous layer of its kind; the preview under the cursor shows it in front of or behind the tile already at that spot (a wall on a lower layer is drawn behind the higher layers' tiles there).</p>
+  <figure class="medium"><img src="img/paste-preview.png" alt="Paste preview" /><figcaption>Red cells: the tiles this paste would replace.</figcaption></figure>
   <p><b>What a paste replaces.</b> While a paste or preset follows the mouse, the cells whose existing tiles it would replace are shaded red, and a note at the bottom counts them, before you click. Hold <kbd>Alt</kbd> when clicking to stack instead of replacing.</p>
   <p>Empty cells paste as transparent. Hold <kbd>Alt</kbd> when you click to paste to <b>stack</b> the paste onto what's there (into the next free layer, adding layers as needed) instead of replacing it. Pasting into another map that doesn't load the copied tiles' DT1s offers to add them; if one of them has the same file name as a different DT1 the map already loads, it asks for a new name first (two libraries with one name get mixed up, placing the wrong tiles) and adds a renamed copy. <kbd>Esc</kbd> first drops what's on the cursor (a paste, an object, the paint tile), then deselects.</p>
 
@@ -436,7 +458,7 @@
   <h2 id="s-resize"><span class="num">3.9</span>Resizing and new maps</h2>
   <div class="pair">
     <figure><img src="img/resize.png" alt="Resizing" /><figcaption>Map → Resize: drag the handles on the edges.</figcaption></figure>
-    <figure><img src="img/new-map.png" alt="New map" /><figcaption>Map → New map.</figcaption></figure>
+    <figure><img src="img/new-map-type.png" alt="New map" /><figcaption>Map → New map, starting from an existing level type.</figcaption></figure>
   </div>
   <p><b>Map → Resize</b> shows handles on the four edges: drag them to add or remove cells (objects move with the cells). <b>Resize…</b> does it by numbers. When the map is a whole level of its own, saving it after a resize also sets that level's size in Levels.txt (SizeX/SizeY, all difficulties) to match: the game stops with an error building a level whose map isn't its size. <b>Map → New map</b> creates an empty map, 150×150 by default, with no tile libraries: the DT1 library opens straight after, to choose them from any act. A new map is shown in the <b>Act 0</b> colours (only the colours that look the same in every act; magenta marks those that change between acts), so tiles from different acts look as they will in game; <b>View → Colours</b> switches palette, and a map remembers the one you pick. Its act is Act 5 by default, the act the game gives every level added with Add to game. It's saved where <i>Save path</i> says. <b>Level type</b> chooses where its tiles come from (hover the <b>?</b> next to each): <b>(New Lvltype)</b> starts empty as above and gets a level type of its own when it's added to the game, listing just the tile libraries it uses; <b>(Choose Existing)</b> starts with an existing level type's tile libraries (from LvlTypes.txt) in that act's colours, and Add to game then starts from a level of that type. Use <a href="#s-addgame">Game → Add to game</a> to make the game load it; that also gives the map a level type of its own, holding just its tile libraries, when it needs one.</p>
 </section>
@@ -455,6 +477,7 @@
   <p>The list is the act's placeable objects and NPCs, worked out from the game's own tables (and your mod's).</p>
 
   <h2 id="s-editobj"><span class="num">4.2</span>Moving and editing objects</h2>
+  <figure class="medium"><img src="img/same-objects.png" alt="Every object of a kind" /><figcaption>Double-click a torch: every torch on the map is selected.</figcaption></figure>
   <p>In object mode, drag an object to move it; <kbd>Delete</kbd> removes the selected one. <b>Double-click</b> an object to select every object of the same kind on the map (all 19 torches, say): <kbd>Delete</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> and <kbd>Ctrl</kbd>+<kbd>X</kbd> then act on all of them. Switching to another view deselects objects. <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selected object onto the cursor, shown in <b>green</b>; <kbd>Ctrl</kbd>+<kbd>X</kbd> cuts it, taking it off the map and showing it in <b>red</b>. Click the map to put it down (an NPC's path moves with it); <kbd>Ctrl</kbd>+<kbd>V</kbd> brings it back for another copy, and <kbd>Esc</kbd> drops it from the cursor. The name a player sees when pointing at an object comes from the game's string tables; a few objects (the guild objects Blizzard cut, such as Guild Vault and Steeg Stone) have none and show an empty box, which the <a href="#s-check">Compatibility check</a> finds and fixes by adding the names to your mod's <code>patchstring.tbl</code>. The <b>Preview</b> panel animates the selected object in every direction. The <b>Object</b> panel edits its type, id, position, flags and its NPC path (the points an NPC walks between).</p>
 
   <h2 id="s-inmap"><span class="num">4.3</span>“In this map”: find any object</h2>
@@ -477,6 +500,11 @@
     <li>The <b>Preset builder</b> starts with this map's tile libraries; add any other DT1 with <b>Add a DT1</b>. Tiles from a library that isn't in the Act 0 colours yet (an added one, or one of the map's) are copied into the preset converted to Act 0, so a preset looks right in any act.</li>
   </ul>
   <p>Open the panel with the <b>Presets</b> tab next to Tiles, or <b>Map → Presets</b>.</p>
+  <div class="pair">
+    <figure><img src="img/save-preset.png" alt="Save as preset" /><figcaption>Save as preset: pick a category or make a new one.</figcaption></figure>
+    <figure><img src="img/preset-menu.png" alt="Preset menu" /><figcaption>Right-click a saved preset.</figcaption></figure>
+  </div>
+  <figure><img src="img/preset-builder.png" alt="Preset builder" /><figcaption>The Preset builder: tiles from this map's libraries (or any DT1 you add), in the Act 0 colours.</figcaption></figure>
 </section>
 
 <!-- ============================================================ 6 WARPS -->

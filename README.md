@@ -55,7 +55,7 @@ DS1 Studio's own labelled markers. On Linux, point it at the Diablo II folder in
 downloads and installs it and restarts the app. (Installs from `.deb`/`.rpm` packages get a link to the new release.)
 
 **Manual:** a full illustrated how-to guide with a linked table of contents is in
-[docs/manual/DS1-Studio-Manual.pdf](docs/manual/DS1-Studio-Manual.pdf).
+[docs/manual/DS1-Studio-Manual.pdf](docs/manual/DS1-Studio-Manual.pdf). It starts with a **Quick start** (open a map, paint, select, place objects, save, add it to the game).
 
 ---
 
@@ -132,6 +132,8 @@ Pan with the **arrow keys** (hold Shift to go faster), Space+drag or the middle/
 | | |
 | :-: | :-: |
 | ![Click a tile to find it in its DT1](docs/media/tile-focus.png) **Click a tile** — it's highlighted in its DT1 | ![Shift+wheel through stacked tiles](docs/media/stacked-tiles.gif) **Shift + wheel** through stacked tiles |
+| ![Double-click a tile](docs/manual/img/same-tiles.gif) **Double-click** a tile to select every copy of it | ![Shift+wheel through a selection's layers](docs/manual/img/layer-scroll.gif) **Shift + wheel** narrows a selection to one layer |
+| ![Paint](docs/manual/img/quick-paint.gif) **Paint** tiles by dragging | ![Paste preview](docs/manual/img/paste-preview.png) **Paste preview**: red cells are the tiles it replaces |
 
 ### Objects & NPCs
 
