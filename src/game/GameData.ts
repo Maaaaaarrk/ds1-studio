@@ -383,7 +383,8 @@ export class TileLibrary {
 
   /**
    * Which of several same-numbered tiles with no rarity the game shows: the last one of the DT1 loaded FIRST (lowest
-   * LvlTypes File slot), as the game's tile lists hold them and as WinDS1 shows them. Another DT1 with the same numbers
+   * LvlTypes File slot). D2CMP's tile lookup (1.13c D2CMP.dll 0x6FE253A0) collects matches library by library in load
+   * order and D2Common takes the first when no tile has a rarity; WinDS1 shows the same. A DT1 with the same numbers
    * later in the list does not replace it.
    */
   private gameChoice(list: Dt1Tile[]): Dt1Tile {
