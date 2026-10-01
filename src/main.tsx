@@ -3,6 +3,14 @@ import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import './ui/styles.css';
+import { loadPrefs } from './ui/prefs';
+import { applyTheme, findTheme } from './ui/themes';
+
+// The saved theme before the first paint (no flash of the default colours).
+{
+  const p = loadPrefs();
+  applyTheme(findTheme(p.theme, p.customThemes ?? []), p.accent);
+}
 
 // `ds1-studio --mcp` starts a hidden window that serves the MCP tools instead of the editor.
 if ((window as { __DS1_MCP__?: boolean }).__DS1_MCP__) {

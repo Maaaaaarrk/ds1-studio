@@ -82,11 +82,16 @@ jobs:
           # Signs update packages so the in-app updater accepts them (not the same as Windows code signing).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Linux: keep the host's display stack out of the AppImage (linuxdeploy reads this; ';'-separated patterns).
+          # Copies from the build machine break EGL on current Mesa ("EGL_BAD_PARAMETER", a blank window); every
+          # desktop that can show a window has its own.
+          LINUXDEPLOY_EXCLUDED_LIBRARIES: 'libwayland-*;libxkbcommon*;libxcb*;libEGL*;libGL*;libGLX*;libGLdispatch*;libgbm*;libdrm*'
         with:
           tagName: ${{ github.ref_name }}
           releaseName: DS1 Studio ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
+          # A draft until every build (and the AppImage check below) has passed; the publish job then releases it.
+          releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
 
@@ -103,3 +108,14 @@ jobs:
           if [ -n "$bad" ]; then echo "::error::The AppImage bundles host graphics libraries:"; echo "$bad"; exit 1; fi
           grep -rl 'GDK_BACKEND=x11' squashfs-root/apprun-hooks 2>/dev/null && { echo "::error::The AppImage forces GDK_BACKEND=x11"; exit 1; } || true
           echo "AppImage OK: no bundled Wayland/xkb/xcb/EGL/GL libraries"
+
+  # Publish the draft once both builds and their checks passed: the updater feed (latest.json) and the downloads only
+  # appear then, so a broken build never reaches users.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false --latest

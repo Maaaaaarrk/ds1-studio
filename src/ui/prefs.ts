@@ -1,3 +1,4 @@
+import { DEFAULT_THEME, type Theme } from './themes';
 import { useCallback, useState } from 'react';
 
 /** App preferences, remembered on this computer. */
@@ -35,6 +36,10 @@ export interface Prefs {
   syncTablesOnSave: boolean;
   /** Arrow-key panning speed (1 = normal). */
   arrowSpeed: number;
+  /** Appearance (as in PD2 Filter Forge): a built-in or custom theme's id, the accent colour, and your own themes. */
+  theme: string;
+  accent: string;
+  customThemes: Theme[];
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -56,6 +61,9 @@ export const DEFAULT_PREFS: Prefs = {
   checkAfterAddToGame: false,
   syncTablesOnSave: true,
   arrowSpeed: 1,
+  theme: DEFAULT_THEME,
+  accent: '#d4a84f',
+  customThemes: [],
 };
 
 const KEY = 'ds1studio.prefs';

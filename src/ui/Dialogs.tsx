@@ -1,3 +1,4 @@
+import { ThemePicker } from './ThemePicker';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ResizeDelta } from '../formats/ds1ops';
 import type { LvlTypeInfo } from '../game/GameData';
@@ -258,7 +259,7 @@ export function UnsavedPrompt({ name, dirty, closing, onChoose }: { name: string
 }
 
 /** Preferences, remembered on this computer. */
-export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: Prefs; onChange: (patch: Partial<Prefs>) => void; onClose: () => void }) {
+export function PreferencesDialog({ prefs, onChange, notify, onClose }: { prefs: Prefs; onChange: (patch: Partial<Prefs>) => void; notify: (text: string, error?: boolean) => void; onClose: () => void }) {
   const check = (key: { [K in keyof Prefs]: Prefs[K] extends boolean ? K : never }[keyof Prefs], title: string, note: string) => (
     <label className="pref-row">
       <input type="checkbox" checked={prefs[key] as boolean} onChange={(e) => onChange({ [key]: e.target.checked } as Partial<Prefs>)} />
@@ -284,6 +285,8 @@ export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: Prefs; 
   const setNm = (patch: Partial<Prefs['newMap']>) => onChange({ newMap: { ...nm, ...patch } });
   return (
     <Modal title="Preferences" wide onClose={onClose}>
+      <div className="pref-section">Appearance</div>
+      <ThemePicker prefs={prefs} onChange={onChange} notify={notify} />
       <div className="pref-section">Maps and saving</div>
       {check('saveOnSwitch', 'Save automatically before opening another map', '(on by default). Off: opening another map with unsaved changes asks you to save or discard them.')}
       <label className="pref-row">

@@ -146,6 +146,7 @@ import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type Des
 import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
+import { applyTheme, findTheme } from './themes';
 import { Thumb, TilePalette, type PaletteFocus } from './TilePalette';
 import { arrivalProblem, arrivalText } from '../game/arrival';
 import { readAutomapRows, type AutomapSource } from '../game/automapImport';
@@ -595,6 +596,8 @@ export function App() {
   const [unsavedAsk, setUnsavedAsk] = useState<{ closing: boolean; resolve: (c: 'save' | 'discard' | 'cancel') => void } | null>(null);
   const askUnsaved = useCallback((closing: boolean) => new Promise<'save' | 'discard' | 'cancel'>((resolve) => setUnsavedAsk({ closing, resolve })), []);
   const [prefs, setPrefs] = usePrefs();
+  // The theme (Preferences → Appearance): its colours go on :root as the stylesheet's variables.
+  useEffect(() => applyTheme(findTheme(prefs.theme, prefs.customThemes ?? []), prefs.accent), [prefs.theme, prefs.accent, prefs.customThemes]);
   /** The preferences for callbacks that shouldn't be rebuilt when one changes. */
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
@@ -4480,7 +4483,7 @@ export function App() {
           })()}
         </Modal>
       )}
-      {prefsOpen && <PreferencesDialog prefs={prefs} onChange={setPrefs} onClose={() => setPrefsOpen(false)} />}
+      {prefsOpen && <PreferencesDialog prefs={prefs} onChange={setPrefs} notify={notify} onClose={() => setPrefsOpen(false)} />}
       {dialog === 'saveAs' && doc && <SaveAsDialog path={doc.path} onSave={saveAs} onClose={() => setDialog(null)} />}
       {dialog === 'resize' && doc && <ResizeDialog width={doc.ds1.width} height={doc.ds1.height} onResize={resize} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog bindings={keys.bindings} onBind={keys.bind} onReset={keys.reset} onClose={() => setDialog(null)} />}
