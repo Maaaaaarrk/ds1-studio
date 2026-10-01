@@ -72,7 +72,7 @@ import { act0Convert, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, planCustomDt1, type CustomDt1Plan } from '../game/customDt1';
 import { cellKey, addToSelection, removeFromSelection, fitSelection, clampRect, fillEdits, clearEdits, clipboardSources, copyRect, inSelection, missingForPaste, overlapEdits, pasteEdits, pasteObjects, rectFrom, rectSize, selectionCount, type CellRect, type CellSelection, type Clipboard, type ClipPart } from '../game/clipboard';
-import { checkMap, type CheckResult, type Fix } from '../game/compat';
+import { checkMap, type CheckResult, type Fix, resultKey } from '../game/compat';
 import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, readMapPackage, tableCoverage, type ImportPlan, type MapPackage, type RecipeSuggestion, type TableCoverage } from '../game/mapPackage';
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { buildPresetPackage, planPresetImport, type PresetImportPlan } from '../game/presetPackage';
@@ -140,7 +140,7 @@ import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
-import { CompatDialog, CrashLogDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
+import { ChooseCopiesDialog, CompatDialog, CrashLogDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
 import type { Sprite } from '../game/sprites';
 import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
 import { DesktopSetup } from './DesktopSetup';
@@ -197,6 +197,26 @@ function keptAnswers(): Set<string> {
     return new Set(JSON.parse(localStorage.getItem(KEPT_KEY) ?? '[]') as string[]);
   } catch {
     return new Set();
+  }
+}
+
+/** Compatibility-check results accepted as intended, per map ({ "<map path>": [result keys] }), in this app's storage. */
+const ACCEPTED_KEY = 'ds1studio.check.accepted';
+function acceptedResults(mapPath: string): Set<string> {
+  try {
+    const all = JSON.parse(localStorage.getItem(ACCEPTED_KEY) ?? '{}') as Record<string, string[]>;
+    return new Set(all[normalizePath(mapPath)] ?? []);
+  } catch {
+    return new Set();
+  }
+}
+function setAcceptedResults(mapPath: string, keys: Set<string>): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(ACCEPTED_KEY) ?? '{}') as Record<string, string[]>;
+    all[normalizePath(mapPath)] = [...keys];
+    localStorage.setItem(ACCEPTED_KEY, JSON.stringify(all));
+  } catch {
+    // storage unavailable: accepted for this session only
   }
 }
 
@@ -1975,6 +1995,11 @@ export function App() {
 
   /** Which the hide-area dialog sets up by default: roof or wall hiding (the same game feature). */
   const [popsKind, setPopsKind] = useState<'roof' | 'wall'>('roof');
+  /** Two copies of the same tiles to choose between (from the compatibility check). */
+  const [chooseCopies, setChooseCopies] = useState<{ earlier: string; later: string; keys: number[] }[] | null>(null);
+  /** Check results accepted as intended for the open map. */
+  const [acceptedChecks, setAcceptedChecks] = useState<Set<string>>(new Set());
+  useEffect(() => setAcceptedChecks(map ? acceptedResults(map.path) : new Set()), [map?.path]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Tile files whose paths are too long, being renamed (from the compatibility check). */
   const [shortenPaths, setShortenPaths] = useState<string[] | null>(null);
   /**
@@ -2853,7 +2878,8 @@ export function App() {
     const kept = keptAnswers();
     const results = await checkMap(gd, map, scene, automap, (key) => kept.has(`${normalizePath(map.path)}|${key}`));
     if (quiet) {
-      const problems = results.filter((r) => r.severity === 'error' || r.severity === 'warning').length;
+      const ok = acceptedResults(map.path);
+      const problems = results.filter((r) => r.severity === 'error' || (r.severity === 'warning' && !ok.has(resultKey(r)))).length;
       if (!problems) return notify('Compatibility check: no problems found');
       setDialog((d) => d ?? 'check');
     }
@@ -2900,6 +2926,8 @@ export function App() {
             return setWarpEdit(fix.vis);
           case 'shorten-paths':
             return setShortenPaths(fix.paths);
+          case 'choose-copies':
+            return setChooseCopies(fix.pairs);
           case 'keep': {
             // "Keep it as it is": remembered for this map, so the check doesn't ask again.
             const kept = keptAnswers();
@@ -4875,6 +4903,30 @@ export function App() {
           }}
           onFix={applyFix}
           onClose={() => setDialog(null)}
+          accepted={acceptedChecks}
+          onAccept={(r, accept) => {
+            if (!map) return;
+            const next = new Set(acceptedChecks);
+            if (accept) next.add(resultKey(r));
+            else next.delete(resultKey(r));
+            setAcceptedResults(map.path, next);
+            setAcceptedChecks(next);
+            notify(accept ? 'Accepted as intended for this map: it no longer shows in the check (see Accepted)' : 'Shown in the check again');
+          }}
+        />
+      )}
+      {chooseCopies && map && (
+        <ChooseCopiesDialog
+          pairs={chooseCopies}
+          lib={map.lib}
+          palette={map.palette}
+          onApply={async (remove) => {
+            const drop = new Set(remove.map(normalizePath));
+            await applyDt1s(map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path) && !drop.has(normalizePath(l.path))).map((l) => l.path));
+            notify(`Removed ${remove.map((r) => r.split('/').pop()).join(', ')} from this map (its tables updated)`);
+            setTimeout(() => void runCheckRef.current(), 300);
+          }}
+          onClose={() => setChooseCopies(null)}
         />
       )}
       {dialog === 'export' && doc && (

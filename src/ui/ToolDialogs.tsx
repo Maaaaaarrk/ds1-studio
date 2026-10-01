@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { listCrashLogs, readCrashLog, type CrashLogFile } from '../app/crashLogs';
-import type { CheckResult, Fix } from '../game/compat';
+import { resultKey, type CheckResult, type Fix } from '../game/compat';
+import type { Palette } from '../formats/palette';
+import { TileLibrary } from '../game/GameData';
+import { Thumb } from './TilePalette';
 import { explainCrash, parseCrashLog, type Crash, type CrashExplanation } from '../game/crashLog';
 import { missingTablesWarning, type ImportPlan, type MapPackage, type TableCoverage } from '../game/mapPackage';
 import { Modal } from './Dialogs';
@@ -18,10 +21,17 @@ interface CheckProps {
   /** Carries out a fix; resolves when done (the check then re-runs). */
   onFix: (fix: Fix) => Promise<void> | void;
   onClose: () => void;
+  /** Results marked as intended for this map (by resultKey): kept out of the list and the counts. */
+  accepted: Set<string>;
+  onAccept: (r: CheckResult, accept: boolean) => void;
 }
 
-export function CompatDialog({ results, onRerun, onShowCells, onFix, onClose }: CheckProps) {
+export function CompatDialog({ results, onRerun, onShowCells, onFix, onClose, accepted, onAccept }: CheckProps) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [showAccepted, setShowAccepted] = useState(false);
+  const isAccepted = (r: CheckResult) => r.severity !== 'ok' && r.severity !== 'error' && accepted.has(resultKey(r));
+  const acceptedNow = results?.filter(isAccepted) ?? [];
+  const shown = showAccepted ? acceptedNow : results?.filter((r) => !isAccepted(r));
   const run = async (key: string, fix: Fix) => {
     setBusy(key);
     try {
@@ -31,7 +41,7 @@ export function CompatDialog({ results, onRerun, onShowCells, onFix, onClose }: 
     }
   };
   const errors = results?.filter((r) => r.severity === 'error').length ?? 0;
-  const warnings = results?.filter((r) => r.severity === 'warning').length ?? 0;
+  const warnings = results?.filter((r) => r.severity === 'warning' && !isAccepted(r)).length ?? 0;
   return (
     <Modal title="Compatibility check" onClose={onClose} wide>
       <div className="check-summary">
@@ -44,12 +54,25 @@ export function CompatDialog({ results, onRerun, onShowCells, onFix, onClose }: 
         ) : (
           <span className="muted">Checking…</span>
         )}
-        <button className="btn" onClick={onRerun}>
-          Re-run
-        </button>
+        <span className="inline">
+          {(acceptedNow.length > 0 || showAccepted) && (
+            <button className={`btn${showAccepted ? ' primary' : ''}`} onClick={() => setShowAccepted(!showAccepted)} title="Warnings you marked as intended for this map">
+              {showAccepted ? 'Back to the check' : `Accepted (${acceptedNow.length})`}
+            </button>
+          )}
+          <button className="btn" onClick={onRerun}>
+            Re-run
+          </button>
+        </span>
       </div>
+      {showAccepted && (
+        <p className="small muted">
+          Warnings you marked as intended for this map. They stay out of the check and its counts; their fixes still work here. Un-accept puts one back.
+        </p>
+      )}
+      {showAccepted && !acceptedNow.length && <p className="small muted">No accepted warnings appear in this check.</p>}
       <ul className="check-list">
-        {results?.map((r, i) => (
+        {shown?.map((r, i) => (
           <li key={i} className={`check ${r.severity}`}>
             <span className="check-icon">{ICON[r.severity]}</span>
             <div className="check-text">
@@ -77,6 +100,17 @@ export function CompatDialog({ results, onRerun, onShowCells, onFix, onClose }: 
                       </button>
                     );
                   })}
+                </div>
+              )}
+              {(r.severity === 'warning' || r.severity === 'info') && (
+                <div className="inline">
+                  <button
+                    className="link small"
+                    onClick={() => onAccept(r, !showAccepted)}
+                    title={showAccepted ? 'Show it in the check again' : 'Mark it as intended for this map: it no longer shows in the check (see Accepted)'}
+                  >
+                    {showAccepted ? 'Un-accept' : 'Accept as intended'}
+                  </button>
                 </div>
               )}
             </div>
@@ -362,6 +396,80 @@ export function CrashLogDialog({ levelsWithEntry, onCheck, onClose }: CrashLogPr
           </ul>
         </>
       )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Two copies of the same tiles: choose which to keep
+
+interface CopiesProps {
+  pairs: { earlier: string; later: string; keys: number[] }[];
+  lib: TileLibrary;
+  palette: Palette;
+  onApply: (remove: string[]) => Promise<void>;
+  onClose: () => void;
+}
+
+/**
+ * The map loads two DT1s with the same tiles (an original and a copy): the game picks among both at random per cell,
+ * so some cells show the other copy. Shows the same tiles from each side by side to choose which to keep; the other
+ * leaves the map's tile libraries (its tables are updated like any library change).
+ */
+export function ChooseCopiesDialog({ pairs, lib, palette, onApply, onClose }: CopiesProps) {
+  const [keep, setKeep] = useState<Record<number, 'earlier' | 'later' | undefined>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
+  const tileOf = (path: string, k: number) => lib.tilesOf(path).find((t) => TileLibrary.key(t.orientation, t.mainIndex, t.subIndex) === k);
+  const remove = pairs.flatMap((p, i) => (keep[i] === 'earlier' ? [p.later] : keep[i] === 'later' ? [p.earlier] : []));
+  return (
+    <Modal title="Choose which copy to keep" wide onClose={() => !busy && onClose()}>
+      <p className="small">
+        Each pair below provides the same tile numbers, so the game picks between them at random on every cell that uses them: a few cells show the other
+        copy. Compare the same tiles from each and keep the one that looks right; the other is taken off this map (and out of its level&apos;s Dt1Mask).
+      </p>
+      {pairs.map((p, i) => (
+        <div key={i} className="copies-pair">
+          {(['earlier', 'later'] as const).map((side) => {
+            const path = p[side];
+            return (
+              <label key={side} className={`copies-side${keep[i] === side ? ' on' : ''}`}>
+                <span className="inline">
+                  <input type="radio" name={`keep${i}`} checked={keep[i] === side} onChange={() => setKeep({ ...keep, [i]: side })} />
+                  <b className="mono small">{short(path)}</b>
+                </span>
+                <span className="copies-tiles">
+                  {p.keys.map((k) => {
+                    const t = tileOf(path, k);
+                    return t ? <Thumb key={k} tile={t} palette={palette} /> : <span key={k} className="thumb-img" />;
+                  })}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      ))}
+      {error && <p className="small error-text">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn" disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn primary"
+          disabled={busy || !remove.length}
+          onClick={() => {
+            setBusy(true);
+            setError(null);
+            onApply(remove)
+              .then(onClose)
+              .catch((e) => setError(String((e as Error)?.message ?? e)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {remove.length ? `Keep the chosen ${remove.length === 1 ? 'copy' : 'copies'}: remove ${remove.map((r) => r.split('/').pop()).join(', ')}` : 'Choose a copy to keep'}
+        </button>
+      </div>
     </Modal>
   );
 }

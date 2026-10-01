@@ -22,6 +22,14 @@ import { blankObjectNames, nameStringsWrite, readStringTables } from './objectSt
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
+/**
+ * What identifies a check result between runs, for "accepted" (intended) warnings: its area and title, with the
+ * numbers in it ignored (counts change as the map is edited).
+ */
+export function resultKey(r: Pick<CheckResult, 'area' | 'title'>): string {
+  return `${r.area}|${r.title.replace(/\d+/g, '#').trim().toLowerCase()}`;
+}
+
 export interface CheckResult {
   severity: Severity;
   area: 'Tiles' | 'Tables' | 'Level' | 'Objects' | 'Map';
@@ -61,6 +69,8 @@ export type Fix = { label: string } & (
   | { kind: 'warp-link'; vis: number; edit: boolean; place: boolean; toTown?: number }
   /** Answers a check's question with "keep it as it is": remembered, so it isn't asked again. */
   | { kind: 'keep'; key: string }
+  /** Shows two copies of the same tiles side by side to choose which to keep (the others leave the map). */
+  | { kind: 'choose-copies'; pairs: { earlier: string; later: string; keys: number[] }[] }
   /** Renames tile files whose paths are too long (relative to data/global/tiles), updating LvlTypes / LvlPrest. */
   | { kind: 'shorten-paths'; paths: string[] }
 );
@@ -145,6 +155,27 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
       detail: `${dups.map((d) => `${short(d.earlier)} and ${short(d.later)}`).join('; ')} provide the same tiles. Where a tile has random variants, the game picks among both copies, so the map shows a random mix of them (odd colours on some cells, for example) — in game too. Keep one copy of each.`,
       cells,
       fixes: [
+        {
+          kind: 'choose-copies',
+          label: 'Compare the copies and choose…',
+          // Sample tiles for each pair: ones the map places whose pictures differ between the copies first.
+          pairs: dups.map((d) => {
+            const used = new Set<number>();
+            for (let i = 0; i < ds1.width * ds1.height; i++) {
+              for (const l of ds1.floors) if (l[i].prop1 !== 0) used.add(TileLibrary.key(Orientation.Floor, l[i].mainIndex, l[i].subIndex));
+              for (const l of ds1.walls) if (l[i].prop1 !== 0) used.add(TileLibrary.key(l[i].orientation, l[i].mainIndex, l[i].subIndex));
+            }
+            const pic = (path: string, k: number) => {
+              const t = lib.tilesOf(path).find((x) => TileLibrary.key(x.orientation, x.mainIndex, x.subIndex) === k);
+              const img = t ? decodeTile(t) : null;
+              return img ? img.pixels.join(',') : '';
+            };
+            const shared = [...d.shared];
+            const differ = shared.filter((k) => pic(d.earlier, k) !== pic(d.later, k));
+            const order = [...differ.filter((k) => used.has(k)), ...differ.filter((k) => !used.has(k)), ...shared.filter((k) => !differ.includes(k))];
+            return { earlier: d.earlier, later: d.later, keys: order.slice(0, 6) };
+          }),
+        },
         { kind: 'remove-dt1s', label: `Keep the later ones: remove ${earlier.map(short).join(', ')}`, paths: earlier },
         { kind: 'remove-dt1s', label: `Keep the earlier ones: remove ${later.map(short).join(', ')}`, paths: later },
       ],

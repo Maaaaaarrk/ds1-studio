@@ -1054,3 +1054,9 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .ct-row:hover { background: var(--panel-2); }
 .ct-row.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .ct-row.current span:nth-child(2) { font-weight: 600; }
+/* Choose which copy to keep: the same tiles from two DT1s side by side. */
+.copies-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.copies-side { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.copies-side.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.copies-tiles { display: flex; flex-wrap: wrap; gap: 4px; }
+.copies-tiles .thumb-img { width: 72px; height: 72px; background-size: contain; background-repeat: no-repeat; background-position: center; background-color: var(--bg); border-radius: 4px; }

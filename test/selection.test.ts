@@ -73,3 +73,11 @@ describe('taking cells out of a selection and fitting it to the map', () => {
     expect(cellsToSelection(new Set([cellKey(1, 1), cellKey(3, 1)]))).toMatchObject({ x0: 1, y0: 1, x1: 3, y1: 1 });
   });
 });
+
+describe('accepted check results', () => {
+  it('are recognised across runs whatever the counts in their titles', async () => {
+    const { resultKey } = await import('../src/game/compat');
+    expect(resultKey({ area: 'Map', title: '97 walls have no automap entry' })).toBe(resultKey({ area: 'Map', title: '12 walls have no automap entry' }));
+    expect(resultKey({ area: 'Map', title: '97 walls have no automap entry' })).not.toBe(resultKey({ area: 'Tiles', title: '97 walls have no automap entry' }));
+  });
+});
