@@ -106,7 +106,8 @@ jobs:
           cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/$img" --appimage-extract > /dev/null
           bad=$(find squashfs-root -name 'libwayland-*.so*' -o -name 'libxkbcommon*.so*' -o -name 'libxcb*.so*' -o -name 'libEGL*.so*' -o -name 'libGL*.so*' -o -name 'libgbm*.so*' -o -name 'libdrm*.so*')
           if [ -n "$bad" ]; then echo "::error::The AppImage bundles host graphics libraries:"; echo "$bad"; exit 1; fi
-          grep -rl 'GDK_BACKEND=x11' squashfs-root/apprun-hooks 2>/dev/null && { echo "::error::The AppImage forces GDK_BACKEND=x11"; exit 1; } || true
+          # (Tauri's GTK hook keeps the line commented out: only an active export counts.)
+          grep -rlE '^[[:space:]]*export GDK_BACKEND=x11' squashfs-root/apprun-hooks 2>/dev/null && { echo "::error::The AppImage forces GDK_BACKEND=x11"; exit 1; } || true
           echo "AppImage OK: no bundled Wayland/xkb/xcb/EGL/GL libraries"
 
   # Publish the draft once both builds and their checks passed: the updater feed (latest.json) and the downloads only

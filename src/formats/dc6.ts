@@ -89,3 +89,71 @@ export function decodeDc6Frame(h: Dc6FrameHeader, data: Uint8Array): SpriteFrame
   }
   return { width, height, offsetX: h.offsetX, offsetY: h.offsetY - height, pixels };
 }
+
+/** A frame to write: palette indices (0 = transparent), top row first. */
+export interface Dc6FrameIn {
+  width: number;
+  height: number;
+  pixels: Uint8Array;
+  offsetX?: number;
+  offsetY?: number;
+}
+
+/**
+ * Writes a DC6 (version 6, one direction) the way the game's own UI images are stored: each frame's rows bottom-up,
+ * runs of transparent pixels as 0x80|n, runs of pixels as n then the indices (n ≤ 127), 0x80 ending a row (trailing
+ * transparency is left out), then the three 0xEE termination bytes.
+ */
+export function writeDc6(frames: Dc6FrameIn[]): Uint8Array {
+  const bodies = frames.map((f) => {
+    const out: number[] = [];
+    for (let y = f.height - 1; y >= 0; y--) {
+      const row = f.pixels.subarray(y * f.width, (y + 1) * f.width);
+      let end = row.length;
+      while (end > 0 && row[end - 1] === 0) end--;
+      let x = 0;
+      while (x < end) {
+        if (row[x] === 0) {
+          let n = 0;
+          while (x < end && row[x] === 0 && n < 127) (x++, n++);
+          out.push(0x80 | n);
+        } else {
+          let n = 0;
+          while (x + n < end && row[x + n] !== 0 && n < 127) n++;
+          out.push(n, ...row.subarray(x, x + n));
+          x += n;
+        }
+      }
+      out.push(0x80);
+    }
+    return Uint8Array.from(out);
+  });
+  const headerSize = 24 + frames.length * 4;
+  const sizes = bodies.map((b) => 32 + b.length + 3);
+  const total = headerSize + sizes.reduce((a, b) => a + b, 0);
+  const bytes = new Uint8Array(total);
+  const v = new DataView(bytes.buffer);
+  v.setInt32(0, 6, true);
+  v.setInt32(4, 1, true);
+  v.setInt32(8, 0, true);
+  v.setUint32(12, 0xeeeeeeee, true);
+  v.setUint32(16, 1, true);
+  v.setUint32(20, frames.length, true);
+  let at = headerSize;
+  frames.forEach((f, i) => {
+    v.setUint32(24 + i * 4, at, true);
+    const next = at + sizes[i];
+    v.setUint32(at, 0, true); // stored bottom-up
+    v.setUint32(at + 4, f.width, true);
+    v.setUint32(at + 8, f.height, true);
+    v.setInt32(at + 12, f.offsetX ?? 0, true);
+    v.setInt32(at + 16, f.offsetY ?? 0, true);
+    v.setUint32(at + 20, 0, true);
+    v.setUint32(at + 24, next, true);
+    v.setUint32(at + 28, bodies[i].length, true);
+    bytes.set(bodies[i], at + 32);
+    bytes.set([0xee, 0xee, 0xee], at + 32 + bodies[i].length);
+    at = next;
+  });
+  return bytes;
+}

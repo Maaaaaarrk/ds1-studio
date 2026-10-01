@@ -1108,3 +1108,7 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .theme-editor-backdrop { z-index: 60; }
 .theme-card-tools .icon-btn:hover { color: var(--text); }
 .theme-card-tools .icon-btn.danger:hover { color: var(--error); }
+.entry-preview { display: flex; align-items: center; justify-content: center; min-height: 70px; padding: 14px; margin: 8px 0; overflow-x: auto; background: radial-gradient(ellipse at 50% 40%, #2a2418 0%, #15120d 60%, #0b0a08 100%); border: 1px solid var(--border); border-radius: var(--radius); }
+.entry-preview canvas { image-rendering: pixelated; max-width: none; }
+.entry-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.entry-row .text-input { flex: 1; min-width: 0; }

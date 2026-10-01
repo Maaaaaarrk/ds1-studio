@@ -62,12 +62,13 @@ import {
   BrickWall,
   EyeOff,
   Settings,
+  Type as TypeIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
 import { embeddedFileName, newDs1, resizeDs1, type ResizeDelta } from '../formats/ds1ops';
 import { Orientation, type Dt1Tile } from '../formats/dt1';
-import { ACT0_PALETTE, PALETTE_NAMES } from '../formats/palette';
+import { ACT0_PALETTE, PALETTE_NAMES, type Palette } from '../formats/palette';
 import { act0Convert, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { GameData } from '../game/GameData';
 import { customAutomapEdits, planCustomDt1, type CustomDt1Plan } from '../game/customDt1';
@@ -122,7 +123,7 @@ import { MapRecipeRibbon } from './MapRecipeRibbon';
 import { loadLevelTables, loadTable, planCombine, planFreeSlots, setPopSettings, SlotsFullError, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { AUTOMAP_CODES, applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
-import { getCell, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
+import { getCell, parseTxtTable, serializeTxtTable, setCell, type TxtTableDoc } from '../formats/txtTable';
 import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
 import { AutomapEditor } from './AutomapEditor';
@@ -134,7 +135,7 @@ import { bugReportUrl, checkForUpdate, featureRequestUrl, GUIDE_URL, MANUAL_PDF_
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
 import { planTileFlags, planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
-import { cellFix, levelSizeFix, MAX_TILE_PATH, rowOfRecord, tilePathProblem } from '../game/addToGame';
+import { cellFix, ENTRY_IMAGE_DIR, levelSizeFix, MAX_TILE_PATH, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
@@ -146,6 +147,7 @@ import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type Des
 import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
+import { EntryTextDialog } from './EntryTextDialog';
 import { applyTheme, findTheme } from './themes';
 import { Thumb, TilePalette, type PaletteFocus } from './TilePalette';
 import { arrivalProblem, arrivalText } from '../game/arrival';
@@ -387,7 +389,7 @@ export function App() {
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
   /** Every object of one kind, selected together by double-clicking one (Delete / Ctrl+C / Ctrl+X act on all). */
   const [objectGroup, setObjectGroup] = useState<Set<number> | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | 'entrytext' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -1807,6 +1809,20 @@ export function App() {
   }, [scene, map]);
 
   const libraryDocuments = useRef(new WeakSet<MapDocument>());
+  /** Entering text: Levels.txt and the Act 1 palette (the game draws those images with it), loaded when it opens. */
+  const [entryTables, setEntryTables] = useState<{ levels: TxtTableDoc; palette: Palette } | null>(null);
+  useEffect(() => {
+    if (dialog !== 'entrytext' || !gd) return void setEntryTables(null);
+    let live = true;
+    void Promise.all([loadTable(gd.fs, 'Levels.txt'), gd.palette(0)]).then(([levels, palette]) => {
+      if (!live) return;
+      if (!levels) return notify('Levels.txt was not found.', true);
+      setEntryTables({ levels, palette });
+    });
+    return () => {
+      live = false;
+    };
+  }, [dialog, gd, notify]);
   /** The map's level type has no free slot for its libraries: the dialog offering ways to make room. */
   const [typeFull, setTypeFull] = useState<{ reason: string | null } | null>(null);
   const applyDt1s = useCallback(
@@ -3713,6 +3729,7 @@ export function App() {
           items: [
             { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
             { label: 'Change level type…', icon: <Shapes />, onClick: () => setDialog('lvltype'), disabled: noMap || !canWrite, size: 'sm', title: 'Give the map’s level another level type (LvlTypes), with the File slots, Dt1Mask and automap rows it needs' },
+            { label: 'Entering text…', icon: <TypeIcon />, onClick: () => setDialog('entrytext'), disabled: !canWrite, size: 'sm', title: 'Make the “Entering …” text image a level shows as players walk in (its EntryFile), drawn with the game’s font as txt2dc6 did' },
             { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
             { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],
@@ -5039,6 +5056,28 @@ export function App() {
             setAcceptedChecks(next);
             notify(accept ? 'Accepted as intended for this map: it no longer shows in the check (see Accepted)' : 'Shown in the check again');
           }}
+        />
+      )}
+      {dialog === 'entrytext' && entryTables && (
+        <EntryTextDialog
+          fs={data.gd.fs}
+          levels={entryTables.levels}
+          levelId={map?.resolution.preset?.levelId ?? 0}
+          palette={entryTables.palette}
+          canWrite={canWrite}
+          onApply={async ({ levelId, entryFile, dc6 }) => {
+            const levels = await loadTable(data.gd.fs, 'Levels.txt');
+            const row = levels ? rowOfRecord(levels, levelId) : -1;
+            if (!levels || row < 0) throw new Error(`Levels.txt has no level ${levelId}.`);
+            const before = getCell(levels, row, 'EntryFile');
+            await writeFiles([
+              { path: `${ENTRY_IMAGE_DIR}${entryFile}.dc6`, bytes: dc6 },
+              ...(before === entryFile ? [] : [{ path: 'data/global/excel/Levels.txt', bytes: serializeTxtTable(setCell(levels, row, 'EntryFile', entryFile)) }]),
+            ]);
+            await reloadTables();
+            notify(`Saved ${ENTRY_IMAGE_DIR}${entryFile}.dc6${before === entryFile ? '' : ` and set level ${levelId}'s EntryFile (${before || 'empty'} → ${entryFile})`}. The game reads the .bin tables: rebuild them (-direct -txt) to see it.`);
+          }}
+          onClose={() => setDialog(null)}
         />
       )}
       {typeFull && map && doc && (

@@ -219,6 +219,7 @@ fn writable(rel: &str) -> bool {
     (p.starts_with("data/global/") && ext(&[".ds1", ".dt1", ".cof", ".dcc", ".dc6"]))
         || (p.starts_with("data/global/excel/") && ext(&[".txt"]))
         || (p.starts_with("data/local/lng/") && ext(&[".tbl"]))
+        || (p.starts_with("data/local/ui/") && ext(&[".dc6"]))
         || (p.starts_with("data/ds1studio/") && ext(&[".json"]))
 }
 
