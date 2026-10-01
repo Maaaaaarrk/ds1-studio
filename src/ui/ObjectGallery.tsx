@@ -20,6 +20,8 @@ const FILTERS: { id: TypeFilter; label: string }[] = [
 ];
 
 const SIZE_KEY = 'ds1studio.objThumbSize';
+/** Object ids per act in the game's DS1 object table (see GameData.objRow). */
+const OBJECTS_PER_ACT = 150;
 
 /** Thumbnail data URLs (null = no sprite), per GameData, then "palette#:act:type:id". */
 const thumbCache = new WeakMap<GameData, Map<string, Promise<string | null>>>();
@@ -125,7 +127,15 @@ export function ObjectGallery({ gd, act, palette, placing, onPlace }: ObjectGall
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const all = useMemo(() => gd.objectList(act), [gd, act]);
+  // Objects of another act: the game reads a DS1 object's id in its act's table and runs on into the neighbouring
+  // acts' (150 objects per act), so an Act 5 map places Act 1's object 0 as id -600, as WinDS1 maps do.
+  const [fromAct, setFromAct] = useState(act);
+  useEffect(() => setFromAct(act), [act]);
+  const shift = (fromAct - act) * OBJECTS_PER_ACT;
+  const all = useMemo(
+    () => gd.objectList(fromAct).filter((o) => fromAct === act || o.type === 2).map((o) => ({ ...o, id: o.id + (o.type === 2 ? shift : 0), own: o.id })),
+    [gd, act, fromAct, shift],
+  );
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
     return all.filter(
@@ -145,6 +155,17 @@ export function ObjectGallery({ gd, act, palette, placing, onPlace }: ObjectGall
             </button>
           ))}
         </div>
+        <label className="small og-act" title="Objects of another act, placed with the id that reaches them from this map's act (negative for earlier acts, e.g. -600 for Act 1's object 0 in an Act 5 map). NPCs only come from the map's own act.">
+          Act{' '}
+          <select value={fromAct} onChange={(e) => setFromAct(Number(e.target.value))}>
+            {[0, 1, 2, 3, 4].map((a) => (
+              <option key={a} value={a}>
+                {a + 1}
+                {a === act ? ' (this map)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
         <input
           className="search small-input og-search"
           placeholder="Name or id…"
@@ -171,7 +192,7 @@ export function ObjectGallery({ gd, act, palette, placing, onPlace }: ObjectGall
             <button
               key={`${o.type}:${o.id}`}
               className={`og-item${active ? ' active' : ''}`}
-              title={`${o.name} · ${o.type === 1 ? 'NPC' : 'object'} ${o.type}/${o.id}${active ? ' (placing — click the map)' : ''}`}
+              title={`${o.name} · ${o.type === 1 ? 'NPC' : 'object'} ${o.type}/${o.id}${fromAct !== act ? ` (Act ${fromAct + 1} object ${o.own})` : ''}${active ? ' (placing — click the map)' : ''}`}
               onClick={() => onPlace({ type: o.type, id: o.id })}
             >
               <ObjThumb gd={gd} act={act} type={o.type} id={o.id} name={o.name} palette={palette} />
