@@ -3728,8 +3728,8 @@ export function App() {
           label: 'Level',
           items: [
             { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
-            { label: 'Change level type…', icon: <Shapes />, onClick: () => setDialog('lvltype'), disabled: noMap || !canWrite, size: 'sm', title: 'Give the map’s level another level type (LvlTypes), with the File slots, Dt1Mask and automap rows it needs' },
-            { label: 'Entering text…', icon: <TypeIcon />, onClick: () => setDialog('entrytext'), disabled: !canWrite, size: 'sm', title: 'Make the “Entering …” text image a level shows as players walk in (its EntryFile), drawn with the game’s font as txt2dc6 did' },
+            { label: 'Level type…', icon: <Shapes />, onClick: () => setDialog('lvltype'), disabled: noMap || !canWrite, title: 'Give the map’s level another level type (LvlTypes), with the File slots, Dt1Mask and automap rows it needs' },
+            { label: 'Entering text…', icon: <TypeIcon />, onClick: () => setDialog('entrytext'), disabled: !canWrite, title: 'Make the “Entering …” text image a level shows as players walk in (its EntryFile), drawn with the game’s font as txt2dc6 did' },
             { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
             { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],

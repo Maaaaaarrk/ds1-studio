@@ -633,7 +633,7 @@ export function LevelTypeFullDialog({ fs, mapPath, dt1s, fallbackTypeId, reason,
       </button>
 
       <div className="field-label">3 · A level type of its own</div>
-      <p className="small muted">Gives this level its own copy of the level type with just the libraries it needs (Game → Change level type).</p>
+      <p className="small muted">Gives this level its own copy of the level type with just the libraries it needs (Game → Level type…).</p>
       <button className="btn small" disabled={busy} onClick={onOwnType}>
         Change level type…
       </button>
