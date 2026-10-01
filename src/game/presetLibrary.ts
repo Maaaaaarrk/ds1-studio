@@ -1,5 +1,5 @@
 import { isEmptyCell, withFields, type WallCell } from '../formats/ds1';
-import { parseDt1 } from '../formats/dt1';
+import { decodeTile, parseDt1, type Dt1Tile } from '../formats/dt1';
 import { buildDt1 } from '../formats/dt1Write';
 import { normalizePath } from '../vfs/vfs';
 import { clipboardSources, type Clipboard } from './clipboard';
@@ -21,8 +21,67 @@ export async function resolvePresetSources(clip: Clipboard, read: (path: string)
   return { ...clip, ...clipboardSources(clip, lib) };
 }
 
+/** A tile number the pasted tiles and the map both have, from different DT1s, with different pictures. */
+export interface PasteTileClash {
+  key: string;
+  /** The DT1 the pasted tile comes from. */
+  from: string;
+  /** The map's versions (random variants / animation frames) and the pasted ones. */
+  ours: Dt1Tile[];
+  theirs: Dt1Tile[];
+  /** How many pasted cells use it. */
+  cells: number;
+}
+
+/** A tile's versions as pictures, for comparing two DT1s' versions of one number. */
+const pictures = (tiles: Dt1Tile[]) =>
+  tiles
+    .map((t) => {
+      const img = decodeTile(t);
+      return img ? `${img.width}x${img.height}:${img.pixels.join(',')}` : '';
+    })
+    .sort()
+    .join('|');
+
+/**
+ * Tile numbers the pasted tiles share with the map, where the map's tiles come from another DT1: `same` when the
+ * pictures match pixel for pixel (the map's tiles do: nothing to add), else a clash to choose between.
+ */
+export async function comparePasteTiles(clip: Clipboard, target: TileLibrary, read: (path: string) => Promise<Uint8Array | null>) {
+  clip = await resolvePresetSources(clip, read);
+  const parsed = new Map<string, ReturnType<typeof parseDt1> | null>();
+  const counts = new Map<string, number>();
+  const at = new Map<string, [number, number, number]>();
+  for (const { layer, cells } of clip.layers)
+    for (const c of cells) {
+      if (isEmptyCell(c)) continue;
+      const o = orientation(layer.kind, c as WallCell);
+      if (o === 10 || o === 11) continue;
+      const key = tileKey(o, c.mainIndex, c.subIndex);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      at.set(key, [o, c.mainIndex, c.subIndex]);
+    }
+  const same: string[] = [];
+  const clashes: PasteTileClash[] = [];
+  for (const [key, [o, m, s]] of at) {
+    const from = clip.tileSources?.[key];
+    const ours = target.variants(o, m, s);
+    if (!from || !ours.length || ours.every((t) => normalizePath(target.sourceOf(t)?.path ?? '') === normalizePath(from))) continue;
+    const source = normalizePath(from);
+    if (!parsed.has(source)) {
+      const bytes = await read(source);
+      parsed.set(source, bytes ? parseDt1(bytes) : null);
+    }
+    const theirs = parsed.get(source)?.tiles.filter((t) => t.orientation === o && t.mainIndex === m && t.subIndex === s) ?? [];
+    if (!theirs.length) continue; // reported when the tiles are prepared
+    if (pictures(ours) === pictures(theirs)) same.push(key);
+    else clashes.push({ key, from: source, ours, theirs, cells: counts.get(key) ?? 0 });
+  }
+  return { clip, same, clashes };
+}
+
 /** Copy only required missing identities, including variants, animation frames and corner partners. */
-export async function preparePresetLibrary(clip: Clipboard, target: TileLibrary, path: string, read: (path: string) => Promise<Uint8Array | null>) {
+export async function preparePresetLibrary(clip: Clipboard, target: TileLibrary, path: string, read: (path: string) => Promise<Uint8Array | null>, keep?: ReadonlySet<string>) {
   clip = await resolvePresetSources(clip, read);
   const sources = new Map<string, Uint8Array>();
   const parsed = new Map<string, ReturnType<typeof parseDt1>>();
@@ -37,6 +96,8 @@ export async function preparePresetLibrary(clip: Clipboard, target: TileLibrary,
     const from = clip.tileSources?.[key];
     const variants = target.variants(o, c.mainIndex, c.subIndex);
     if (variants.length && (!from || variants.every(t => normalizePath(target.sourceOf(t)?.path ?? '') === normalizePath(from)))) continue;
+    // The map's own version of this number is kept (the same picture, or chosen over the pasted one).
+    if (variants.length && keep?.has(key)) continue;
     if (!from) throw new Error(`The source of preset tile ${key} is unknown. Re-save this preset from its original map.`);
     const source = normalizePath(from);
     let bytes = sources.get(source);

@@ -14,6 +14,8 @@ export interface WalkBrush {
   /** Flag bits the brush sets or clears (WALK_FLAGS). */
   bits: number;
   size: WalkBrushSize;
+  /** Where the change goes: this map only (blocker tiles / tile copies in <map>_walk.dt1), or the tiles' own flags. */
+  target: 'map' | 'tile';
 }
 
 interface Props {
@@ -31,6 +33,8 @@ interface Props {
   libraryPath: string;
   /** The last stroke's result, in words. */
   last: string | null;
+  /** Tile flag changes waiting to be written (the "tiles themselves" target). */
+  tileFlags: { pending: number; saving: boolean; onSave: () => void; onDiscard: () => void };
   onDone: () => void;
 }
 
@@ -60,7 +64,7 @@ export function WalkLegend({ floating = false }: { floating?: boolean }) {
 }
 
 /** The side panel while the walkability overlay is on: painting sub-tiles blocked or walkable, for this map only. */
-export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, onChange, busy, canWrite, libraryPath, last, onDone }: Props) {
+export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, onChange, busy, canWrite, libraryPath, last, tileFlags, onDone }: Props) {
   const set = (patch: Partial<WalkBrush>) => onChange({ ...brush, ...patch });
   const [pick, setPick] = useState(false);
   const remembered = useRef<{ ds1: Ds1; x: number; y: number; sub: number } | null>(null);
@@ -81,13 +85,42 @@ export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, on
     <section className="panel">
       <div className="panel-header static">
         <span>Walkability</span>
-        <HelpTip text="The game works out where units can go from the sub-tiles of every tile in a cell (5×5 per cell). Here you change them for this map only: blocking adds an invisible blocker tile to the cell, making walkable gives the cell its own copy of the blocking tile without that flag. Other maps using the same tiles don't change." />
+        <HelpTip text="The game works out where units can go from the sub-tiles of every tile in a cell (5×5 per cell). “This map only”: blocking adds an invisible blocker tile to the cell, making walkable gives the cell its own copy of the blocking tile without that flag; other maps don't change. “The tiles themselves” (like WinDS1): the flags are changed in the tiles' DT1s, for every cell and map using them." />
       </div>
       <div className="panel-body">
         <p className="small muted">
           Click or drag on the map to paint sub-tiles. <b>Shift</b>+drag paints a rectangle; hold <b>Ctrl</b> to swap add/remove (with Set exactly, Ctrl temporarily adds).
         </p>
         <details className="small muted"><summary>Map colour legend</summary><WalkLegend /></details>
+        <div className="field-label">Change</div>
+        <div className="segmented">
+          <button className={brush.target !== 'tile' ? 'active' : ''} onClick={() => set({ target: 'map' })} title="Only this map: blocker tiles and tile copies go into this map's own walkability DT1. Other maps don't change.">
+            This map only
+          </button>
+          <button className={brush.target === 'tile' ? 'active' : ''} onClick={() => set({ target: 'tile' })} title="Like WinDS1: change the sub-tile flags of the tiles themselves, in their DT1s. No extra DT1; every cell and map using those tiles changes too.">
+            The tiles themselves
+          </button>
+        </div>
+        <p className="small muted">
+          {brush.target === 'tile'
+            ? 'Like WinDS1: the flags are changed in the tiles’ own DT1s. No extra DT1 and never “full”, but every cell, in every map, that uses those tiles changes too. Adding flags puts them on the cell’s floor tile; removing takes them off every tile in the cell.'
+            : 'Only this map changes: blockers and tile copies go into its own walkability DT1. A cell whose two floor layers are both used can still be blocked whole (Cell brush) with the map’s whole-cell flag.'}
+        </p>
+        {brush.target === 'tile' && tileFlags.pending > 0 && (
+          <div className="imp-callout small">
+            <span>
+              {tileFlags.pending} tile{tileFlags.pending === 1 ? '' : 's'} with changed flags, not saved yet (the DT1s are written into your mod; originals kept as .bak).
+            </span>
+            <span className="inline">
+              <button className="btn small primary" disabled={tileFlags.saving || !canWrite} onClick={tileFlags.onSave}>
+                {tileFlags.saving ? 'Saving…' : 'Save tile flags'}
+              </button>
+              <button className="btn small" disabled={tileFlags.saving} onClick={tileFlags.onDiscard}>
+                Discard
+              </button>
+            </span>
+          </div>
+        )}
         <fieldset className="collision-controls" disabled={busy || !canWrite}>
         <div className="field-label">Quick brushes</div>
         <div className="chips">
@@ -117,7 +150,7 @@ export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, on
             onBlur={e => { if (/^[\da-f]{1,2}$/i.test(e.target.value)) set({ bits: parseInt(e.target.value, 16) }); else e.target.value = collisionHex(brush.bits); }}
             onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
         </label>
-        <details className="small muted"><summary>How combinations work</summary><p>Each sub-tile stores eight independent bits. For example, 01 + 02 + 04 = 07. Flags from overlapping floors, walls and roofs combine. Shadows do not contribute. Removing a flag here removes its contributions from every affected layer, only in this map cell.</p><p>Advanced flags have context-dependent meanings in the classic engine. Test them in your mod. Teleport rules also depend on the level and skill.</p></details>
+        <details className="small muted"><summary>How combinations work</summary><p>Each sub-tile stores eight independent bits. For example, 01 + 02 + 04 = 07. Flags from overlapping floors, walls and roofs combine. Shadows do not contribute. Removing a flag here removes its contributions from every affected layer: in this map cell only, or (The tiles themselves) in those tiles everywhere.</p><p>Advanced flags have context-dependent meanings in the classic engine. Test them in your mod. Teleport rules also depend on the level and skill.</p></details>
         <div className="field-label">Brush</div>
         <div className="segmented">
           {([1, 3, 5, 'cell'] as const).map((s) => (
@@ -145,9 +178,9 @@ export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, on
         {busy && <p className="small muted">Applying…</p>}
         {last && !busy && <p className="small">{last}</p>}
         <details className="small muted"><summary>Saving and undo</summary><p>
-          Blockers and tile copies go into <span className="mono">{libraryPath}</span>, which is added to the map&apos;s tile libraries and level type. Undo
+          This map only: blockers and tile copies go into <span className="mono">{libraryPath}</span>, which is added to the map&apos;s tile libraries and level type. Undo
           (Ctrl+Z) takes a stroke back; save the map to keep them.
-        </p></details>
+        </p><p>The tiles themselves: changes show at once; Save tile flags writes the DT1s (Discard takes them all back).</p></details>
         <div className="modal-actions">
           <button className="btn" onClick={onDone}>
             Done

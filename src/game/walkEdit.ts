@@ -240,8 +240,14 @@ export async function planWalkEdit(opts: {
       } else if (hasFlags || needFloor) {
         const free = ds1.floors.findIndex((l) => isEmptyCell(l[i]));
         const index = free >= 0 ? free : ds1.floors.length < 2 ? ds1.floors.length : -1;
-        if (index < 0) throw new Error("both floor layers are used, so there's no room for a blocker");
-        else {
+        if (index < 0) {
+          // No room for a blocker: a whole cell blocked for walking and/or sight can use the DS1's own whole-cell flags.
+          const whole = paint.mode === 'block' && (mask & 0x1ffffff) === 0x1ffffff && !(paint.bits & ~0x05) && contributors.length > 0;
+          if (!whole) throw new Error("both floor layers are used, so there's no room for a blocker (paint the whole cell with the Cell brush to block walking or sight with the map's whole-cell flag, or change the tiles themselves)");
+          const c = contributors[0];
+          c.cell = { ...c.cell, prop3: c.cell.prop3 | (paint.bits & 1 ? 2 : 0) | (paint.bits & 4 ? 1 : 0) };
+          edits.push({ layer: c.layer, x, y, cell: c.cell });
+        } else {
           if (index >= floors) floors = index + 1;
           edits.push({ layer: { kind: 'floor', index }, x, y, cell: hidden(withTile(EMPTY_CELL, blockMain, blockerFor(want), DEFAULT_PROP1.floor)) });
         }
@@ -259,6 +265,86 @@ export async function planWalkEdit(opts: {
     }
   }
   return { floors, edits, dt1: records.length > originalCount ? buildDt1(records) : null, changed, skipped };
+}
+
+export interface TileFlagPlan {
+  /** The tiles (every variant of each number involved) and their new sub-tile flags, in DT1 file order. */
+  tiles: { tile: Dt1Tile; flags: Uint8Array }[];
+  /** Painted sub-tiles whose flags changed. */
+  changed: number;
+  /** Other cells of the map that use the changed tiles (they change too). */
+  alsoAffects: number;
+  skipped: string[];
+}
+
+/**
+ * Like WinDS1: a paint stroke changes the sub-tile flags of the tiles themselves (in their DT1s), so no blocker tiles or
+ * copies are needed. Every cell (in every map) using those tiles changes with them. Adding flags puts them on the cell's
+ * floor tile (else its first wall); removing takes them off every tile in the cell; "set exactly" does both.
+ */
+export function planTileFlags(ds1: Ds1, lib: TileLibrary, paint: WalkPaint): TileFlagPlan {
+  const next = new Map<Dt1Tile, Uint8Array>();
+  const flagsNow = (t: Dt1Tile) => next.get(t) ?? t.subTileFlags;
+  const skipped: string[] = [];
+  const changedKeys = new Set<string>();
+  const paintedCells = new Set<number>();
+  let changed = 0;
+  const clearBits = paint.mode === 'replace' ? ~paint.bits & 255 : paint.mode === 'clear' ? paint.bits & 255 : 0;
+  const setBits = paint.mode === 'clear' ? 0 : paint.bits & 255;
+  const usable = (t: Dt1Tile) => {
+    const src = lib.sourceOf(t);
+    return !!src && !isBuiltinPath(src.path);
+  };
+  const cellKeys = (i: number) => {
+    const out: { kind: 'floor' | 'wall'; keys: { o: number; m: number; s: number }[] }[] = [];
+    for (const l of ds1.floors) if (!isEmptyCell(l[i])) out.push({ kind: 'floor', keys: [{ o: 0, m: l[i].mainIndex, s: l[i].subIndex }] });
+    for (const l of ds1.walls) {
+      const c = l[i];
+      if (isEmptyCell(c) || c.orientation === Orientation.SpecialTile1 || c.orientation === Orientation.SpecialTile2) continue;
+      const keys = [{ o: c.orientation, m: c.mainIndex, s: c.subIndex }];
+      if (c.orientation === Orientation.RightPartOfNorthCornerWall) keys.push({ o: Orientation.LeftPartOfNorthCornerWall, m: c.mainIndex, s: c.subIndex });
+      out.push({ kind: 'wall', keys });
+    }
+    return out;
+  };
+  for (const [i, mask] of paint.cells) {
+    if (!Number.isInteger(i) || i < 0 || i >= ds1.width * ds1.height || !(mask & 0x1ffffff)) continue;
+    paintedCells.add(i);
+    const x = i % ds1.width, y = Math.floor(i / ds1.width);
+    const painted: number[] = [];
+    for (let k = 0; k < 25; k++) if (mask & (1 << k)) painted.push(fileIndex(k));
+    const parts = cellKeys(i);
+    const tilesOf = (keys: { o: number; m: number; s: number }[]) => keys.flatMap((k) => lib.variants(k.o, k.m, k.s).filter(usable).map((t) => ({ t, key: keyStr(k.o, k.m, k.s) })));
+    const target = (parts.find((p) => p.kind === 'floor' && tilesOf(p.keys).length) ?? parts.find((p) => tilesOf(p.keys).length)) ?? null;
+    if (setBits && !target) {
+      skipped.push(`(${x}, ${y}): no tile from a DT1 in this cell to carry the flags`);
+      continue;
+    }
+    const before = new Uint8Array(25);
+    for (const p of parts) for (const { t } of tilesOf(p.keys)) flagsNow(t).forEach((f, j) => (before[j] |= f));
+    const change = (t: Dt1Tile, key: string, fn: (f: number) => number) => {
+      const cur = flagsNow(t);
+      const out = cur.slice();
+      for (const j of painted) out[j] = fn(out[j]);
+      if (out.some((f, j) => f !== cur[j])) {
+        next.set(t, out);
+        changedKeys.add(key);
+      }
+    };
+    if (clearBits) for (const p of parts) for (const { t, key } of tilesOf(p.keys)) change(t, key, (f) => f & ~clearBits);
+    if (setBits && target) for (const { t, key } of tilesOf(target.keys)) change(t, key, (f) => f | setBits);
+    const after = new Uint8Array(25);
+    for (const p of parts) for (const { t } of tilesOf(p.keys)) flagsNow(t).forEach((f, j) => (after[j] |= f));
+    for (const j of painted) if (after[j] !== before[j]) changed++;
+  }
+  // Cells outside the stroke that place a changed tile.
+  let alsoAffects = 0;
+  if (changedKeys.size)
+    for (let i = 0; i < ds1.width * ds1.height; i++) {
+      if (paintedCells.has(i)) continue;
+      if (cellKeys(i).some((p) => p.keys.some((k) => changedKeys.has(keyStr(k.o, k.m, k.s))))) alsoAffects++;
+    }
+  return { tiles: [...next].map(([tile, flags]) => ({ tile, flags })), changed, alsoAffects, skipped };
 }
 
 /** Whether the cell has a real floor besides its blocker (without one, removing the blocker leaves it empty). */

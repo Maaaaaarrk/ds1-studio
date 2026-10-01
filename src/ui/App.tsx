@@ -94,7 +94,7 @@ import { ClipboardPanel } from './ClipboardPanel';
 import { SavePresetDialog } from './SavePresetDialog';
 import { PresetBuilder } from './PresetBuilder';
 import { loadPrefs, usePrefs } from './prefs';
-import { preparePresetLibrary, resolvePresetSources } from '../game/presetLibrary';
+import { comparePasteTiles, preparePresetLibrary, resolvePresetSources, type PasteTileClash } from '../game/presetLibrary';
 import { CommandPalette, ribbonCommands } from './CommandPalette';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { comboOf, useKeybindings, type ActionId } from './keybindings';
@@ -133,7 +133,7 @@ import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, GUIDE_URL, MANUAL_PDF_URL, openExternal, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
-import { planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
+import { planTileFlags, planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
 import { cellFix, levelSizeFix, MAX_TILE_PATH, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
@@ -146,7 +146,7 @@ import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type Des
 import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
-import { TilePalette, type PaletteFocus } from './TilePalette';
+import { Thumb, TilePalette, type PaletteFocus } from './TilePalette';
 import { arrivalProblem, arrivalText } from '../game/arrival';
 import { readAutomapRows, type AutomapSource } from '../game/automapImport';
 import { AutomapImportDialog } from './AutomapImport';
@@ -427,7 +427,7 @@ export function App() {
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
   const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
   /** Walkability mode (the overlay on): the brush, the sub-tiles a stroke is painting, and its result. */
-  const [walkBrush, setWalkBrush] = useState<WalkBrush>({ mode: 'block', bits: 0x01, size: 1 });
+  const [walkBrush, setWalkBrush] = useState<WalkBrush>({ mode: 'block', bits: 0x01, size: 1, target: 'map' });
   const [walkMarks, setWalkMarks] = useState<{ keys: ReadonlySet<number>; mode: 'block' | 'clear' | 'replace' } | null>(null);
   const [walkBusy, setWalkBusy] = useState(false);
   const [walkLast, setWalkLast] = useState<string | null>(null);
@@ -1430,7 +1430,19 @@ export function App() {
     [doc, selection, notify, onlyLayer, cellShown, tool, selectedObject, objectLabel, objectGroup], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
-  const [pasteOffer, setPasteOffer] = useState<{ clip: Clipboard; tiles: number; different: number; dt1s: string[]; label: string } | null>(null);
+  const [pasteOffer, setPasteOffer] = useState<{
+    clip: Clipboard;
+    tiles: number;
+    different: number;
+    dt1s: string[];
+    label: string;
+    /** Tile numbers whose map version matches the pasted one pixel for pixel: nothing to add for them. */
+    same: string[];
+    /** Tile numbers whose map version looks different: the user picks which to keep. */
+    clashes: PasteTileClash[];
+  } | null>(null);
+  /** Per clashing tile number: keep the map's version or bring in the pasted one. */
+  const [pasteChoice, setPasteChoice] = useState<Record<string, 'map' | 'pasted'>>({});
   /** New names for pasted DT1s whose file name is already taken by another of the map's DT1s (path → new file name). */
   const [pasteRenames, setPasteRenames] = useState<Record<string, string>>({});
   /** The pasted DT1s named like a different DT1 the map loads: path → the loaded one. */
@@ -1458,18 +1470,39 @@ export function App() {
   }, [pasteNameClashes, gd]);
   const beginPaste = useCallback(
     (clip: Clipboard, label: string, skipCheck = false) => {
+      const go = (c: Clipboard, note = '') => {
+        setClipboard(c);
+        setPasting(true);
+        notify(`${label}${note} · click the map (hold Alt to stack onto existing tiles) · Esc to cancel`);
+      };
       if (!skipCheck && map) {
         const m = missingForPaste(clip, map.lib);
         if (m.tiles || m.different) {
-          setPasteOffer({ clip, tiles: m.tiles, different: m.different, dt1s: m.dt1s, label });
+          const offer = { clip, tiles: m.tiles, different: m.different, dt1s: m.dt1s, label, same: [] as string[], clashes: [] as PasteTileClash[] };
+          if (!m.different || !gd) {
+            setPasteOffer(offer);
+            return;
+          }
+          // Tile numbers the map has from another DT1: identical pictures need nothing, different ones a choice.
+          const forMap = map;
+          void comparePasteTiles(clip, map.lib, (p) => gd.fs.read(p))
+            .then((cmp) => {
+              if (currentContext.current.map?.path !== forMap.path) return;
+              if (!m.tiles && !cmp.clashes.length) return go(cmp.clip, ' · its tiles match this map’s pixel for pixel');
+              const settled = new Set(cmp.same);
+              const sources = cmp.clip.tileSources ?? {};
+              // DT1s still needed: the ones a missing or clashing tile comes from.
+              const needed = new Set(Object.entries(sources).filter(([k]) => !settled.has(k)).map(([, p]) => normalizePath(p)));
+              setPasteChoice(Object.fromEntries(cmp.clashes.map((c) => [c.key, 'pasted' as const])));
+              setPasteOffer({ ...offer, clip: cmp.clip, different: cmp.clashes.length, dt1s: m.dt1s.filter((p) => needed.has(normalizePath(p))), same: cmp.same, clashes: cmp.clashes });
+            })
+            .catch(() => setPasteOffer(offer));
           return;
         }
       }
-      setClipboard(clip);
-      setPasting(true);
-      notify(`${label} · click the map (hold Alt to stack onto existing tiles) · Esc to cancel`);
+      go(clip);
     },
-    [map, notify],
+    [map, gd, notify],
   );
   const startPaste = useCallback(() => {
     if (tool === 'object') {
@@ -2125,6 +2158,16 @@ export function App() {
    */
   applyWalkRef.current = async (paint: WalkPaint) => {
     if (!gd || !map || !doc || historyBusyRef.current) return;
+    if (walkBrush.target === 'tile') {
+      // Like WinDS1: the tiles' own flags change (shown at once; written with Save tile flags).
+      const plan = planTileFlags(doc.ds1, map.lib, paint);
+      for (const { tile, flags } of plan.tiles) editTileFlags([tile], () => flags);
+      const msg = plan.changed
+        ? `${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'} updated in the tiles themselves${plan.alsoAffects ? `; ${plan.alsoAffects} other cell${plan.alsoAffects === 1 ? '' : 's'} of this map use${plan.alsoAffects === 1 ? 's' : ''} them too` : ''}. Save tile flags to keep it.`
+        : 'No flags changed by this brush.';
+      setWalkLast(`${msg}${plan.skipped.length ? ` Skipped ${plan.skipped.length} cell${plan.skipped.length === 1 ? '' : 's'}: ${plan.skipped.slice(0, 3).join('; ')}` : ''}`);
+      return;
+    }
     if (!canWrite) return notify('Walkability edits need a writable mod folder: they add a small tile library for this map.', true);
     const walkPath = walkDt1Path(map.path);
     const tooLong = tilePathProblem(walkPath.replace(/^data\/global\/tiles\//i, ''));
@@ -2323,10 +2366,11 @@ export function App() {
   /** Write an edited DT1 and refresh the map graphics. */
   const saveEditedDt1 = useCallback(
     async (r: Dt1EditResult) => {
-      if (!gd || !map || !doc) return;
+      if (!gd) return;
       await writeFiles([{ path: r.path, bytes: r.bytes }]);
+      gd.forgetDt1(r.path);
       const notes: string[] = [`Saved ${r.path.split('/').pop()}`];
-      if (r.switchMap) {
+      if (r.switchMap && map && doc) {
         const paths = map.lib.loaded
           .filter((l) => l.found && !isBuiltinPath(l.path))
           .map((l) => (normalizePath(l.path) === normalizePath(r.original) ? r.path : l.path));
@@ -2493,8 +2537,8 @@ export function App() {
     [gd, notify, openPackage],
   );
 
-  /** The DT1 just imported, for the library window to show. */
-  const [revealDt1, setRevealDt1] = useState<string | null>(null);
+  /** The DT1s just imported, for the library window to show (and choose). */
+  const [revealDt1, setRevealDt1] = useState<string[] | null>(null);
   /**
    * Act 0 is the standard: DT1s using colours that change between acts get the nearest colours that are the same in
    * every act, judged in the act they were drawn for (their folder's, else this map's). Returns the files as written.
@@ -2563,7 +2607,8 @@ export function App() {
           // per-viewer convenience only
         }
         setImporting(null);
-        setRevealDt1(c.files[0].path);
+        // Shown in the library window; when not added to the map, they come chosen there (one click adds them all).
+        setRevealDt1(c.addToMap && map ? [c.files[0].path] : c.files.map((f) => f.path));
         const n = c.files.length;
         const what = `${n === 1 ? c.files[0].path.split('/').pop() : `${n} DT1s`}${act0.converted.length ? ` (${act0.converted.length} converted to Act 0 colours)` : ''}`;
         if (c.addToMap && map) {
@@ -2834,7 +2879,9 @@ export function App() {
     try {
       const path = `data/global/tiles/studio/p${Date.now().toString(36)}.dt1`;
       if (gd.fs.locate(path)) throw new Error('That tile library already exists. Please retry.');
-      const result = await preparePresetLibrary(pasteOffer.clip, map.lib, path, p => gd.fs.read(p));
+      // Kept from the map: identical tiles, and clashing ones the user chose the map's version of.
+      const keep = new Set([...pasteOffer.same, ...pasteOffer.clashes.filter((c) => pasteChoice[c.key] === 'map').map((c) => c.key)]);
+      const result = await preparePresetLibrary(pasteOffer.clip, map.lib, path, p => gd.fs.read(p), keep);
       if (result.bytes) {
         const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
         // Validate the level's file-slot capacity before creating the DT1.
@@ -3453,6 +3500,7 @@ export function App() {
                 },
               ],
             },
+            { label: 'Edit a DT1…', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), size: 'sm', title: 'Open any DT1 from the game or your mod in the DT1 editor, no map needed: recolour, paint, make act-safe, change tile flags, save a copy' },
             {
               label: 'Import',
               icon: <FileInput />,
@@ -3613,7 +3661,7 @@ export function App() {
           items: [
             { label: 'Tile libraries', icon: <Library />, onClick: () => setDialog('dt1s'), disabled: noMap, title: 'Add or remove DT1 files for this map' },
             { label: 'DT1 library…', icon: <Grid2x2Plus />, onClick: () => setDialog('dt1lib'), disabled: noMap, size: 'sm', title: 'Browse every tile library the game and your mods have, add DT1s from your computer, add whole libraries to the map or build a custom DT1 from single tiles' },
-            { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), disabled: noMap, size: 'sm', title: 'Duplicate, rename and recolour a DT1 (whole file, chosen tiles, or the tiles of a preset)' },
+            { label: 'DT1 editor', icon: <PaletteIcon />, onClick: () => setDialog('dt1edit'), size: 'sm', title: 'Duplicate, rename, recolour and paint a DT1, or change its tiles’ flags (whole file, chosen tiles, or the tiles of a preset). Works without a map open too.' },
             { label: 'Reroll floors…', icon: <RefreshCw />, onClick: () => setDialog('floors'), disabled: noMap || !canWrite, size: 'sm', title: 'Choose floor tiles and reroll the selection or whole map' },
             { label: 'Animated water…', icon: <Blend />, onClick: () => setDialog('water'), disabled: noMap || !canWrite, size: 'sm', title: 'Edit water frames or create new animated water' },
             { label: 'Make act-safe', icon: <Blend />, onClick: () => setDialog('actsafe'), disabled: noMap, size: 'sm', title: "Fix tiles drawn for another act (odd red/purple colours): convert this map's DT1s to the colours that look the same in every act" },
@@ -4035,6 +4083,7 @@ export function App() {
                 busy={walkBusy}
                 canWrite={canWrite}
                 libraryPath={walkDt1Path(map.path).replace(/^data\/global\/tiles\//i, '')}
+                tileFlags={{ pending: flagEditCount, saving: savingFlags, onSave: () => void saveTileFlags(), onDiscard: discardTileFlags }}
                 last={walkLast}
                 onDone={exitMode}
               />
@@ -4505,19 +4554,61 @@ export function App() {
       )}
       {dialog === 'update' && <UpdateDialog initial={pendingUpdate} onClose={() => setDialog(null)} />}
       {pasteOffer && map && (
-        <Modal title="These tiles need other tile libraries" onClose={() => { if (!presetImportBusy) setPasteOffer(null); }}>
+        <Modal title={pasteOffer.clashes.length && !pasteOffer.tiles ? 'Some tiles look different in this map' : 'These tiles need other tile libraries'} wide={pasteOffer.clashes.length > 0} onClose={() => { if (!presetImportBusy) setPasteOffer(null); }}>
           {pasteOffer.tiles > 0 && (
             <p className="small">
               {pasteOffer.tiles} of the tiles you&apos;re pasting aren&apos;t in this map&apos;s tile libraries, so they would show as missing here and in game.
             </p>
           )}
-          {pasteOffer.different > 0 && (
+          {pasteOffer.clashes.length > 0 && (
+            <div className="small">
+              <p>
+                {pasteOffer.clashes.length} tile number{pasteOffer.clashes.length === 1 ? '' : 's'} this map already has from another DT1 look different from the
+                ones you&apos;re pasting. Choose which to use for each: the map&apos;s version keeps the number (nothing added); the pasted version goes into a
+                small DT1 of its own under a new number, so the map&apos;s existing tiles keep their look.
+                {pasteOffer.same.length > 0 && ` ${pasteOffer.same.length} other${pasteOffer.same.length === 1 ? ' matches' : 's match'} this map's tiles pixel for pixel and need${pasteOffer.same.length === 1 ? 's' : ''} nothing.`}
+              </p>
+              <p>
+                For all:{' '}
+                <button className="link" onClick={() => setPasteChoice(Object.fromEntries(pasteOffer.clashes.map((c) => [c.key, 'map' as const])))}>
+                  map&apos;s versions
+                </button>{' '}
+                ·{' '}
+                <button className="link" onClick={() => setPasteChoice(Object.fromEntries(pasteOffer.clashes.map((c) => [c.key, 'pasted' as const])))}>
+                  pasted versions
+                </button>
+              </p>
+              <div className="paste-clashes">
+                {pasteOffer.clashes.map((c) => (
+                  <div key={c.key} className="copies-pair">
+                    <div className="small">
+                      Tile {c.key.split('|').join('/')} · {c.cells} cell{c.cells === 1 ? '' : 's'}
+                    </div>
+                    {(['map', 'pasted'] as const).map((side) => (
+                      <label key={side} className={`copies-side${pasteChoice[c.key] === side ? ' on' : ''}`}>
+                        <span className="inline">
+                          <input type="radio" name={`paste-${c.key}`} checked={pasteChoice[c.key] === side} onChange={() => setPasteChoice({ ...pasteChoice, [c.key]: side })} />
+                          <span>{side === 'map' ? "This map's" : `Pasted (${c.from.split('/').pop()})`}</span>
+                        </span>
+                        <span className="copies-tiles">
+                          {(side === 'map' ? c.ours : c.theirs).slice(0, 4).map((t, i) => (
+                            <Thumb key={i} tile={t} palette={map.palette} />
+                          ))}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {pasteOffer.different > 0 && !pasteOffer.clashes.length && (
             <p className="small">
               {pasteOffer.different} tile{pasteOffer.different === 1 ? '' : 's'} use numbers this map already has from a different DT1, so they would look like this
               map&apos;s tiles instead. Adding the DT1s makes both versions available (the game then picks between them at random for those numbers).
             </p>
           )}
-          {pasteOffer.dt1s.length ? (
+          {pasteOffer.clashes.length ? null : pasteOffer.dt1s.length ? (
             <>
               <p className="small">They come from:</p>
               <ul className="small mono">
@@ -4570,7 +4661,12 @@ export function App() {
             >
               Paste anyway
             </button>
-            {pasteOffer.dt1s.length > 0 && (
+            {pasteOffer.clashes.length > 0 && (
+              <button className="btn primary" disabled={presetImportBusy || (!canWrite && (pasteOffer.tiles > 0 || pasteOffer.clashes.some((c) => pasteChoice[c.key] !== 'map')))} onClick={() => void importPresetTiles()}>
+                {presetImportBusy ? 'Preparing tiles…' : 'Paste with the chosen tiles'}
+              </button>
+            )}
+            {pasteOffer.dt1s.length > 0 && !pasteOffer.clashes.length && (
               <button
                 className="btn primary"
                 disabled={presetImportBusy || !canWrite}
@@ -4604,9 +4700,13 @@ export function App() {
               </button>
             )}
           </div>
-          <p className="muted small">Create a small DT1 containing only the required tiles. Conflicting tile numbers are changed so existing map tiles keep their appearance.</p>
+          {!pasteOffer.clashes.length && (
+            <>
+              <p className="muted small">Create a small DT1 containing only the required tiles. Conflicting tile numbers are changed so existing map tiles keep their appearance.</p>
+              <button className="btn primary" disabled={presetImportBusy || !canWrite} onClick={() => void importPresetTiles()}>{presetImportBusy ? 'Preparing tiles…' : 'Create DT1 from required tiles and place'}</button>
+            </>
+          )}
           {presetImportError && <p className="error-text" role="alert">{presetImportError}</p>}
-          <button className="btn primary" disabled={presetImportBusy || !canWrite} onClick={() => void importPresetTiles()}>{presetImportBusy ? 'Preparing tiles…' : 'Create DT1 from required tiles and place'}</button>
         </Modal>
       )}
            {dialog === 'automap' && map && scene && automapKindOf && (automapData && automapLevel ? (
@@ -4703,7 +4803,7 @@ export function App() {
         />
       )}
       {clearingAutomap && <div className="modal-backdrop"><div className="modal" role="dialog" aria-label="Updating automap pieces"><p role="status">Updating selected automap pieces…</p></div></div>}
-      {dialog === 'dt1edit' && map && (
+      {dialog === 'dt1edit' && (
         <Dt1Editor
           map={map}
           gd={data.gd}

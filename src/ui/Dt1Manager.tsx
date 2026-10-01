@@ -265,8 +265,8 @@ interface LibraryProps extends Omit<Props, 'usage'> {
   onCreateCustom: ((req: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean }) => Promise<void>) | null;
   /** Brings DT1 files, or folders of them, from the computer into the mod (null: no writable mod folder). */
   onImportFiles: ((mode: 'files' | 'folders') => void) | null;
-  /** A library to show (one just imported). */
-  reveal: string | null;
+  /** DT1s just imported: the first is shown, those the map does not load yet come chosen. */
+  reveal: string[] | null;
 }
 
 /**
@@ -311,10 +311,13 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
     if (selected) void gd.dt1(selected).then(d => live && setDt1(d)).catch(() => live && setDt1(null));
     return () => { live = false; };
   }, [selected, gd]);
-  // A DT1 just imported: show it.
+  // DT1s just imported: show the first and choose those the map doesn't load yet (no click per file).
   useEffect(() => {
-    if (reveal) setSelected(reveal);
-  }, [reveal]);
+    if (!reveal?.length) return;
+    setSelected(reveal[0]);
+    const fresh = reveal.filter((p) => !inMap.has(normalizePath(p)));
+    if (fresh.length) setChosen((c) => [...c.filter((x) => !fresh.some((f) => normalizePath(f) === normalizePath(x))), ...fresh]);
+  }, [reveal]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // The import window opened from here closes itself first.
@@ -360,7 +363,19 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
                 + Add a folder…
               </button>
             </div>
-            <Dt1Tree all={all} inMap={current} chosen={custom ? pickLibraries : chosen} chosenLabel={custom ? 'picked' : 'chosen'} selected={selected} onSelect={setSelected} />
+            <Dt1Tree
+              all={all}
+              inMap={current}
+              chosen={custom ? pickLibraries : chosen}
+              chosenLabel={custom ? 'picked' : 'chosen'}
+              selected={selected}
+              onSelect={setSelected}
+              onChooseMany={custom ? undefined : (paths, on) => setChosen((c) => {
+                const these = new Set(paths.map(normalizePath));
+                const rest = c.filter((x) => !these.has(normalizePath(x)));
+                return on ? [...rest, ...paths] : rest;
+              })}
+            />
           </div>
           <div className="dt1l-view">
             {selected ? (

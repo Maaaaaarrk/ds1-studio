@@ -36,7 +36,8 @@ export interface Dt1EditResult {
 }
 
 interface Props {
-  map: OpenMap;
+  /** The open map (null: editing a DT1 on its own, from the Home tab). */
+  map: OpenMap | null;
   gd: GameData;
   /** Saved + suggested presets (their tiles can be selected in one go). */
   presets: Preset[];
@@ -79,7 +80,7 @@ function remappedPalette(palette: Palette, remap: Uint8Array): Palette {
  * the act palette, since DT1s store palette indices).
  */
 export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClose }: Props) {
-  const libs = useMemo(() => map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path), [map]);
+  const libs = useMemo(() => (map ? map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path) : []), [map]);
   const [path, setPath] = useState(libs[0] ?? '');
   /** Every DT1 in the game and mods, for the library tree. */
   const allDt1s = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
@@ -95,7 +96,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       return -1;
     }
   });
-  const [pal, setPal] = useState<{ palette: Palette; act: number; usable: boolean[] | null; source?: string; act0?: Act0Palette }>({ palette: map.palette, act: -2, usable: null });
+  const [pal, setPal] = useState<{ palette: Palette; act: number; usable: boolean[] | null; source?: string; act0?: Act0Palette }>({ palette: map?.palette ?? new Uint8Array(1024), act: -2, usable: null });
   /** Show colours that change between acts as magenta (else in the tile's own act colours). */
   const [highlightUnsafe, setHighlightUnsafe] = useState(() => viewPalette().magenta);
   // The act the DT1 was made for (from its folder): the real colours behind Act 0's magenta slots, for conversions.
@@ -218,7 +219,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       .filter((x) => x.tiles.size > 0);
   }, [presets, dt1]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectionTiles = () => {
-    if (!selection) return new Set<number>();
+    if (!selection || !map) return new Set<number>();
     const cells = [];
     for (let y = selection.y0; y <= selection.y1; y++)
       for (let x = selection.x0; x <= selection.x1; x++) {
@@ -313,7 +314,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal dt1-editor" role="dialog" aria-label="DT1 editor" onKeyDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">DT1 editor</div>
+        <div className="modal-title">DT1 editor{map ? '' : ' · no map open'}</div>
         {busy && <div className="modal-busy-shield" role="status">Saving tile changes…</div>}
         <div className="dte-top">
           <span className="mono small dte-current">{short(path)}</span>
@@ -336,7 +337,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
               text={`Act 0 holds only the ${pal.usable ? pal.usable.filter(Boolean).length : 225} colours that look the same in every act (Gimli's act0 palette${pal.source === 'derived' ? ', worked out from your game palettes because it couldn’t be downloaded' : ''}), so tiles edited with it can be used in any act. Tick “highlight” to see which pixels use colours that change between acts (magenta); “Make act-safe” converts them. The pixel painter only offers Act 0 colours.`}
             />
           </label>
-          <span className="muted small">{dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'no tiles selected'}` : 'loading…'}</span>
+          <span className="muted small">{!path ? 'no DT1 picked' : dt1 ? `${dt1.tiles.length} tiles · ${picked.size ? `${picked.size} selected` : 'no tiles selected'}` : 'loading…'}</span>
           <button className="btn small" onClick={() => setPicked(new Set(dt1?.tiles.map((_, i) => i)))}>
             Select all
           </button>
@@ -354,9 +355,11 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
               </button>
             </span>
           )}
-          <button className="btn small" disabled={!selection} onClick={() => setPicked(selectionTiles())} title="Select the tiles of this DT1 used in the map selection">
-            From map selection
-          </button>
+          {map && (
+            <button className="btn small" disabled={!selection} onClick={() => setPicked(selectionTiles())} title="Select the tiles of this DT1 used in the map selection">
+              From map selection
+            </button>
+          )}
           <select
             className="small"
             value=""
@@ -396,6 +399,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             onWheel={(e) => e.ctrlKey && setSize((v) => Math.round(Math.min(200, Math.max(36, v * Math.exp(-e.deltaY * 0.0015)))))}
             title="Click: one tile · Ctrl+click: toggle · Shift+click: range · Ctrl + scroll to zoom"
           >
+            {!path && <p className="muted small">Pick a DT1 on the left (every tile library in the game and your mod).</p>}
             {dt1?.tiles.map((t, i) => {
               const affected = changes && (picked.has(i));
               const edited = edits.get(i);
@@ -509,7 +513,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             </div>
             {overwrite && <p className="small warn-text">Overwrites the original (kept as .bak).</p>}
             {exists && <p className="small warn-text">A DT1 with that name already exists and will be replaced.</p>}
-            {!overwrite && inMapLib && (
+            {!overwrite && inMapLib && map && (
               <label className="small">
                 <input type="checkbox" checked={switchMap} onChange={(e) => setSwitchMap(e.target.checked)} /> Use it in this map instead of {short(path).split('/').pop()}
               </label>

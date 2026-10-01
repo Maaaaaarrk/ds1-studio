@@ -530,6 +530,10 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .dtt-folder-row, .dtt-file { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; font-size: 12px; padding: 3px 8px; border-radius: 4px; }
 .dtt-folder-row { font-weight: 600; }
 .dtt-folder-row:hover, .dtt-file:hover { background: var(--panel-2, rgba(255, 255, 255, 0.05)); }
+.dtt-folder-head { display: flex; align-items: center; }
+.dtt-folder-head .dtt-folder-row { flex: 1; min-width: 0; }
+.dtt-choose { white-space: nowrap; padding: 0 6px; opacity: 0.55; }
+.dtt-folder-head:hover .dtt-choose { opacity: 1; }
 .dtt-file { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dtt-file.active { background: var(--accent-dim, rgba(212, 168, 79, 0.18)); color: #fff; }
 .dtt-caret { width: 10px; color: var(--muted, #888); }
@@ -1062,3 +1066,5 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .copies-tiles .thumb-img { width: 72px; height: 72px; background-size: contain; background-repeat: no-repeat; background-position: center; background-color: var(--bg); border-radius: 4px; }
 .versions-pair { grid-template-columns: 1fr; }
 .versions-pair .thumb-img { width: 150px; height: 150px; image-rendering: pixelated; }
+.paste-clashes { max-height: 50vh; overflow-y: auto; }
+.paste-clashes .copies-pair > .small:first-child { grid-column: 1 / -1; }

@@ -3,7 +3,7 @@ import { decodeCell, withFields, withTile, type Ds1 } from '../src/formats/ds1';
 import { parseDt1 } from '../src/formats/dt1';
 import { blockerRecord, buildDt1 } from '../src/formats/dt1Write';
 import { TileLibrary } from '../src/game/GameData';
-import { fileIndex, planWalkEdit, type WalkPaint, type WalkPlan } from '../src/game/walkEdit';
+import { fileIndex, planTileFlags, planWalkEdit, type WalkPaint, type WalkPlan } from '../src/game/walkEdit';
 import { buildScene, walkability } from '../src/render/scene';
 
 const FLOOR = 'data/global/tiles/test/floor.dt1';
@@ -176,5 +176,56 @@ describe('collision regression coverage', () => {
     const lib = new TileLibrary(); lib.add(FLOOR, parseDt1(floorDt1));
     const p = await planWalkEdit({ ds1: d, lib, walk: null, walkPath: WALK, read: async () => floorDt1, paint: { mode: 'clear', bits: 13, cells: new Map([[1, 1 << 12]]) } });
     expect(p.skipped).toHaveLength(1); expect(p.changed).toBe(0); expect(p.edits).toEqual([]); expect(p.dt1).toBeNull();
+  });
+});
+
+describe('walkability when a cell has no room, and on the tiles themselves', () => {
+  const ALL = 0x1ffffff;
+  const libOf = () => {
+    const lib = new TileLibrary();
+    lib.add(FLOOR, parseDt1(floorDt1));
+    return lib;
+  };
+  const full = () => {
+    const d = ds1();
+    // Cell 0: both floor layers used.
+    d.floors.push(Array.from({ length: 4 }, () => decodeCell(0)));
+    d.floors[1][0] = withTile(decodeCell(0), 1, 0, 0xc2);
+    return d;
+  };
+  const plan = (d: Ds1, paint: WalkPaint) => planWalkEdit({ ds1: d, lib: libOf(), read: async (p) => (p === FLOOR ? floorDt1 : null), walkPath: WALK, walk: null, paint });
+
+  it('blocks a whole cell with the DS1 whole-cell flag when both floor layers are used', async () => {
+    const d = full();
+    const p = await plan(d, { mode: 'block', bits: 1, cells: new Map([[0, ALL]]) });
+    expect(p.skipped).toEqual([]);
+    expect(p.dt1).toBeNull();
+    expect(p.edits).toHaveLength(1);
+    expect(p.edits[0].cell.prop3 & 2).toBe(2);
+    const s = apply(d, p, null);
+    expect(blocked(s.d, s.lib, 0)).toHaveLength(25);
+  });
+
+  it('still skips part of such a cell, saying what to do instead', async () => {
+    const p = await plan(full(), { mode: 'block', bits: 1, cells: new Map([[0, 1]]) });
+    expect(p.skipped[0]).toMatch(/whole cell/);
+  });
+
+  it('changes the tiles’ own flags, and counts the other cells that use them', () => {
+    const d = ds1();
+    const lib = libOf();
+    const tile = lib.variants(0, 1, 0)[0];
+    const p = planTileFlags(d, lib, { mode: 'block', bits: 1, cells: new Map([[0, 1 << 3]]) });
+    expect(p.changed).toBe(1);
+    expect(p.tiles).toHaveLength(1);
+    expect(p.tiles[0].tile).toBe(tile);
+    expect(p.tiles[0].flags[fileIndex(3)]).toBe(1);
+    expect(tile.subTileFlags[fileIndex(3)]).toBe(0); // only planned
+    expect(p.alsoAffects).toBe(1); // cell 2 uses floor 1/0 too
+    // Removing takes it off the blocking tile.
+    const c = planTileFlags(d, lib, { mode: 'clear', bits: 1, cells: new Map([[1, 1 << 12]]) });
+    expect(c.tiles[0].flags[fileIndex(12)]).toBe(0);
+    // A cell with no tile can't carry new flags.
+    expect(planTileFlags(d, lib, { mode: 'block', bits: 1, cells: new Map([[3, 1]]) }).skipped).toHaveLength(1);
   });
 });

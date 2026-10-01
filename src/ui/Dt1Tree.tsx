@@ -46,10 +46,12 @@ interface Props {
   chosenLabel?: string;
   selected: string;
   onSelect: (path: string) => void;
+  /** Choose (or unchoose) every library in a folder and its subfolders at once. */
+  onChooseMany?: (paths: string[], on: boolean) => void;
 }
 
 /** Tile libraries as a tree: the map's own first, then every DT1 by folder (collapsible), with a search box. */
-export function Dt1Tree({ all, inMap, chosen = [], chosenLabel = 'chosen', selected, onSelect }: Props) {
+export function Dt1Tree({ all, inMap, chosen = [], chosenLabel = 'chosen', selected, onSelect, onChooseMany }: Props) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<Set<string>>(() => {
     // Start with the selected library's folders open.
@@ -85,11 +87,24 @@ export function Dt1Tree({ all, inMap, chosen = [], chosenLabel = 'chosen', selec
     const isOpen = !!q || open.has(f.key);
     return (
       <div key={f.key} className="dtt-folder">
+        <div className="dtt-folder-head">
         <button className="dtt-folder-row" style={{ paddingLeft: 6 + depth * 12 }} onClick={() => toggle(f.key)}>
           <span className="dtt-caret">{isOpen ? '▾' : '▸'}</span>
           {f.name}
           <span className="dtt-count">{count(f)}</span>
         </button>
+        {onChooseMany && (() => {
+          // The folder's libraries the map doesn't load yet.
+          const free = allFiles(f).filter((p) => !inMapSet.has(normalizePath(p)));
+          if (!free.length) return null;
+          const on = free.every((p) => chosenSet.has(normalizePath(p)));
+          return (
+            <button className="link small dtt-choose" onClick={() => onChooseMany(free, !on)} title={on ? 'Unchoose every library in this folder' : `Choose all ${free.length} libraries in this folder (and its subfolders) that this map doesn't load yet`}>
+              {on ? 'unchoose all' : `choose all ${free.length}`}
+            </button>
+          );
+        })()}
+        </div>
         {isOpen && (
           <div>
             {[...f.folders.values()].sort((a, b) => byName(a.name, b.name)).map((c) => renderFolder(c, depth + 1))}
@@ -126,6 +141,10 @@ export function Dt1Tree({ all, inMap, chosen = [], chosenLabel = 'chosen', selec
       </div>
     </div>
   );
+}
+
+function allFiles(f: Folder): string[] {
+  return [...f.files, ...[...f.folders.values()].flatMap(allFiles)];
 }
 
 function allKeys(f: Folder): string[] {
