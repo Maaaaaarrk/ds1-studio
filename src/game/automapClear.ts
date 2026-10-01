@@ -7,6 +7,8 @@ import { planCustomDt1 } from './customDt1';
 import type { GameData, TileLibrary } from './GameData';
 import type { CellEdit } from './MapDocument';
 import { mapTileUses, tileIdentity } from './assetUsage';
+import { decodeTile } from '../formats/dt1';
+import { sameTileRecoloured } from './duplicateDt1s';
 
 /** Isolate selected pieces under fresh tile IDs, preserving matching cells elsewhere and all graphics. */
 export async function planAutomapEdit(gd: GameData, lib: TileLibrary, ds1: Ds1, pieces: AutomapPiece[], table: TxtTableDoc, level: string, cel: number) {
@@ -32,6 +34,18 @@ export async function planAutomapEdit(gd: GameData, lib: TileLibrary, ds1: Ds1, 
     }
   }
   if (!records.length) return null;
+  // Versions of one tile from two copies of a library in different colours: copying both would keep the random mix
+  // (some cells in the wrong colours) in a DT1 of their own, where the copies can no longer be told apart.
+  for (const [p] of wanted.values()) {
+    const vs = lib.variants(p.orientation, p.main, p.sub);
+    for (let a = 0; a < vs.length; a++)
+      for (let b = a + 1; b < vs.length; b++) {
+        const [sa, sb] = [lib.sourceOf(vs[a]), lib.sourceOf(vs[b])];
+        const [ia, ib] = [decodeTile(vs[a]), decodeTile(vs[b])];
+        if (sa && sb && sa.path !== sb.path && ia && ib && sameTileRecoloured(ia, ib))
+          throw new Error(`Tile ${p.orientation}/${p.main}/${p.sub} comes from two copies of a library in different colours (${sa.path.replace(/^data\/global\/tiles\//i, '')} and ${sb.path.replace(/^data\/global\/tiles\//i, '')}). Keep one copy first (Diagnostics → Compatibility check → Compare the copies), then edit the automap.`);
+      }
+  }
   const source = 'selected-automap.dt1';
   const plan = planCustomDt1(records.map((_,index)=>({dt1:source,index})),new Map([[source,buildDt1(records)]]),new Set(lib.entries().map(e=>tileIdentity(e.orientation,e.main,e.sub))));
   if (plan.skipped.length) throw new Error(plan.skipped.join('\n'));

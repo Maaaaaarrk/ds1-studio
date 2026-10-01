@@ -7,7 +7,7 @@ import { guessDrawnAct } from '../game/openMap';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { isBuiltinPath } from '../game/specialTiles';
-import { duplicateDt1s } from '../game/duplicateDt1s';
+import { duplicateDt1s, mixedVersions, type MixedVersions } from '../game/duplicateDt1s';
 import { Modal } from './Dialogs';
 import { HelpTip } from './HelpTip';
 import { ImageThumb } from './PixelPainter';
@@ -41,6 +41,8 @@ interface Props {
   onApply: (files: { path: string; bytes: Uint8Array }[]) => Promise<void>;
   /** Removes DT1s from the map's tile libraries (and the game's tables). */
   onRemove: (paths: string[]) => Promise<void>;
+  /** Open the dialog that picks one version of each tile DS1 Studio's DT1s have in two colourings. */
+  onChooseVersions?: (items: MixedVersions[]) => void;
   onClose: () => void;
 }
 
@@ -49,7 +51,8 @@ interface Props {
  * in the act each DT1 was drawn for. Fixes tiles drawn for one act (say Act 1) showing odd colours (often red) in a map
  * of another act, both here and in game.
  */
-export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onClose }: Props) {
+export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onChooseVersions, onClose }: Props) {
+  const mixed = useMemo(() => mixedVersions(map.lib), [map]);
   const mapAct = map.paletteAct === OLD_ACT5_PALETTE ? 4 : map.paletteAct === ACT0_PALETTE ? Math.min(4, map.ds1.act) : map.paletteAct;
   const [act0, setAct0] = useState<Act0Palette | null>(null);
   const [acts, setActs] = useState<Palette[] | null>(null);
@@ -188,6 +191,20 @@ export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onClose }: 
           <button className="btn small" disabled={busy} onClick={() => void remove(redundant)}>
             Remove {redundant.length} duplicate cop{redundant.length === 1 ? 'y' : 'ies'} from this map
           </button>
+        </div>
+      )}
+      {mixed.length > 0 && (
+        <div className="imp-callout small actsafe-callout">
+          <b>
+            {mixed.length} tile{mixed.length === 1 ? ' has' : 's have'} two versions in different colours
+          </b>{' '}
+          in {[...new Set(mixed.map((m) => m.path.split('/').pop()))].join(', ')}: copied from two copies of the same library. They use only Act 0
+          colours, so they count as act-safe below, but the game shows one at random per cell, so some cells look wrong.{' '}
+          {onChooseVersions && (
+            <button className="btn small" disabled={busy} onClick={() => onChooseVersions(mixed)}>
+              Compare the versions and choose…
+            </button>
+          )}
         </div>
       )}
       {!rows && !error && <p className="small">Checking the map's tile libraries…</p>}

@@ -6,7 +6,7 @@ import { normalizePath } from '../vfs/vfs';
 import { GameData, TileLibrary } from './GameData';
 import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
-import { clashingDt1s, duplicateDt1s } from './duplicateDt1s';
+import { clashingDt1s, duplicateDt1s, mixedVersions } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
 import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
 import { ACT_TOWNS, exitProblems } from './exits';
@@ -71,6 +71,8 @@ export type Fix = { label: string } & (
   | { kind: 'keep'; key: string }
   /** Shows two copies of the same tiles side by side to choose which to keep (the others leave the map). */
   | { kind: 'choose-copies'; pairs: { earlier: string; later: string; keys: number[] }[] }
+  /** Pick one version of each tile number DS1 Studio's DT1s have in two colourings; the others are taken out of the file. */
+  | { kind: 'choose-versions'; items: { path: string; key: number; indices: number[] }[] }
   /** Renames tile files whose paths are too long (relative to data/global/tiles), updating LvlTypes / LvlPrest. */
   | { kind: 'shorten-paths'; paths: string[] }
 );
@@ -196,6 +198,26 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
       }`,
       cells: clash.cells,
       fixes: clash.removable.length ? [{ kind: 'remove-dt1s', label: `Remove ${clash.removable.map(short).join(', ')} from the map's libraries`, paths: clash.removable }] : [],
+    });
+  }
+  const mixed = mixedVersions(lib);
+  if (mixed.length) {
+    const keys = new Set(mixed.map((m) => m.key));
+    const cells: { x: number; y: number }[] = [];
+    for (let i = 0; i < ds1.width * ds1.height; i++) {
+      const used =
+        ds1.floors.some((l) => l[i].prop1 !== 0 && keys.has(TileLibrary.key(Orientation.Floor, l[i].mainIndex, l[i].subIndex))) ||
+        ds1.walls.some((l) => l[i].prop1 !== 0 && keys.has(TileLibrary.key(l[i].orientation, l[i].mainIndex, l[i].subIndex)));
+      if (used) cells.push({ x: i % ds1.width, y: Math.floor(i / ds1.width) });
+    }
+    const files = [...new Set(mixed.map((m) => short(m.path)))];
+    out.push({
+      severity: 'warning',
+      area: 'Tiles',
+      title: `${mixed.length} tile${mixed.length === 1 ? ' has' : 's have'} two versions in different colours`,
+      detail: `In ${files.join(', ')} (made by DS1 Studio: an automap edit or a custom DT1). They were copied while the map loaded two copies of the same library, so each copy's version came along. The game picks a version at random for every cell, so ${cells.length} cell${cells.length === 1 ? '' : 's'} sometimes show the wrong colours (purple doors, for example) — in game too. The act-safe check can't tell: both versions use only colours every act shares. Keep the version that looks right.`,
+      cells,
+      fixes: [{ kind: 'choose-versions', label: 'Compare the versions and choose…', items: mixed }],
     });
   }
   if (scene.missing.length) {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { listCrashLogs, readCrashLog, type CrashLogFile } from '../app/crashLogs';
 import { resultKey, type CheckResult, type Fix } from '../game/compat';
 import type { Palette } from '../formats/palette';
+import { decodeTile } from '../formats/dt1';
 import { TileLibrary } from '../game/GameData';
 import { Thumb } from './TilePalette';
 import { explainCrash, parseCrashLog, type Crash, type CrashExplanation } from '../game/crashLog';
@@ -468,6 +469,101 @@ export function ChooseCopiesDialog({ pairs, lib, palette, onApply, onClose }: Co
           }}
         >
           {remove.length ? `Keep the chosen ${remove.length === 1 ? 'copy' : 'copies'}: remove ${remove.map((r) => r.split('/').pop()).join(', ')}` : 'Choose a copy to keep'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+interface VersionsProps {
+  items: { path: string; key: number; indices: number[] }[];
+  lib: TileLibrary;
+  palette: Palette;
+  /** Per DT1, the tile indices to take out of the file. */
+  onApply: (drop: Map<string, number[]>) => Promise<void>;
+  onClose: () => void;
+}
+
+/** Shows each tile number's versions side by side, to keep the one in the right colours (the rest leave the DT1). */
+export function ChooseVersionsDialog({ items, lib, palette, onApply, onClose }: VersionsProps) {
+  const [keep, setKeep] = useState<Record<number, number | undefined>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
+  const tileAt = (path: string, i: number) => lib.tilesOf(path)[i];
+  const drop = new Map<string, number[]>();
+  items.forEach((it, n) => {
+    const k = keep[n];
+    if (k === undefined) return;
+    const pix = (i: number) => {
+      const t = tileAt(it.path, i);
+      return t ? (decodeTile(t)?.pixels.join(',') ?? '') : '';
+    };
+    // Identical copies of the chosen version stay too.
+    const chosen = pix(k);
+    const gone = it.indices.filter((i) => i !== k && pix(i) !== chosen);
+    if (gone.length) drop.set(it.path, [...(drop.get(it.path) ?? []), ...gone]);
+  });
+  const dropping = [...drop.values()].reduce((n, l) => n + l.length, 0);
+  const chooseAll = (index: number) => setKeep(Object.fromEntries(items.map((_, n) => [n, items[n].indices[index]])));
+  return (
+    <Modal title="Choose the right version of each tile" wide onClose={() => !busy && onClose()}>
+      <p className="small">
+        Each tile below has versions that are the same picture in different colours. The game picks one at random for every cell, so some cells show the
+        wrong one. Click the version that looks right; the other versions are taken out of the DT1 (the old file is kept as .bak).
+      </p>
+      {items.length > 1 && items.every((it) => it.indices.length === items[0].indices.length) && (
+        <p className="small">
+          Same choice for all:{' '}
+          {items[0].indices.map((_, i) => (
+            <button key={i} className="link" onClick={() => chooseAll(i)}>
+              version {i + 1}
+            </button>
+          ))}
+        </p>
+      )}
+      {items.map((it, n) => {
+        const t0 = tileAt(it.path, it.indices[0]);
+        return (
+          <div key={n} className="copies-pair versions-pair">
+            <div className="small">
+              <b className="mono">{short(it.path)}</b> · tile {t0 ? `${t0.orientation}/${t0.mainIndex}/${t0.subIndex}` : it.key}
+            </div>
+            <span className="copies-tiles">
+              {it.indices.map((i, v) => {
+                const t = tileAt(it.path, i);
+                return (
+                  <label key={i} className={`copies-side${keep[n] === i ? ' on' : ''}`}>
+                    <span className="inline">
+                      <input type="radio" name={`ver${n}`} checked={keep[n] === i} onChange={() => setKeep({ ...keep, [n]: i })} />
+                      <span className="small">version {v + 1}</span>
+                    </span>
+                    {t ? <Thumb tile={t} palette={palette} /> : <span className="thumb-img" />}
+                  </label>
+                );
+              })}
+            </span>
+          </div>
+        );
+      })}
+      {error && <p className="small error-text">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn" disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn primary"
+          disabled={busy || !dropping}
+          onClick={() => {
+            setBusy(true);
+            setError(null);
+            onApply(drop)
+              .then(onClose)
+              .catch((e) => setError(String((e as Error)?.message ?? e)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {dropping ? `Keep the chosen versions: remove ${dropping} tile${dropping === 1 ? '' : 's'}` : 'Choose a version to keep'}
         </button>
       </div>
     </Modal>

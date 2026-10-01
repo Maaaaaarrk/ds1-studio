@@ -1060,3 +1060,5 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .copies-side.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .copies-tiles { display: flex; flex-wrap: wrap; gap: 4px; }
 .copies-tiles .thumb-img { width: 72px; height: 72px; background-size: contain; background-repeat: no-repeat; background-position: center; background-color: var(--bg); border-radius: 4px; }
+.versions-pair { grid-template-columns: 1fr; }
+.versions-pair .thumb-img { width: 150px; height: 150px; image-rendering: pixelated; }

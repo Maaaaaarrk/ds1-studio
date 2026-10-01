@@ -140,7 +140,7 @@ import { PopsDialog } from './PopsDialog';
 import { ObjectPreview } from './ObjectPreview';
 import { PresetsPanel } from './PresetsPanel';
 import { Ribbon, type RibbonTab } from './Ribbon';
-import { ChooseCopiesDialog, CompatDialog, CrashLogDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
+import { ChooseCopiesDialog, ChooseVersionsDialog, CompatDialog, CrashLogDialog, ExportPackageDialog, ImportPackageDialog } from './ToolDialogs';
 import type { Sprite } from '../game/sprites';
 import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type DesktopConfig } from '../vfs/tauri';
 import { DesktopSetup } from './DesktopSetup';
@@ -1997,6 +1997,7 @@ export function App() {
   const [popsKind, setPopsKind] = useState<'roof' | 'wall'>('roof');
   /** Two copies of the same tiles to choose between (from the compatibility check). */
   const [chooseCopies, setChooseCopies] = useState<{ earlier: string; later: string; keys: number[] }[] | null>(null);
+  const [chooseVersions, setChooseVersions] = useState<{ path: string; key: number; indices: number[] }[] | null>(null);
   /** Check results accepted as intended for the open map. */
   const [acceptedChecks, setAcceptedChecks] = useState<Set<string>>(new Set());
   useEffect(() => setAcceptedChecks(map ? acceptedResults(map.path) : new Set()), [map?.path]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2928,6 +2929,8 @@ export function App() {
             return setShortenPaths(fix.paths);
           case 'choose-copies':
             return setChooseCopies(fix.pairs);
+          case 'choose-versions':
+            return setChooseVersions(fix.items);
           case 'keep': {
             // "Keep it as it is": remembered for this map, so the check doesn't ask again.
             const kept = keptAnswers();
@@ -4692,6 +4695,10 @@ export function App() {
             await applyDt1s(map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path) && !drop.has(normalizePath(l.path))).map((l) => l.path));
             setDialog(null);
           }}
+          onChooseVersions={(items) => {
+            setDialog(null);
+            setChooseVersions(items);
+          }}
           onClose={() => setDialog(null)}
         />
       )}
@@ -4913,6 +4920,27 @@ export function App() {
             setAcceptedChecks(next);
             notify(accept ? 'Accepted as intended for this map: it no longer shows in the check (see Accepted)' : 'Shown in the check again');
           }}
+        />
+      )}
+      {chooseVersions && map && (
+        <ChooseVersionsDialog
+          items={chooseVersions}
+          lib={map.lib}
+          palette={map.palette}
+          onApply={async (drop) => {
+            const writes: { path: string; bytes: Uint8Array }[] = [];
+            for (const [path, gone] of drop) {
+              const out = new Set(gone);
+              const records = dt1Records(await data.gd.fs.readOrThrow(path));
+              writes.push({ path, bytes: buildDt1(records.filter((_, i) => !out.has(i))) });
+            }
+            await writeFiles(writes);
+            await reloadTables();
+            const n = [...drop.values()].reduce((s, l) => s + l.length, 0);
+            notify(`Removed ${n} wrong-coloured tile version${n === 1 ? '' : 's'} from ${writes.map((w) => w.path.split('/').pop()).join(', ')} (the old file is kept as .bak)`);
+            setTimeout(() => void runCheckRef.current(), 300);
+          }}
+          onClose={() => setChooseVersions(null)}
         />
       )}
       {chooseCopies && map && (
