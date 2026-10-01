@@ -299,6 +299,7 @@ export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: Prefs; 
           <span className="muted small"> (12 by default).</span>
         </span>
       </label>
+      {check('syncTablesOnSave', 'Update LvlTypes / Dt1Mask when saving', '(on by default). When the map’s tile libraries changed, saving also puts them in its level type (LvlTypes.txt) and Dt1Mask (LvlPrest.txt), so the game loads them. Off: saving only writes the map; you edit the tables yourself (the Compatibility check shows what the game won’t load).')}
       {check('checkAfterSave', 'Run the Compatibility check after saving', '(off by default). It opens only when it finds problems.')}
       {check('checkAfterAddToGame', 'Run the Compatibility check after Add to game', '(off by default). It opens only when it finds problems.')}
 

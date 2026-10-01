@@ -1,7 +1,8 @@
 import { arrivalText, type ArrivalProblem } from '../game/arrival';
 import { useEffect, useMemo, useState } from 'react';
 import { getCell, parseTxtTable, type TxtTableDoc } from '../formats/txtTable';
-import { dataRows, planAddToGame, recordOrderFix, typeAct, type TableFix } from '../game/addToGame';
+import { dataRows, planAddToGame, recordOrderFix, tilePathProblem, typeAct, type TableFix } from '../game/addToGame';
+import { loadLevelTables, typeSlotUse, type TypeSlots } from '../game/levelTables';
 import type { LayeredFs } from '../vfs/vfs';
 import { normalizePath } from '../vfs/vfs';
 import { Modal } from './Dialogs';
@@ -489,6 +490,159 @@ export function ChangeLevelTypeDialog({ fs, mapPath, levelId: openAs, usedDt1s, 
           }}
         >
           {busy ? 'Applying…' : 'Apply'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+interface TypeFullProps {
+  fs: LayeredFs;
+  mapPath: string;
+  /** The map's tile libraries (not the built-in ones), in load order. */
+  dt1s: string[];
+  fallbackTypeId?: number;
+  /** Why it opened (e.g. "Saved guild2.ds1, but…"). */
+  reason: string | null;
+  canWrite: boolean;
+  onFree: (remove: Set<number>) => Promise<void>;
+  onCombine: (members: string[], path: string) => Promise<void>;
+  onOwnType: () => void;
+  onClose: () => void;
+}
+
+/**
+ * A level type has 32 File slots. When they are all used and a map needs another library: remove libraries none of the
+ * type's levels use, combine some of the map's DT1s into one, or give the level a level type of its own.
+ */
+export function LevelTypeFullDialog({ fs, mapPath, dt1s, fallbackTypeId, reason, canWrite, onFree, onCombine, onOwnType, onClose }: TypeFullProps) {
+  const [use, setUse] = useState<TypeSlots | null | 'error'>(null);
+  const [drop, setDrop] = useState<Set<number>>(new Set());
+  const [members, setMembers] = useState<Set<string>>(new Set());
+  const mapName = mapPath.split('/').pop()!.replace(/\.ds1$/i, '');
+  const folder = mapPath.slice(0, mapPath.lastIndexOf('/') + 1);
+  const [name, setName] = useState(`${mapName}_combined`);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadLevelTables(fs)
+      .then((t) => {
+        if (!live) return;
+        const u = typeSlotUse(t, mapPath, fallbackTypeId);
+        setUse(u ?? 'error');
+      })
+      .catch(() => live && setUse('error'));
+    return () => {
+      live = false;
+    };
+  }, [fs, mapPath, fallbackTypeId]);
+  const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
+  const run = (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    fn()
+      .then(onClose)
+      .catch((e) => setError(String((e as Error)?.message ?? e)))
+      .finally(() => setBusy(false));
+  };
+  if (!use || use === 'error')
+    return (
+      <Modal title="The level type is full" onClose={onClose}>
+        <p className="small">{use === 'error' ? 'This map’s level type could not be read from LvlTypes.txt.' : 'Reading the level tables…'}</p>
+      </Modal>
+    );
+  const inSlot = (p: string) => use.slots.find((s) => s.path === normalizePath(p));
+  const missing = dt1s.filter((p) => !inSlot(p));
+  const unused = use.slots.filter((s) => s.path && !s.mine && !s.users.length);
+  // Combining: slots freed (members only this map uses), less the one the combined DT1 takes; members not in a slot
+  // need none any more.
+  const chosen = dt1s.filter((p) => members.has(p));
+  const freedByCombine = use.allPreset ? chosen.filter((p) => { const s = inSlot(p); return s && !s.users.length; }).length : 0;
+  const needAfterCombine = missing.filter((p) => !members.has(p)).length + (chosen.length >= 2 ? 1 : 0);
+  const combinedPath = `${folder}${name.trim()}.dt1`;
+  const nameProblem = !/^[A-Za-z0-9_-]+$/.test(name.trim())
+    ? 'letters, digits, - and _ only'
+    : tilePathProblem(short(combinedPath)) ?? (fs.locate(combinedPath) ? 'a DT1 with that name already exists' : null);
+  return (
+    <Modal title={`Level type ${use.typeId} "${use.name}" is full`} wide onClose={() => !busy && onClose()}>
+      {reason && <p className="small">{reason}</p>}
+      <p className="small">
+        A level type loads at most 32 tile libraries (File 1–32 in LvlTypes.txt), and all {use.slots.length - use.free} of this one&apos;s are used. This map needs{' '}
+        {missing.length} more: <span className="mono">{missing.map(short).join(', ') || '—'}</span>. Used by {use.levelNames.join(', ') || 'no level'}.
+      </p>
+
+      <div className="field-label">1 · Remove libraries nothing uses</div>
+      {!use.allPreset ? (
+        <p className="small muted">Not offered: maze or outdoor levels use this type, and they pick tiles by slot, so no slot can be told unused for sure.</p>
+      ) : !unused.length ? (
+        <p className="small muted">Every slot is selected by the Dt1Mask of a map of this level type.</p>
+      ) : (
+        <>
+          <p className="small muted">
+            No map of this level type selects these in its Dt1Mask. Tick the ones to remove (at least {missing.length}); the other libraries move up (no gaps) and every map&apos;s Dt1Mask is renumbered to match.{' '}
+            <button className="link" onClick={() => setDrop(new Set(unused.map((s) => s.slot)))}>
+              tick all
+            </button>{' '}
+            ·{' '}
+            <button className="link" onClick={() => setDrop(new Set())}>
+              none
+            </button>
+          </p>
+          <div className="type-full-list">
+            {unused.map((s) => (
+              <label key={s.slot} className="small">
+                <input type="checkbox" checked={drop.has(s.slot)} onChange={() => setDrop((d) => { const n = new Set(d); if (n.has(s.slot)) n.delete(s.slot); else n.add(s.slot); return n; })} /> File {s.slot}{' '}
+                <span className="mono">{short(s.path)}</span>
+              </label>
+            ))}
+          </div>
+          <button className="btn small primary" disabled={busy || !canWrite || !drop.size || drop.size < missing.length} onClick={() => run(() => onFree(drop))}>
+            Remove {drop.size || ''} unused and add this map&apos;s {missing.length}
+          </button>
+        </>
+      )}
+
+      <div className="field-label">2 · Combine some of this map&apos;s DT1s into one</div>
+      <p className="small muted">
+        The combined DT1 holds copies of their tiles, in the same order, so the map looks the same (the game pools the tiles of every library it loads anyway). It takes one slot;
+        the slots of the ones only this map uses are freed. The originals stay where they are for other maps.
+      </p>
+      <div className="type-full-list">
+        {dt1s.map((p) => {
+          const s = inSlot(p);
+          return (
+            <label key={p} className="small">
+              <input type="checkbox" checked={members.has(p)} onChange={() => setMembers((m) => { const n = new Set(m); if (n.has(p)) n.delete(p); else n.add(p); return n; })} />{' '}
+              <span className="mono">{short(p)}</span>{' '}
+              <span className="muted">{!s ? '(not in the type yet)' : s.users.length ? `(File ${s.slot}, also used by ${s.users.slice(0, 3).join(', ')}${s.users.length > 3 ? '…' : ''}: its slot stays)` : `(File ${s.slot})`}</span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="inline small">
+        Save as <span className="mono muted">{short(folder)}</span>
+        <input className="small-input mono" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+        .dt1 {nameProblem && <span className="error-text">{nameProblem}</span>}
+      </div>
+      <p className="small muted">
+        {chosen.length >= 2 ? `Frees ${freedByCombine} slot${freedByCombine === 1 ? '' : 's'} and needs ${needAfterCombine}: ${use.free + freedByCombine >= needAfterCombine ? 'fits.' : `still ${needAfterCombine - use.free - freedByCombine} short; choose more, or combine with option 1.`}` : 'Choose two or more.'}
+      </p>
+      <button className="btn small primary" disabled={busy || !canWrite || chosen.length < 2 || !!nameProblem || use.free + freedByCombine < needAfterCombine} onClick={() => run(() => onCombine(chosen, combinedPath))}>
+        Combine {chosen.length || ''} into {name.trim() || '…'}.dt1
+      </button>
+
+      <div className="field-label">3 · A level type of its own</div>
+      <p className="small muted">Gives this level its own copy of the level type with just the libraries it needs (Game → Change level type).</p>
+      <button className="btn small" disabled={busy} onClick={onOwnType}>
+        Change level type…
+      </button>
+
+      {error && <p className="small error-text">{error}</p>}
+      <p className="muted small">Changed tables keep their old file as .bak.</p>
+      <div className="modal-actions">
+        <button className="btn" disabled={busy} onClick={onClose}>
+          Not now
         </button>
       </div>
     </Modal>

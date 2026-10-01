@@ -116,10 +116,10 @@ import { stackMatchesLayer, stepTileStack, wallClickStack, type TileStack } from
 import { planAutomapClear, planAutomapEdit } from '../game/automapClear';
 import { buildDt1, dt1Records } from '../formats/dt1Write';
 import { renameInLvlPrest, renameInLvlTypes, suggestShortPath } from '../game/dt1Review';
-import { ChangeLevelTypeDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
+import { ChangeLevelTypeDialog, LevelTypeFullDialog, RegisterMapDialog, type TableWrite } from './LevelTools';
 import { CubeRecipeDialog } from './CubeRecipe';
 import { MapRecipeRibbon } from './MapRecipeRibbon';
-import { loadTable, setPopSettings, syncLevelTables } from '../game/levelTables';
+import { loadLevelTables, loadTable, planCombine, planFreeSlots, setPopSettings, SlotsFullError, syncLevelTables } from '../game/levelTables';
 import { applyPopPlan, findPops, planPops, popTargets, removePops, type PopArea } from '../game/pops';
 import { AUTOMAP_CODES, applyAutomapEdits, applyAutomapSuggestions, automapColors, referenceTiles, type AutomapColors, type ReferenceTile, AUTOMAP_DC6, AUTOMAP_TXT, automapLevelFor, automapPieces, parseAutomap, parseAutomapCels, setAutomapCel, suggestAutomap, withSuggestions, type AutomapEdit, type AutomapPiece, type AutomapSuggestion, type AutomapTable } from '../game/automap';
 import { getCell, parseTxtTable, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
@@ -1804,6 +1804,8 @@ export function App() {
   }, [scene, map]);
 
   const libraryDocuments = useRef(new WeakSet<MapDocument>());
+  /** The map's level type has no free slot for its libraries: the dialog offering ways to make room. */
+  const [typeFull, setTypeFull] = useState<{ reason: string | null } | null>(null);
   const applyDt1s = useCallback(
     async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; floors?: number; edits?: CellEdit[]; file?: FileHistoryChange; label?: string } = {}) => {
       if (!gd || !map || !doc) return;
@@ -1815,6 +1817,7 @@ export function App() {
         } catch (e) {
           if (opts.strict) throw e;
           note = ' Game tables could not be updated: ' + String(e);
+          if (e instanceof SlotsFullError) setTypeFull({ reason: `The map now lists the tile libraries, but the game tables weren't updated: ${e.message}.` });
         }
       }
       if (currentContext.current.doc !== doc) return;
@@ -3022,7 +3025,14 @@ export function App() {
             return recheck();
           }
           case 'sync-tables': {
-            const writes = await syncLevelTables(gd.fs, map.path, libs, map.resolution.lvlType?.id);
+            let writes: TableWrite[];
+            try {
+              writes = await syncLevelTables(gd.fs, map.path, libs, map.resolution.lvlType?.id);
+            } catch (e) {
+              if (!(e instanceof SlotsFullError)) throw e;
+              setDialog(null);
+              return setTypeFull({ reason: `${e.message}.` });
+            }
             if (writes.length) {
               await writeFiles(writes);
               await reloadTables();
@@ -3191,14 +3201,20 @@ export function App() {
     const name = doc.path.split('/').pop()!;
     savingMap.current = true;
     try {
-      if (data.saveTarget && map?.resolution.preset && libraryDocuments.current.has(doc)) {
-        const paths = doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p);
-        const writes = await syncLevelTables(gd.fs, savedPath, paths, map.resolution.lvlType?.id);
-        if (writes.length) await writeFiles(writes);
-      }
       if (data.saveTarget) {
         notify(await data.saveTarget.save(savedPath, bytes));
         gd.fs.remember(savedPath, bytes, data.saveTarget.label);
+        // Then the game tables, when the map's tile libraries changed. The map is saved whatever happens here.
+        if (map?.resolution.preset && libraryDocuments.current.has(doc) && prefsRef.current.syncTablesOnSave) {
+          const paths = doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p);
+          try {
+            const writes = await syncLevelTables(gd.fs, savedPath, paths, map.resolution.lvlType?.id);
+            if (writes.length) await writeFiles(writes);
+          } catch (e) {
+            if (e instanceof SlotsFullError) setTypeFull({ reason: `Saved ${name}, but the game tables weren't updated: ${e.message}. Make room below, or leave it for now (the Compatibility check lists what the game won't load).` });
+            else notify(`Saved ${name}, but the game tables weren't updated: ${errorMessage(e)}. Diagnostics → Compatibility check shows what the game won't load.`, true);
+          }
+        }
       } else {
         downloadFile(name, bytes);
         notify(`Downloaded ${name} (no writable mod folder configured)`);
@@ -5020,6 +5036,38 @@ export function App() {
             setAcceptedChecks(next);
             notify(accept ? 'Accepted as intended for this map: it no longer shows in the check (see Accepted)' : 'Shown in the check again');
           }}
+        />
+      )}
+      {typeFull && map && doc && (
+        <LevelTypeFullDialog
+          fs={data.gd.fs}
+          mapPath={map.path}
+          dt1s={doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p && !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p)}
+          fallbackTypeId={map.resolution.lvlType?.id}
+          reason={typeFull.reason}
+          canWrite={canWrite}
+          onFree={async (remove) => {
+            const dt1s = doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p && !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p);
+            const writes = planFreeSlots(await loadLevelTables(data.gd.fs), map.path, dt1s, remove, map.resolution.lvlType?.id);
+            await writeFiles(writes);
+            await reloadTables();
+            notify(`Updated ${writes.map((w) => `${w.table}: ${w.summary.join('; ')}`).join(' · ')} (the old files are kept as .bak)`);
+          }}
+          onCombine={async (members, path) => {
+            const dt1s = doc.ds1.files.map(ds1FileToDt1Path).filter((p): p is string => !!p && !isBuiltinPath(p)).map((p) => data.gd.fs.exactPath(p) ?? p);
+            // The members' tiles in load order: the same pool of tiles the game builds from them.
+            const records = [];
+            for (const p of dt1s.filter((d) => members.includes(d))) records.push(...dt1Records(await data.gd.fs.readOrThrow(p)));
+            const plan = planCombine(await loadLevelTables(data.gd.fs), map.path, dt1s, members, path, map.resolution.lvlType?.id);
+            await writeFiles([{ path, bytes: buildDt1(records) }, ...plan.writes]);
+            await applyDt1s(plan.dt1s, { keepOpen: true, label: 'Combine tile libraries' });
+            notify(`Combined ${members.length} DT1s into ${path.split('/').pop()} (${records.length} tiles) and updated ${plan.writes.map((w) => w.table).join(', ')}. Save the map to keep its new library list.`);
+          }}
+          onOwnType={() => {
+            setTypeFull(null);
+            setDialog('lvltype');
+          }}
+          onClose={() => setTypeFull(null)}
         />
       )}
       {chooseVersions && map && (

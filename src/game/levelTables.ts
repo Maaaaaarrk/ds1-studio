@@ -11,6 +11,18 @@ export interface TableWrite {
   summary: string[];
 }
 
+/** A level type has no free "File N" slot left for a map's tile libraries. */
+export class SlotsFullError extends Error {
+  constructor(
+    readonly typeId: number,
+    readonly typeName: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'SlotsFullError';
+  }
+}
+
 export async function loadTable(fs: LayeredFs, name: string): Promise<TxtTableDoc | null> {
   const b = await fs.read(`${EXCEL}${name}`);
   return b ? parseTxtTable(b) : null;
@@ -53,7 +65,7 @@ export function ensureTypeSlots(types: TxtTableDoc, typeRow: number, dt1s: strin
     for (let i = 1; i <= 32 && !slot; i++) if (slotPath(types, i) === dt1) slot = i;
     if (!slot) {
       for (let i = 1; i <= 32 && !slot; i++) if (colIndex(types, `File ${i}`) >= 0 && !slotPath(types, i)) slot = i;
-      if (!slot) throw new Error(`LvlTypes "${getCell(types, typeRow, 'Name')}" has no free File slot for ${tilesRel(dt1)}`);
+      if (!slot) throw new SlotsFullError(num(getCell(types, typeRow, 'Id')), getCell(types, typeRow, 'Name'), `LvlTypes "${getCell(types, typeRow, 'Name')}" has no free File slot for ${tilesRel(dt1)} (all 32 are used)`);
       const value = asSlotValue(types, typeRow, original.get(dt1) ?? dt1);
       types = setCell(types, typeRow, `File ${slot}`, value);
       added.push(`File ${slot} = ${value}`);
@@ -105,26 +117,44 @@ export function maskFor(types: TxtTableDoc, typeRow: number, dt1s: string[], old
  * level type comes from the level that places them.
  */
 export async function syncLevelTables(fs: LayeredFs, mapPath: string, dt1s: string[], fallbackTypeId?: number): Promise<TableWrite[]> {
-  const [prest, levels, types0] = await Promise.all([loadTable(fs, 'LvlPrest.txt'), loadTable(fs, 'Levels.txt'), loadTable(fs, 'LvlTypes.txt')]);
-  if (!prest || !levels || !types0) throw new Error('LvlPrest.txt, Levels.txt or LvlTypes.txt not found');
+  return syncTablesIn(await loadLevelTables(fs), mapPath, dt1s, fallbackTypeId);
+}
+
+export interface LevelTables {
+  prest: TxtTableDoc;
+  levels: TxtTableDoc;
+  types: TxtTableDoc;
+}
+
+export async function loadLevelTables(fs: LayeredFs): Promise<LevelTables> {
+  const [prest, levels, types] = await Promise.all([loadTable(fs, 'LvlPrest.txt'), loadTable(fs, 'Levels.txt'), loadTable(fs, 'LvlTypes.txt')]);
+  if (!prest || !levels || !types) throw new Error('LvlPrest.txt, Levels.txt or LvlTypes.txt not found');
+  return { prest, levels, types };
+}
+
+/** syncLevelTables on tables already loaded (or changed in memory). */
+/** `stay`: keep the map in its level type even when other levels use it (made room for it on purpose). */
+export function syncTablesIn(tables: LevelTables, mapPath: string, dt1s: string[], fallbackTypeId?: number, stay = false): TableWrite[] {
+  const { prest, levels, types: types0 } = tables;
   const rows = presetRowsFor(prest, mapPath);
   if (!rows.length) throw new Error('This map is not in LvlPrest.txt yet: use Game → Add to game first.');
-  const levelId = num(getCell(prest, rows[0], 'LevelId'));
-  let typeId = fallbackTypeId ?? 0;
-  if (levelId) {
-    const lv = levels.rows.findIndex((_, i) => num(getCell(levels, i, 'Id')) === levelId);
-    if (lv >= 0) typeId = num(getCell(levels, lv, 'LevelType'));
-  }
+  const { levelId, typeId } = mapLevelType(tables, mapPath, fallbackTypeId);
   const typeRow = types0.rows.findIndex((_, i) => num(getCell(types0, i, 'Id')) === typeId);
   if (typeRow < 0) throw new Error(`LvlTypes.txt has no level type ${typeId}`);
-  const { types, added } = ensureTypeSlots(types0, typeRow, dt1s);
+  // DT1s no slot holds yet (worked out before filling slots: a full type shared with other levels still gets the
+  // level a type of its own below).
+  const inSlots = new Set(Array.from({ length: 32 }, (_, i) => slotFile(types0, typeRow, i + 1)).filter(Boolean));
+  const missing = dt1s.filter((d) => !inSlots.has(normalizePath(d)));
+  const levelRow0 = levelId ? rowOfRecord(levels, levelId) : -1;
+  const ownType = !stay && missing.length > 0 && levelRow0 >= 0 && levelsOfType(levels, typeId, levelId).length > 0 && dataRows(prest).filter((r) => num(getCell(prest, r, 'LevelId')) === levelId).every((r) => rows.includes(r));
+  const { types, added } = ownType ? { types: types0, added: missing } : ensureTypeSlots(types0, typeRow, dt1s);
   let p = prest;
   const changedPresets: string[] = [];
   // New libraries for a level type other levels use too: the map's level gets a level type of its own instead, so
   // theirs keeps its tile list. Only when this map is the level's only preset (its type then affects nothing else).
   const levelRow = levelId ? rowOfRecord(levels, levelId) : -1;
   const levelPresets = levelId ? dataRows(prest).filter((r) => num(getCell(prest, r, 'LevelId')) === levelId) : [];
-  if (added.length && levelRow >= 0 && levelsOfType(levels, typeId, levelId).length && levelPresets.every((r) => rows.includes(r))) {
+  if (ownType && added.length && levelRow >= 0 && levelsOfType(levels, typeId, levelId).length && levelPresets.every((r) => rows.includes(r))) {
     const name = getCell(levels, levelRow, 'Name');
     const own = appendOwnType(types0, typeRow, name, dt1s);
     const mask = maskOf(own.slots);
@@ -313,4 +343,166 @@ export async function mergeMapRows(fs: LayeredFs, mapPath: string, rows: Package
   push('Levels.txt', levels);
   push('LvlPrest.txt', prest);
   return { writes: out, levelIds, typeIds };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// A level type with no free File slot: what uses its slots, and ways to make room.
+
+/** The level and level type a map's LvlPrest row belongs to (`fallbackTypeId` for shared presets, LevelId 0). */
+export function mapLevelType(tables: LevelTables, mapPath: string, fallbackTypeId?: number): { levelId: number; typeId: number } {
+  const { prest, levels } = tables;
+  const rows = presetRowsFor(prest, mapPath);
+  const levelId = rows.length ? num(getCell(prest, rows[0], 'LevelId')) : 0;
+  let typeId = fallbackTypeId ?? 0;
+  if (levelId) {
+    const lv = levels.rows.findIndex((_, i) => num(getCell(levels, i, 'Id')) === levelId);
+    if (lv >= 0) typeId = num(getCell(levels, lv, 'LevelType'));
+  }
+  return { levelId, typeId };
+}
+
+export interface SlotUse {
+  slot: number;
+  /** The DT1 (game path), '' for an empty slot. */
+  path: string;
+  /** Whether this map's own LvlPrest rows select it. */
+  mine: boolean;
+  /** Other LvlPrest rows (of levels using this type) that select it. */
+  users: string[];
+}
+
+export interface TypeSlots {
+  typeId: number;
+  typeRow: number;
+  name: string;
+  slots: SlotUse[];
+  free: number;
+  /**
+   * Every level of the type is a preset level (DrlgType 2), so its LvlPrest rows are all that load the slots and
+   * slots can safely be removed. Maze and outdoor levels also build rooms from shared rows and pick tiles by slot.
+   */
+  allPreset: boolean;
+  /** The levels using the type. */
+  levelNames: string[];
+}
+
+const slotFile = (types: TxtTableDoc, row: number, i: number) => {
+  const v = getCell(types, row, `File ${i}`);
+  return v && v !== '0' ? normalizePath(`data/global/tiles/${v}`) : '';
+};
+
+/** LvlPrest rows of the levels using level type `typeId`. */
+function rowsOfType(tables: LevelTables, typeId: number): number[] {
+  const ids = new Set(levelsOfType(tables.levels, typeId).map((r) => num(getCell(tables.levels, r, 'Id'))));
+  return dataRows(tables.prest).filter((r) => ids.has(num(getCell(tables.prest, r, 'LevelId'))));
+}
+
+/** What uses each slot of a map's level type. */
+export function typeSlotUse(tables: LevelTables, mapPath: string, fallbackTypeId?: number): TypeSlots | null {
+  const { prest, levels, types } = tables;
+  const { typeId } = mapLevelType(tables, mapPath, fallbackTypeId);
+  const typeRow = types.rows.findIndex((_, i) => num(getCell(types, i, 'Id')) === typeId);
+  if (typeRow < 0) return null;
+  const mine = new Set(presetRowsFor(prest, mapPath));
+  const rows = rowsOfType(tables, typeId);
+  const ofType = levelsOfType(levels, typeId);
+  const slots: SlotUse[] = [];
+  for (let i = 1; i <= 32; i++) {
+    if (colIndex(types, `File ${i}`) < 0) continue;
+    const bit = 1 << (i - 1);
+    const sel = (r: number) => (num(getCell(prest, r, 'Dt1Mask')) >>> 0) & bit;
+    slots.push({
+      slot: i,
+      path: slotFile(types, typeRow, i),
+      mine: [...mine].some((r) => sel(r)),
+      users: rows.filter((r) => !mine.has(r) && sel(r)).map((r) => getCell(prest, r, 'Name') || `row ${r}`),
+    });
+  }
+  return {
+    typeId,
+    typeRow,
+    name: getCell(types, typeRow, 'Name'),
+    slots,
+    free: slots.filter((s) => !s.path).length,
+    allPreset: ofType.every((r) => num(getCell(levels, r, 'DrlgType')) === 2),
+    levelNames: ofType.map((r) => getCell(levels, r, 'LevelName') || getCell(levels, r, 'Name')),
+  };
+}
+
+/**
+ * Takes `remove` out of a level type's File slots, moving the others up so the list stays without gaps (the server's
+ * tile preload stops at the first empty slot), and renumbers the Dt1Mask bits of every LvlPrest row of its levels.
+ */
+export function removeTypeSlots(tables: LevelTables, typeId: number, remove: ReadonlySet<number>): { tables: LevelTables; summary: string[] } {
+  const { types, prest } = tables;
+  const typeRow = types.rows.findIndex((_, i) => num(getCell(types, i, 'Id')) === typeId);
+  if (typeRow < 0 || !remove.size) return { tables, summary: [] };
+  const kept: { from: number; value: string }[] = [];
+  for (let i = 1; i <= 32; i++) {
+    if (colIndex(types, `File ${i}`) < 0) continue;
+    const v = getCell(types, typeRow, `File ${i}`);
+    if (v && v !== '0' && !remove.has(i)) kept.push({ from: i, value: v });
+  }
+  let t = types;
+  for (let i = 1; i <= 32; i++) if (colIndex(types, `File ${i}`) >= 0) t = setCell(t, typeRow, `File ${i}`, kept[i - 1]?.value ?? '0');
+  const moved = new Map(kept.map((k, i) => [k.from, i + 1]));
+  let p = prest;
+  const removed = [...remove].sort((a, b) => a - b).map((i) => tilesRel(slotFile(types, typeRow, i)) || `File ${i}`);
+  const summary = [`Type ${typeId} "${getCell(types, typeRow, 'Name')}": removed ${removed.join(', ')}; ${kept.length} libraries left, in File 1–${kept.length}`];
+  for (const r of rowsOfType(tables, typeId)) {
+    const old = num(getCell(prest, r, 'Dt1Mask')) >>> 0;
+    let mask = 0;
+    for (let i = 1; i <= 32; i++) if (old & (1 << (i - 1)) && moved.has(i)) mask |= 1 << (moved.get(i)! - 1);
+    mask >>>= 0;
+    if (mask !== old) {
+      p = setCell(p, r, 'Dt1Mask', String(mask));
+      summary.push(`"${getCell(prest, r, 'Name')}": Dt1Mask ${old} → ${mask}`);
+    }
+  }
+  return { tables: { ...tables, types: t, prest: p }, summary };
+}
+
+function writesOf(before: LevelTables, after: LevelTables, summary: string[]): TableWrite[] {
+  const out: TableWrite[] = [];
+  if (after.types !== before.types) out.push({ table: 'LvlTypes.txt', path: `${EXCEL}LvlTypes.txt`, bytes: serializeTxtTable(after.types), summary: summary.slice(0, 1) });
+  if (after.prest !== before.prest) out.push({ table: 'LvlPrest.txt', path: `${EXCEL}LvlPrest.txt`, bytes: serializeTxtTable(after.prest), summary: summary.slice(1) });
+  return out;
+}
+
+/** Merges two lists of table writes: a later write of a table replaces an earlier one (it was built on top of it). */
+function mergeWrites(a: TableWrite[], b: TableWrite[]): TableWrite[] {
+  const out = new Map(a.map((w) => [w.table, w]));
+  for (const w of b) out.set(w.table, { ...w, summary: [...(out.get(w.table)?.summary ?? []), ...w.summary] });
+  return [...out.values()];
+}
+
+/** Frees slots no LvlPrest row of the type's levels selects, then brings the map's tables in line. */
+export function planFreeSlots(tables: LevelTables, mapPath: string, dt1s: string[], remove: ReadonlySet<number>, fallbackTypeId?: number): TableWrite[] {
+  const use = typeSlotUse(tables, mapPath, fallbackTypeId);
+  if (!use) throw new Error('The map has no level type.');
+  if (!use.allPreset) throw new Error(`Level type "${use.name}" is also used by maze or outdoor levels: its slots can't be removed safely.`);
+  for (const i of remove) {
+    const s = use.slots.find((x) => x.slot === i);
+    if (s && (s.users.length || s.mine)) throw new Error(`File ${i} is still used (${s.mine ? 'by this map' : s.users.join(', ')}).`);
+  }
+  const freed = removeTypeSlots(tables, use.typeId, remove);
+  return mergeWrites(writesOf(tables, freed.tables, freed.summary), syncTablesIn(freed.tables, mapPath, dt1s, fallbackTypeId, true));
+}
+
+/**
+ * Replaces several of the map's DT1s with one combined DT1 (`combined`: the members' tiles in load order; the game pools
+ * the tiles of every loaded DT1 anyway, so the map looks the same). The members' slots no other row uses are removed,
+ * the combined DT1 goes in, and the map's Dt1Mask follows. Returns the table writes and the map's new library list.
+ */
+export function planCombine(tables: LevelTables, mapPath: string, dt1s: string[], members: string[], combined: string, fallbackTypeId?: number): { writes: TableWrite[]; dt1s: string[] } {
+  const use = typeSlotUse(tables, mapPath, fallbackTypeId);
+  if (!use) throw new Error('The map has no level type.');
+  const mem = new Set(members.map(normalizePath));
+  if (mem.size < 2) throw new Error('Choose at least two DT1s to combine.');
+  const first = dt1s.findIndex((p) => mem.has(normalizePath(p)));
+  if (first < 0) throw new Error('The DT1s to combine are not in the map.');
+  const next = [...dt1s.slice(0, first), combined, ...dt1s.slice(first).filter((p) => !mem.has(normalizePath(p)))];
+  const remove = use.allPreset ? new Set(use.slots.filter((s) => s.path && mem.has(s.path) && !s.users.length).map((s) => s.slot)) : new Set<number>();
+  const freed = removeTypeSlots(tables, use.typeId, remove);
+  return { writes: mergeWrites(writesOf(tables, freed.tables, freed.summary), syncTablesIn(freed.tables, mapPath, next, fallbackTypeId, true)), dt1s: next };
 }

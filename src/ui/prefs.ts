@@ -31,6 +31,8 @@ export interface Prefs {
   /** Run the Compatibility check after saving a map / after Add to game (it opens when it finds problems). */
   checkAfterSave: boolean;
   checkAfterAddToGame: boolean;
+  /** When saving a map whose tile libraries changed: also update its LvlTypes slots and LvlPrest Dt1Mask. */
+  syncTablesOnSave: boolean;
   /** Arrow-key panning speed (1 = normal). */
   arrowSpeed: number;
 }
@@ -52,6 +54,7 @@ export const DEFAULT_PREFS: Prefs = {
   recentCount: 12,
   checkAfterSave: false,
   checkAfterAddToGame: false,
+  syncTablesOnSave: true,
   arrowSpeed: 1,
 };
 

@@ -1068,3 +1068,4 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .versions-pair .thumb-img { width: 150px; height: 150px; image-rendering: pixelated; }
 .paste-clashes { max-height: 50vh; overflow-y: auto; }
 .paste-clashes .copies-pair > .small:first-child { grid-column: 1 / -1; }
+.type-full-list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; margin: 4px 0 8px; }
