@@ -9,9 +9,11 @@ import type { CellEdit } from './MapDocument';
 import { mapTileUses, tileIdentity } from './assetUsage';
 import { decodeTile } from '../formats/dt1';
 import { sameTileRecoloured } from './duplicateDt1s';
+import { appendTiles } from './ownTiles';
 
 /** Isolate selected pieces under fresh tile IDs, preserving matching cells elsewhere and all graphics. */
-export async function planAutomapEdit(gd: GameData, lib: TileLibrary, ds1: Ds1, pieces: AutomapPiece[], table: TxtTableDoc, level: string, cel: number) {
+/** `own`: the level type's own-tiles file to add the copies to (see ownTiles.ts), and the numbers they must avoid. */
+export async function planAutomapEdit(gd: GameData, lib: TileLibrary, ds1: Ds1, pieces: AutomapPiece[], table: TxtTableDoc, level: string, cel: number, own?: { existing: Uint8Array | null; taken: Set<string> }) {
   const wanted = new Map<string, AutomapPiece[]>();
   for (const p of pieces) {
     const key = tileIdentity(p.orientation, p.main, p.sub);
@@ -47,7 +49,7 @@ export async function planAutomapEdit(gd: GameData, lib: TileLibrary, ds1: Ds1, 
       }
   }
   const source = 'selected-automap.dt1';
-  const plan = planCustomDt1(records.map((_,index)=>({dt1:source,index})),new Map([[source,buildDt1(records)]]),new Set(lib.entries().map(e=>tileIdentity(e.orientation,e.main,e.sub))));
+  const plan = planCustomDt1(records.map((_,index)=>({dt1:source,index})),new Map([[source,buildDt1(records)]]),own?.taken ?? new Set(lib.entries().map(e=>tileIdentity(e.orientation,e.main,e.sub))));
   if (plan.skipped.length) throw new Error(plan.skipped.join('\n'));
   const uses=mapTileUses(ds1), edits: CellEdit[]=[], done=new Set<string>();
   for (const tile of plan.tiles) {
@@ -61,10 +63,10 @@ export async function planAutomapEdit(gd: GameData, lib: TileLibrary, ds1: Ds1, 
       edits.push({...u,cell:withFields(cells[u.y*ds1.width+u.x],{main:tile.newMain,sub:tile.newSub})});
     }
   }
-  return { bytes:buildDt1(plan.records),table,edits };
+  return { bytes: own ? appendTiles(own.existing, plan.records).bytes : buildDt1(plan.records), table, edits };
 }
 
 /** Clear visible pieces in an area; hidden tiles and other layers retain their original rules. */
-export function planAutomapClear(gd: GameData, lib: TileLibrary, ds1: Ds1, area: CellSelection, pieces: AutomapPiece[], table: TxtTableDoc, level: string) {
-  return planAutomapEdit(gd, lib, ds1, pieces.filter(p => p.cel !== null && inSelection(area, p.cellX, p.cellY)), table, level, -1);
+export function planAutomapClear(gd: GameData, lib: TileLibrary, ds1: Ds1, area: CellSelection, pieces: AutomapPiece[], table: TxtTableDoc, level: string, own?: { existing: Uint8Array | null; taken: Set<string> }) {
+  return planAutomapEdit(gd, lib, ds1, pieces.filter(p => p.cel !== null && inSelection(area, p.cellX, p.cellY)), table, level, -1, own);
 }

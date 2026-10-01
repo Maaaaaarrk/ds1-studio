@@ -134,7 +134,8 @@ import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, GUIDE_URL, MANUAL_PDF_URL, openExternal, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
-import { planTileFlags, planWalkEdit, walkDt1Path, type WalkPaint } from '../game/walkEdit';
+import { planTileFlags, planWalkEdit, type WalkPaint } from '../game/walkEdit';
+import { appendTiles, keysOf, ownTilesPath, typeTakenKeys } from '../game/ownTiles';
 import { cellFix, ENTRY_IMAGE_DIR, levelSizeFix, MAX_TILE_PATH, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
 import { PopsDialog } from './PopsDialog';
@@ -147,6 +148,7 @@ import { getConfig, isTauri, loadFromTauri, setConfig, tauriSaveTarget, type Des
 import { DesktopSetup } from './DesktopSetup';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
+import { TypePackageDialog } from './TypePackageDialog';
 import { EntryTextDialog } from './EntryTextDialog';
 import { applyTheme, findTheme } from './themes';
 import { Thumb, TilePalette, type PaletteFocus } from './TilePalette';
@@ -389,7 +391,7 @@ export function App() {
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
   /** Every object of one kind, selected together by double-clicking one (Delete / Ctrl+C / Ctrl+X act on all). */
   const [objectGroup, setObjectGroup] = useState<Set<number> | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | 'entrytext' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | 'entrytext' | 'typepkg' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -1979,16 +1981,19 @@ export function App() {
     const area = selection ?? { x0: 0, y0: 0, x1: doc.ds1.width - 1, y1: doc.ds1.height - 1 };
     const sources = new Map<string, Uint8Array>();
     for (const path of new Set(choices.map(c => c.path))) sources.set(path, await gd.fs.readOrThrow(path));
-    const plan = prepareFloorLibrary(choices, sources, new Set(map.lib.entries().map(e => tileIdentity(e.orientation, e.main, e.sub))));
+    // The copies go into the level type's own-tiles file (see game/ownTiles.ts), numbered free across the type.
+    const own = await ownTiles();
+    const plan = prepareFloorLibrary(choices, sources, own.taken);
     if (plan.skipped.length || !plan.records.length) throw new Error(plan.skipped.join('\n') || 'No floor tiles could be copied.');
-    const path = 'data/global/tiles/studio/f' + Date.now().toString(36) + '.dt1';
-    const bytes = buildDt1(plan.records), tiles = parseDt1(bytes).tiles;
-    const selected = plan.tiles.map((t, i) => ({ path, index: i, tile: tiles[i], brush: { orientation: 0, main: t.newMain, sub: t.newSub } }));
+    const path = own.path;
+    const { bytes, first } = appendTiles(own.existing, plan.records), tiles = parseDt1(bytes).tiles;
+    const selected = plan.tiles.map((t, i) => ({ path, index: first + i, tile: tiles[first + i], brush: { orientation: 0, main: t.newMain, sub: t.newSub } }));
     const result = smartFloorReroll(doc, map.lib, area, layer, selected, options);
     if (!result.edits.length) throw new Error('No eligible floors match these choices. Try other tiles or turn off Preserve walkability.');
-    const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
+    const paths = own.listed ? own.libs : [...own.libs, path];
     if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
     await writeFiles([{ path, bytes }]);
+    gd.forgetDt1(path);
     await applyDt1s(paths, { keepOpen: true, strict: true });
     if (currentContext.current.doc !== doc) return;
     doc.apply(result.edits, 'Reroll floors'); bump(); setActiveLayer({ kind: 'floor', index: layer }); setDialog(null);
@@ -2135,13 +2140,15 @@ export function App() {
    * is only final once the tables are synced: a shared type is split off first).
    */
   const createCustomDt1 = useCallback(
-    async ({ path, plan, bytes: dt1Bytes, actSafe, keepOpen }: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean; keepOpen?: boolean }) => {
+    async ({ path, plan, bytes: dt1Bytes, actSafe, keepOpen, existing }: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean; keepOpen?: boolean; existing?: Uint8Array | null }) => {
       if (!gd || !map) return;
-      if (gd.fs.locate(path)) throw new Error(`${path} already exists.`);
+      // `existing` given: the tiles are added to that file (the level type's own-tiles file); else it's a new DT1.
+      if (existing === undefined && gd.fs.locate(path)) throw new Error(`${path} already exists.`);
       if (!plan.records.length) throw new Error('No tiles to put in it.');
-      await writeFiles([{ path, bytes: dt1Bytes }]);
+      await writeFiles([{ path, bytes: existing === undefined ? dt1Bytes : appendTiles(existing, plan.records).bytes }]);
+      gd.forgetDt1(path);
       const libs = map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path);
-      await applyDt1s([...libs, path], { keepOpen, strict: true });
+      await applyDt1s(libs.some((l) => normalizePath(l) === normalizePath(path)) ? libs : [...libs, path], { keepOpen, strict: true });
       let automapNote = '';
       try {
         const fresh = await GameData.load(gd.fs);
@@ -2168,7 +2175,11 @@ export function App() {
         automapNote = `; AutoMap.txt not updated (${errorMessage(e)})`;
       }
       const renumbered = plan.renumbered.length ? `, ${plan.renumbered.length} renumbered` : '';
-      notify(`Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}${actSafe ? ', act-safe colours' : ''}) and added it to the map${automapNote}. Find it in the Tiles panel.`);
+      notify(
+        existing === undefined
+          ? `Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}${actSafe ? ', act-safe colours' : ''}) and added it to the map${automapNote}. Find it in the Tiles panel.`
+          : `Added ${plan.records.length} tiles${renumbered} to ${path.replace(/^data\/global\/tiles\//i, '')} (the level type's own tile file)${automapNote}.`,
+      );
     },
     [gd, map, writeFiles, applyDt1s, notify],
   );
@@ -2178,6 +2189,22 @@ export function App() {
    * new tiles, adds it to the map's tile libraries (and level type) the first time, and changes the cells as one undo
    * step.
    */
+  /**
+   * The map's own-tiles file (see game/ownTiles.ts): one per level type, in the type's folder. Returns where it is, what
+   * it holds now, the tile numbers new tiles must avoid (every library of the type, the map's own, the file's), and
+   * the map's libraries.
+   */
+  const ownTiles = async () => {
+    if (!gd || !map) throw new Error('No map open.');
+    const type = map.resolution.lvlType;
+    const path = ownTilesPath(gd, map.path, type);
+    const existing = await gd.fs.read(path);
+    const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
+    const taken = await typeTakenKeys(gd, type, libs);
+    for (const k of keysOf(existing)) taken.add(k);
+    for (const e of map.lib.entries()) taken.add(tileIdentity(e.orientation, e.main, e.sub));
+    return { path, existing, taken, libs, listed: libs.some((p) => normalizePath(p) === normalizePath(path)) };
+  };
   applyWalkRef.current = async (paint: WalkPaint) => {
     if (!gd || !map || !doc || historyBusyRef.current) return;
     if (walkBrush.target === 'tile') {
@@ -2190,15 +2217,17 @@ export function App() {
       setWalkLast(`${msg}${plan.skipped.length ? ` Skipped ${plan.skipped.length} cell${plan.skipped.length === 1 ? '' : 's'}: ${plan.skipped.slice(0, 3).join('; ')}` : ''}`);
       return;
     }
-    if (!canWrite) return notify('Walkability edits need a writable mod folder: they add a small tile library for this map.', true);
-    const walkPath = walkDt1Path(map.path);
-    const tooLong = tilePathProblem(walkPath.replace(/^data\/global\/tiles\//i, ''));
-    if (tooLong) return notify(`The map's walkability library would be ${tooLong}`, true);
+    if (!canWrite) return notify('Walkability edits need a writable mod folder: they add tiles to the level type’s own tile file.', true);
     historyBusyRef.current = true; setHistoryBusy(true);
     const expectedRevision = doc.revision;
     setWalkBusy(true);
     try {
-      const plan = await planWalkEdit({ ds1: doc.ds1, lib: map.lib, read: (p) => gd.fs.read(p), walkPath, walk: await gd.fs.read(walkPath), paint });
+      // Blockers and tile copies go into the level type's one own-tiles file (see game/ownTiles.ts).
+      const own = await ownTiles();
+      const walkPath = own.path;
+      const tooLong = tilePathProblem(walkPath.replace(/^data\/global\/tiles\//i, ''));
+      if (tooLong) throw new Error(`the level type's own tile file would be ${tooLong}`);
+      const plan = await planWalkEdit({ ds1: doc.ds1, lib: map.lib, read: (p) => gd.fs.read(p), walkPath, walk: own.existing, paint, extraTaken: own.taken });
       if (currentContext.current.doc !== doc || doc.revision !== expectedRevision) throw new Error('The map changed during the stroke. Please try again.');
       if (plan.dt1) {
         await writeFiles([{ path: walkPath, bytes: plan.dt1 }]);
@@ -2368,16 +2397,19 @@ export function App() {
     try {
       const table = await loadTable(gd.fs, 'AutoMap.txt');
       if (!table) throw new Error('AutoMap.txt was not found.');
+      // The copies go into the level type's own-tiles file (see game/ownTiles.ts).
+      const own = await ownTiles();
       const plan = piece
-        ? await planAutomapEdit(gd, map.lib, doc.ds1, [piece], table, automapLevel, cel)
-        : await planAutomapClear(gd, map.lib, doc.ds1, selection!, automapPiecesNow ?? [], table, automapLevel);
+        ? await planAutomapEdit(gd, map.lib, doc.ds1, [piece], table, automapLevel, cel, own)
+        : await planAutomapClear(gd, map.lib, doc.ds1, selection!, automapPiecesNow ?? [], table, automapLevel, own);
       if (currentContext.current.doc !== doc || doc.revision !== expectedRevision) throw new Error('The map changed while preparing the automap edit. Select the cells again.');
       if (!plan?.edits.length) { notify('No visible automap pieces in the selection.'); return; }
-      const path = 'data/global/tiles/studio/a' + Date.now().toString(36) + '.dt1';
-      const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
+      const path = own.path;
+      const paths = own.listed ? own.libs : [...own.libs, path];
       if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
       if (currentContext.current.doc !== doc) return;
       await writeFiles([{ path, bytes: plan.bytes }, { path: AUTOMAP_TXT, bytes: serializeTxtTable(plan.table) }]);
+      gd.forgetDt1(path);
       await applyDt1s(paths, { keepOpen: true, strict: true, edits: plan.edits, label: cel < 0 ? 'Clear selected automap pieces' : 'Change selected automap piece', file: { path: AUTOMAP_TXT, before: serializeTxtTable(table), after: serializeTxtTable(plan.table) } });
       if (currentContext.current.doc !== doc) return;
       setAutomapSuggestions(null);
@@ -2899,16 +2931,17 @@ export function App() {
     if (!pasteOffer || !gd || !map || !doc || presetImportBusy) return;
     setPresetImportBusy(true); setPresetImportError('');
     try {
-      const path = `data/global/tiles/studio/p${Date.now().toString(36)}.dt1`;
-      if (gd.fs.locate(path)) throw new Error('That tile library already exists. Please retry.');
+      // The tiles go into the level type's own-tiles file (see game/ownTiles.ts).
+      const own = await ownTiles();
+      const path = own.path;
       // Kept from the map: identical tiles, and clashing ones the user chose the map's version of.
       const keep = new Set([...pasteOffer.same, ...pasteOffer.clashes.filter((c) => pasteChoice[c.key] === 'map').map((c) => c.key)]);
-      const result = await preparePresetLibrary(pasteOffer.clip, map.lib, path, p => gd.fs.read(p), keep);
+      const result = await preparePresetLibrary(pasteOffer.clip, map.lib, path, p => gd.fs.read(p), keep, own.taken);
       if (result.bytes) {
-        const paths = [...map.lib.loaded.filter(l => l.found && !isBuiltinPath(l.path)).map(l => l.path), path];
-        // Validate the level's file-slot capacity before creating the DT1.
+        const paths = own.listed ? own.libs : [...own.libs, path];
+        // Validate the level's file-slot capacity before writing.
         if (map.resolution.preset) await syncLevelTables(gd.fs, map.path, paths, map.resolution.lvlType?.id);
-        await createCustomDt1({ path, plan: result.plan, bytes: result.bytes, actSafe: false, keepOpen: true });
+        await createCustomDt1({ path, plan: result.plan, bytes: result.bytes, actSafe: false, keepOpen: true, existing: own.existing });
       }
       if (currentContext.current.doc !== doc) throw new Error('The active map changed. Select the preset again.');
       if (result.clip.presetId) presetImportCache.current.set(result.clip.presetId, result.clip);
@@ -3558,6 +3591,11 @@ export function App() {
               title: 'Share the map',
               menu: [
                 { label: 'Map package…', hint: 'map, tile libraries and table rows (.zip), or the .ds1 alone', onClick: openExport },
+                {
+                  label: 'Level type package…',
+                  hint: map?.resolution.lvlType ? `all of level type ${map.resolution.lvlType.id} “${map.resolution.lvlType.name}”: its tile libraries in one folder, every map’s table rows in one file per table (.zip)` : 'needs a map whose level is in the game',
+                  onClick: () => map?.resolution.lvlType && setDialog('typepkg'),
+                },
                 { label: 'Picture…', hint: 'the whole map or the selection (.png)', onClick: () => setDialog('image') },
                 { label: 'Copy view', hint: `the map pane as a picture${kb['view.snapshot'] ? ` (${kb['view.snapshot']})` : ''}`, onClick: () => void copyView() },
               ],
@@ -4118,7 +4156,7 @@ export function App() {
                 onChange={setWalkBrush}
                 busy={walkBusy}
                 canWrite={canWrite}
-                libraryPath={walkDt1Path(map.path).replace(/^data\/global\/tiles\//i, '')}
+                libraryPath={(gd ? ownTilesPath(gd, map.path, map.resolution.lvlType) : '').replace(/^data\/global\/tiles\//i, '')}
                 tileFlags={{ pending: flagEditCount, saving: savingFlags, onSave: () => void saveTileFlags(), onDiscard: discardTileFlags }}
                 last={walkLast}
                 onDone={exitMode}
@@ -5056,6 +5094,20 @@ export function App() {
             setAcceptedChecks(next);
             notify(accept ? 'Accepted as intended for this map: it no longer shows in the check (see Accepted)' : 'Shown in the check again');
           }}
+        />
+      )}
+      {dialog === 'typepkg' && map?.resolution.lvlType && (
+        <TypePackageDialog
+          gd={data.gd}
+          typeId={map.resolution.lvlType.id}
+          canWrite={canWrite}
+          onGather={async (plan) => {
+            await writeFiles([...plan.copies.map((c) => ({ path: c.to, bytes: c.bytes })), { path: 'data/global/excel/LvlTypes.txt', bytes: serializeTxtTable(plan.types) }]);
+            await reloadTables();
+            notify(`Gathered ${plan.copies.length} tile libraries into one folder and pointed the level type at them (LvlTypes.txt; the old file kept as .bak). The originals are still there.`);
+          }}
+          onExport={(name, zip) => exportBytes(name, zip)}
+          onClose={() => setDialog(null)}
         />
       )}
       {dialog === 'entrytext' && entryTables && (

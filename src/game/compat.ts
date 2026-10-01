@@ -193,7 +193,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
       detail: `${pairs
         .slice(0, 4)
         .map(([p, n]) => `${p.split('|').map(short).join(' and ')} (${n})`)
-        .join('; ')}. For each such cell the game picks one of them at random, so the map looks jumbled in game (and differently each time, and in the editor). ${
+        .join('; ')}. Where those tiles have random variants (a rarity), the game picks among all of them for each cell, so the map looks jumbled in game; where they have none, it always shows the one in the DT1 loaded first (lowest LvlTypes File slot), and DS1 Studio shows the same. ${
         clash.removable.length ? `Every tile the map uses from ${clash.removable.map(short).join(', ')} is in another loaded DT1 too, so removing ${clash.removable.length > 1 ? 'them' : 'it'} leaves one choice per cell.` : 'Each DT1 has tiles only it provides, so keep them and change the clashing cells instead.'
       }`,
       cells: clash.cells,

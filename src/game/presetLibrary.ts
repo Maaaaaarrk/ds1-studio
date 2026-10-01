@@ -81,7 +81,7 @@ export async function comparePasteTiles(clip: Clipboard, target: TileLibrary, re
 }
 
 /** Copy only required missing identities, including variants, animation frames and corner partners. */
-export async function preparePresetLibrary(clip: Clipboard, target: TileLibrary, path: string, read: (path: string) => Promise<Uint8Array | null>, keep?: ReadonlySet<string>) {
+export async function preparePresetLibrary(clip: Clipboard, target: TileLibrary, path: string, read: (path: string) => Promise<Uint8Array | null>, keep?: ReadonlySet<string>, taken?: Set<string>) {
   clip = await resolvePresetSources(clip, read);
   const sources = new Map<string, Uint8Array>();
   const parsed = new Map<string, ReturnType<typeof parseDt1>>();
@@ -111,7 +111,8 @@ export async function preparePresetLibrary(clip: Clipboard, target: TileLibrary,
     if (!matches.length) throw new Error(`Preset tile ${key} no longer exists in ${source}.`);
     picks.push(...matches); needed.set(key, source);
   }
-  const plan = planCustomDt1(picks, sources, new Set(target.entries().map(e => tileKey(e.orientation, e.main, e.sub))));
+  // Numbers to avoid: the map's tiles, or (when given) every library of its level type and its own-tiles file.
+  const plan = planCustomDt1(picks, sources, taken ?? new Set(target.entries().map(e => tileKey(e.orientation, e.main, e.sub))));
   if (plan.skipped.length) throw new Error(plan.skipped.join('\n'));
   const remap = new Map(plan.tiles.filter(t => needed.get(tileKey(t.orientation, t.main, t.sub)) === t.from.dt1).map(t => [tileKey(t.orientation, t.main, t.sub), t]));
   const tileSources = { ...clip.tileSources };

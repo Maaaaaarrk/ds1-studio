@@ -1,4 +1,5 @@
 import { viewPalette } from '../game/openMap';
+import { ownTilesPath } from '../game/ownTiles';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { tileKey } from '../game/dt1Review';
 import type { Dt1, Dt1Tile } from '../formats/dt1';
@@ -476,7 +477,8 @@ function CustomDt1Panel({
   onClose: () => void;
 }) {
   const [name, setName] = useState('');
-  const [folder, setFolder] = useState(DEFAULT_CUSTOM_FOLDER);
+  // The level type's home folder (next to its other libraries; see game/ownTiles.ts), else the old default.
+  const [folder, setFolder] = useState(() => ownTilesPath(gd, map.path, map.resolution.lvlType).replace(/^data\/global\/tiles\//i, '').replace(/\/[^/]*$/, '') || DEFAULT_CUSTOM_FOLDER);
   const [libs, setLibs] = useState<Map<string, Dt1>>(new Map());
   const [plan, setPlan] = useState<CustomDt1Plan | null>(null);
   const [busy, setBusy] = useState(false);

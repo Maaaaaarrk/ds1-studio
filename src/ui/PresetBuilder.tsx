@@ -53,7 +53,8 @@ export function PresetBuilder({ source, gd, onSave, onClose, categories = [] }: 
   const [discard, setDiscard] = useState(false);
   const records = useRef<Dt1Record[]>([]);
   const remapped = useRef(new Map<string, Brush>());
-  const [stagedPath] = useState(() => `data/global/tiles/studio/p${Date.now().toString(36)}.dt1`);
+  // The tiles a preset is built from (its own source, not a level's library): in a folder of their own.
+  const [stagedPath] = useState(() => `data/global/tiles/presets/p${Date.now().toString(36)}.dt1`);
   const sourceBytes = useRef(new Map<string, Uint8Array>());
   const files = useMemo(() => gd.fs.list(p => p.endsWith('.dt1')).sort(), [gd]);
   /** The map's own tile libraries: the builder starts with these (their tiles keep their numbers). */

@@ -72,6 +72,8 @@ export async function planWalkEdit(opts: {
   walkPath: string;
   walk: Uint8Array | null;
   paint: WalkPaint;
+  /** Tile numbers ("o|main|sub") the level type's other libraries use: new tiles avoid them too (a shared file). */
+  extraTaken?: ReadonlySet<string>;
 }): Promise<WalkPlan> {
   const { ds1, lib, paint } = opts;
   const walkKey = normalizePath(opts.walkPath);
@@ -85,6 +87,7 @@ export async function planWalkEdit(opts: {
   // Keys taken by the map's other tile libraries and by the walkability DT1.
   const taken = new Set<string>();
   for (const e of lib.entries()) taken.add(keyStr(e.orientation, e.main, e.sub));
+  for (const k of opts.extraTaken ?? []) taken.add(k);
   for (const r of records) {
     const i = recordInfo(r);
     taken.add(keyStr(i.orientation, i.main, i.sub));
@@ -95,6 +98,7 @@ export async function planWalkEdit(opts: {
   let blockMain = blockerMains.size ? [...blockerMains][0] : -1;
   if (blockMain < 0) {
     const floorMains = new Set(lib.entries().filter((e) => e.orientation === Orientation.Floor).map((e) => e.main));
+    for (const k of opts.extraTaken ?? []) if (k.startsWith('0|')) floorMains.add(Number(k.split('|')[1]));
     for (let m = 63; m >= 0 && blockMain < 0; m--) if (!floorMains.has(m)) blockMain = m;
   }
   const isBlocker = (c: TileCell) => !isEmptyCell(c) && c.mainIndex === blockMain && records.some((r) => !r.blocks.length && recordInfo(r).main === blockMain && recordInfo(r).sub === c.subIndex);

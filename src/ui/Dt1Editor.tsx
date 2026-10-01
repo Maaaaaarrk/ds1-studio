@@ -1,8 +1,11 @@
 import { viewPalette } from '../game/openMap';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isEmptyCell, type WallCell } from '../formats/ds1';
-import { decodeTile, Orientation, type Dt1, type TileImage } from '../formats/dt1';
-import { setManyTilePixels } from '../formats/dt1Paint';
+import { decodeTile, Orientation, parseDt1, type Dt1, type TileImage } from '../formats/dt1';
+import { droppedPixelCount, setManyTilePixels } from '../formats/dt1Paint';
+import { cornerPartner, freeSub, mirrorRecord, rebuildRleRecord } from '../formats/dt1Blocks';
+import { buildDt1, changedRecord, dt1Records, recordInfo, type Dt1Record } from '../formats/dt1Write';
+import { readPng, toPaletteIndices, writeIndexedPng } from '../formats/png';
 import { ImageThumb, PixelPainter } from './PixelPainter';
 import { FloatingWindow } from './FloatingWindow';
 import { TileZoom } from './TileZoom';
@@ -145,6 +148,10 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   const [settingsEdits, setSettingsEdits] = useState<Map<number, Partial<TileSettings>>>(new Map());
   const [sideTab, setSideTab] = useState<'colours' | 'settings'>('colours');
   const [iniMessage, setIniMessage] = useState<string | null>(null);
+  /** The DT1 after clone / mirror / picture imports (not saved yet); null: the file as it is. */
+  const [working, setWorking] = useState<Uint8Array | null>(null);
+  const [cloneSame, setCloneSame] = useState(false);
+  const [opNote, setOpNote] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -159,6 +166,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     setSettingsEdits(new Map());
     setRawBytes(null);
     setIniMessage(null);
+    setWorking(null);
+    setOpNote(null);
     if (!path) return;
     void Promise.all([gd.dt1(path), gd.fs.read(path)]).then(([tiles, bytes]) => {
       if (live) { setDt1(tiles); setRawBytes(bytes); }
@@ -236,7 +245,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     setPicked(prev => selectTileIndices(prev, i, selectionAnchor.current, dt1?.tiles.length ?? 0, { shift, toggle: additive }));
     if (!shift) selectionAnchor.current = i;
   };
-  const discardAllowed = () => !busy && ((!edits.size && !settingsEdits.size && isNeutral(adjust)) || window.confirm('Discard the unsaved pixel, colour and tile-setting changes?'));
+  const discardAllowed = () => !busy && ((!edits.size && !settingsEdits.size && !working && isNeutral(adjust)) || window.confirm('Discard the unsaved pixel, colour and tile-setting changes?'));
   const close = () => { if (discardAllowed()) onClose(); };
 
   // Tile settings (.ini fields): the file's values with pending changes on top.
@@ -297,7 +306,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     setBusy(true);
     setError(null);
     try {
-      const bytes = await gd.fs.read(path);
+      const bytes = working ?? (await gd.fs.read(path));
       if (!bytes) throw new Error(`${path} not found`);
       const painted = edits.size ? setManyTilePixels(bytes, [...edits].map(([tileIndex, image]) => ({ tileIndex, image }))) : bytes;
       const recoloured = changes ? recolorDt1(painted, remap, [...picked]) : painted;
@@ -309,6 +318,104 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       setBusy(false);
     }
   };
+
+  // --- Clone, mirror, PNG (the tile list itself changes: pending pixel and setting edits are folded in first) ---
+  const bake = async (): Promise<Uint8Array> => {
+    const base = working ?? (await gd.fs.read(path));
+    if (!base) throw new Error(`${path} not found`);
+    const painted = edits.size ? setManyTilePixels(base, [...edits].map(([tileIndex, image]) => ({ tileIndex, image }))) : base;
+    return settingsEdits.size ? writeTileSettings(painted, settingsEdits) : painted;
+  };
+  const useWorking = (next: Uint8Array, select: number[], note: string) => {
+    setWorking(next);
+    setRawBytes(next);
+    setDt1(parseDt1(next));
+    setEdits(new Map());
+    setSettingsEdits(new Map());
+    setPicked(new Set(select));
+    setOpNote(note);
+  };
+  /** The picked tiles plus the other half of any north-corner wall among them (the halves go together). */
+  const withPartners = (records: Dt1Record[]) => {
+    const out = new Set(picked);
+    for (const i of picked) {
+      const info = recordInfo(records[i]);
+      const other = cornerPartner(info.orientation);
+      if (other === null) continue;
+      records.forEach((r, j) => {
+        const o = recordInfo(r);
+        if (o.orientation === other && o.main === info.main && o.sub === info.sub) out.add(j);
+      });
+    }
+    return [...out].sort((a, b) => a - b);
+  };
+  const runOp = (fn: () => Promise<void>) => {
+    setError(null);
+    fn().catch((e) => setError((e as Error).message));
+  };
+  const cloneTiles = () =>
+    runOp(async () => {
+      const records = dt1Records(await bake());
+      const targets = withPartners(records);
+      const added: Dt1Record[] = [];
+      const subFor = new Map<string, number>();
+      for (const i of targets) {
+        const info = recordInfo(records[i]);
+        let sub = info.sub;
+        if (!cloneSame) {
+          // Corner halves share one new number.
+          const k = `${Math.min(info.orientation, cornerPartner(info.orientation) ?? info.orientation)}|${info.main}|${info.sub}`;
+          sub = subFor.get(k) ?? freeSub([...records, ...added], info.orientation, info.main);
+          if (sub < 0) throw new Error(`No free sub index left for main index ${info.main}.`);
+          subFor.set(k, sub);
+        }
+        added.push(changedRecord(records[i], { sub }));
+      }
+      const next = buildDt1([...records, ...added]);
+      useWorking(next, added.map((_, k) => records.length + k), `Cloned ${added.length} tile${added.length === 1 ? '' : 's'}${cloneSame ? ' under the same numbers (random variants of the originals)' : ' under new sub indices'}; the copies are selected. Save to keep them.`);
+    });
+  const mirrorTiles = () =>
+    runOp(async () => {
+      const records = dt1Records(await bake());
+      const targets = withPartners(records);
+      const next = records.map((r, i) => (targets.includes(i) ? mirrorRecord(r) : r));
+      const turned = targets.filter((i) => recordInfo(next[i]).orientation !== recordInfo(records[i]).orientation).length;
+      useWorking(buildDt1(next), targets, `Mirrored ${targets.length} tile${targets.length === 1 ? '' : 's'}${turned ? `; ${turned} wall${turned === 1 ? '' : 's'} now face${turned === 1 ? 's' : ''} the other way (orientation changed: maps using the old number no longer find ${turned === 1 ? 'it' : 'them'})` : ''}. Clone first to keep the originals. Save to keep it.`);
+    });
+  const exportPng = async () => {
+    const i = [...picked][0];
+    const t = dt1?.tiles[i];
+    const img = t ? (edits.get(i) ?? decodeTile(t)) : null;
+    if (!t || !img) return setError('That tile has no picture.');
+    const where = await exportBytes(`${path.split('/').pop()!.replace(/\.dt1$/i, '')}_${t.orientation}-${t.mainIndex}-${t.subIndex}.png`, writeIndexedPng(img.width, img.height, img.pixels, palette));
+    if (where) setOpNote(`Exported ${where} (${img.width}×${img.height}, indexed with the palette shown; index 0 transparent). Edit it keeping the size and import it back.`);
+  };
+  const importPng = () =>
+    runOp(async () => {
+      const i = [...picked][0];
+      const t = dt1?.tiles[i];
+      const geo = t ? decodeTile(t) : null;
+      if (!t || !geo) throw new Error('That tile has no picture to replace.');
+      const bytes = await importBytes('png');
+      if (!bytes) return;
+      const png = readPng(bytes);
+      if (png.width !== geo.width || png.height !== geo.height) throw new Error(`The picture is ${png.width}×${png.height}; this tile is ${geo.width}×${geo.height}. Keep the exported size (it places the tile).`);
+      const { pixels, remapped } = toPaletteIndices(png, palette, pal.usable);
+      const image = { ...geo, pixels };
+      const colours = remapped ? `; ${remapped} pixel${remapped === 1 ? '' : 's'} took the nearest ${pal.usable ? 'Act 0 ' : ''}colour` : '';
+      const rle = t.blocks.length > 0 && t.blocks.every((b) => b.format !== 1);
+      if (rle) {
+        // Walls: the blocks are rebuilt from the picture, so it may have any shape inside its area.
+        const records = dt1Records(await bake());
+        records[i] = rebuildRleRecord(records[i], image);
+        useWorking(buildDt1(records), [i], `Imported the picture into tile ${t.orientation}/${t.mainIndex}/${t.subIndex}${colours}. Save to keep it.`);
+      } else {
+        // Floors and roofs keep their diamond: the picture is painted into it.
+        const dropped = droppedPixelCount(t, image);
+        setEdits((m) => new Map(m).set(i, image));
+        setOpNote(`Imported the picture into tile ${t.orientation}/${t.mainIndex}/${t.subIndex}${colours}${dropped ? `; ${dropped} pixels outside the tile's diamond were left out` : ''}. Save to keep it.`);
+      }
+    });
 
   const set = <K extends keyof Adjust>(k: K, v: Adjust[K]) => setAdjust((a) => ({ ...a, [k]: v }));
   return (
@@ -347,6 +454,21 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           <button className="btn small" disabled={picked.size !== 1} onClick={() => setPainting([...picked][0])} title="Paint the selected tile pixel by pixel (or double-click a tile)">
             Paint pixels…
           </button>
+          <button className="btn small" disabled={!picked.size || busy} onClick={cloneTiles} title="Copy the selected tiles into this DT1 under a new, unused sub index (or the same number, as random variants: see the tick box). The originals stay.">
+            Clone
+          </button>
+          <label className="small" title="Give the copies the same number as the originals: the game then picks between them at random (by rarity), for variation.">
+            <input type="checkbox" checked={cloneSame} onChange={(e) => setCloneSame(e.target.checked)} /> same number
+          </label>
+          <button className="btn small" disabled={!picked.size || busy} onClick={mirrorTiles} title="Flip the selected tiles left to right: pixels, walkability flags, and walls turn to face the other way (left ↔ right). Clone first to keep the originals.">
+            Mirror
+          </button>
+          <button className="btn small" disabled={picked.size !== 1} onClick={() => void exportPng()} title="Save the selected tile as an indexed PNG (the palette shown here) to edit in GIMP or similar">
+            Export PNG…
+          </button>
+          <button className="btn small" disabled={picked.size !== 1 || busy} onClick={importPng} title="Replace the selected tile's picture with a PNG of the same size (an exported one, edited). Colours are matched to the palette.">
+            Import PNG…
+          </button>
           {edits.size > 0 && (
             <span className="small accent-text">
               {edits.size} tile{edits.size === 1 ? '' : 's'} painted{' '}
@@ -377,6 +499,11 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             ))}
           </select>
         </div>
+        {(opNote || error) && painting === null && (
+          <p className={`small dte-note${error ? ' error-text' : ''}`}>
+            {error ?? opNote}
+          </p>
+        )}
         {painting !== null && dt1 && (
           <PixelPainter
             key={painting}

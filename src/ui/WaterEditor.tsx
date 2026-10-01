@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ownTilesPath } from '../game/ownTiles';
 import { decodeTile, parseDt1 } from '../formats/dt1';
 import { buildDt1, dt1Records, type Dt1Record } from '../formats/dt1Write';
 import { setTilePixels } from '../formats/dt1Paint';
@@ -65,8 +66,10 @@ export function WaterEditor({ gd, map, canSave, onSave, onClose }: Props) {
       setOldKey(null); setOriginal(null); setEditingPath(''); setOverwrite(false); setFrame(0); setChanged(true); setError('');
     } catch (e) { setError(String(e)); }
   };
-  const newPath = 'data/global/tiles/studio/' + name + '.dt1';
-  const problem = overwrite ? null : customNameProblem(name, 'studio');
+  // New water goes next to the level type's other libraries (its home folder: see game/ownTiles.ts).
+  const folder = useMemo(() => ownTilesPath(gd, map.path, map.resolution.lvlType).replace(/^data\/global\/tiles\//i, '').replace(/\/[^/]*$/, ''), [gd, map]);
+  const newPath = `data/global/tiles/${folder}/${name}.dt1`;
+  const problem = overwrite ? null : customNameProblem(name, folder);
   const updateFrames = (next: Dt1Record[]) => { setFrames(next); setChanged(true); };
   return <Modal title="Animated water editor" wide onClose={close}>
     {painting && image && tiles[index] ? <PixelPainter tile={tiles[index]} tileIndex={index} image={image} palette={map.palette} onDone={edited => {
@@ -119,7 +122,7 @@ export function WaterEditor({ gd, map, canSave, onSave, onClose }: Props) {
         {!overwrite && <label>New DT1 name <input value={name} onChange={e => setName(e.target.value)} /></label>}
         <label><input type="checkbox" checked={addToMap} onChange={e => setAddToMap(e.target.checked)} /> Add to this map</label>
       </div>
-      <p className="muted small">{overwrite ? editingPath + ' — unrelated tiles stay intact; the original is backed up.' : 'Saved in data/global/tiles/studio. Tile numbers are assigned safely when added to the map.'}</p>
+      <p className="muted small">{overwrite ? editingPath + ' — unrelated tiles stay intact; the original is backed up.' : `Saved in data/global/tiles/${folder}, next to the level’s other tile libraries. Tile numbers are assigned safely when added to the map.`}</p>
       {(error || problem) && <p className="error-text" role="alert">{error || problem}</p>}
       <div className="modal-actions"><button className="btn" onClick={close}>Close</button><button className="btn primary" disabled={!canSave || frames.length < 2 || !!problem} onClick={async () => {
         if (overwrite && !window.confirm('Update this animation in ' + editingPath + '? Every map using this tile group will see the edited animation. A backup will be kept.')) return;

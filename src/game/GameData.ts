@@ -331,8 +331,7 @@ export class TileLibrary {
       const k = TileLibrary.key(t.orientation, t.mainIndex, t.subIndex);
       let list = this.byKey.get(k);
       if (!list) this.byKey.set(k, (list = []));
-      // Newest first, like the game's tile lists: when a key has no random variants (all rarity 0) the tile loaded last
-      // is the one used, so a DT1 later in LvlTypes replaces same-numbered tiles of earlier ones (mods rely on this).
+      // Newest first (callers that want file order reverse it). Which one the game shows is pick()'s business.
       list.unshift(t);
     }
   }
@@ -382,14 +381,37 @@ export class TileLibrary {
     return new Set(r).size === r.length && Math.min(...r) === 0;
   }
 
-  /** Picks a variant deterministically from a per-cell seed, weighted by rarity (like the game's random pick). */
+  /**
+   * Which of several same-numbered tiles with no rarity the game shows: the last one of the DT1 loaded FIRST (lowest
+   * LvlTypes File slot), as the game's tile lists hold them and as WinDS1 shows them. Another DT1 with the same numbers
+   * later in the list does not replace it.
+   */
+  private gameChoice(list: Dt1Tile[]): Dt1Tile {
+    const order = (t: Dt1Tile) => {
+      const src = this.sources.get(t);
+      const at = src ? this.loaded.findIndex((l) => l.path === src.path) : Number.MAX_SAFE_INTEGER;
+      return { at: at < 0 ? Number.MAX_SAFE_INTEGER : at, index: src?.index ?? -1 };
+    };
+    let best = list[0];
+    let bo = order(best);
+    for (const t of list) {
+      const o = order(t);
+      if (o.at < bo.at || (o.at === bo.at && o.index > bo.index)) (best = t), (bo = o);
+    }
+    return best;
+  }
+
+  /**
+   * Picks a variant deterministically from a per-cell seed: weighted by rarity among those with one (like the game's
+   * random pick, which also spans DT1s); with no rarity at all, the game's fixed choice (gameChoice).
+   */
   pick(orientation: number, main: number, sub: number, seed: number): Dt1Tile | null {
     const list = this.variants(orientation, main, sub);
     if (list.length <= 1) return list[0] ?? null;
     // Animated tiles use "rarity" as a frame index; show frame 0.
     if (TileLibrary.isAnimation(list)) return list.find((t) => t.rarity === 0) ?? list[0];
     const total = list.reduce((s, t) => s + Math.max(t.rarity, 0), 0);
-    if (total === 0) return list[0];
+    if (total === 0) return this.gameChoice(list);
     let r = hash(seed) % total;
     for (const t of list) {
       r -= Math.max(t.rarity, 0);
