@@ -89,3 +89,17 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # The AppImage must not carry the build machine's Wayland/xkb/xcb libraries: on current Mesa they break EGL
+      # ("Could not create default EGL display: EGL_BAD_PARAMETER", a blank window). Tauri CLI 2.12+ leaves them out;
+      # this fails the run if one ever comes back.
+      - name: Check the AppImage's bundled libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          img=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)
+          cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/$img" --appimage-extract > /dev/null
+          bad=$(find squashfs-root -name 'libwayland-*.so*' -o -name 'libxkbcommon*.so*' -o -name 'libxcb*.so*' -o -name 'libEGL*.so*' -o -name 'libGL*.so*' -o -name 'libgbm*.so*' -o -name 'libdrm*.so*')
+          if [ -n "$bad" ]; then echo "::error::The AppImage bundles host graphics libraries:"; echo "$bad"; exit 1; fi
+          grep -rl 'GDK_BACKEND=x11' squashfs-root/apprun-hooks 2>/dev/null && { echo "::error::The AppImage forces GDK_BACKEND=x11"; exit 1; } || true
+          echo "AppImage OK: no bundled Wayland/xkb/xcb/EGL/GL libraries"
