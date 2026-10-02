@@ -229,7 +229,8 @@ function TilePaletteImpl({ lib, palette, layerKind, onLayerKindChange, brush, mi
   const category = layerKind === 'floor' ? 'floors' : layerKind === 'shadow' ? 'shadows' : ['floors', 'shadows'].includes(filter) ? 'walls' : filter;
   const [query, setQuery] = useState('');
   const [preview, hover, hidePreview] = usePreview();
-  const [dt1, setDt1] = useState<string>('all');
+  /** The library picked in the list; it stays picked when switching between Floors, Walls, Roofs… */
+  const [chosen, setDt1] = useState<string>('all');
   const grid = useRef<HTMLDivElement>(null);
   /** Set by a focus request until the focused thumbnail has been scrolled into view. */
   const pendingScroll = useRef<{ seq: number; dt1: string | null } | null>(null);
@@ -263,7 +264,7 @@ function TilePaletteImpl({ lib, palette, layerKind, onLayerKindChange, brush, mi
   }, []);
 
   // A new map (tile library) starts in the combined view.
-  useEffect(() => setDt1('all'), [lib, layerKind]);
+  useEffect(() => setDt1('all'), [lib]);
 
   // Reveal a focused tile: open its DT1, clear filters, then scroll it into view.
   useEffect(() => {
@@ -283,6 +284,8 @@ function TilePaletteImpl({ lib, palette, layerKind, onLayerKindChange, brush, mi
         .filter((l) => l.count > 0),
     [lib, layerKind],
   );
+  // The picked library when it has tiles for this layer; else all of them (the pick comes back on a layer it has).
+  const dt1 = chosen !== 'all' && dt1s.some((d) => d.path === chosen) ? chosen : 'all';
 
   const entries = useMemo((): Entry[] => {
     const test = (o: number) => tileCategory(o) === category;
@@ -318,7 +321,7 @@ function TilePaletteImpl({ lib, palette, layerKind, onLayerKindChange, brush, mi
         <div className="chips" aria-label="Tile categories">
           {CATEGORIES.filter(c => onLayerKindChange || c.kind === layerKind).map(c =>
             <button key={c.id} className={`chip${category === c.id ? ' active' : ''}`} title={c.id === 'walls' ? 'Upper and lower wall pieces' : c.label}
-              onClick={() => { setFilter(c.id); setDt1('all'); onLayerKindChange?.(c.kind); }}>{c.label}</button>)}
+              onClick={() => { setFilter(c.id); onLayerKindChange?.(c.kind); }}>{c.label}</button>)}
         </div>
         <select className="dt1-select" value={dt1} onChange={(e) => setDt1(e.target.value)} title="Browse one tile library (DT1) at a time">
           <option value="all">All tile libraries (combined)</option>
@@ -384,6 +387,7 @@ function TilePaletteImpl({ lib, palette, layerKind, onLayerKindChange, brush, mi
           );
         })}
         {entries.length === 0 && <div className="muted small pad">No tiles for this layer in {dt1 === 'all' ? 'the loaded DT1s' : 'this DT1'}.</div>}
+        {chosen !== dt1 && <div className="muted small pad">{shortPath(chosen)} has no tiles for this layer: showing all libraries (it comes back on a layer it has tiles for).</div>}
       </div>
       <Splitter axis="y" direction={1} size={gridH} onResize={setGridH} className="pane-handle" title="Drag to make the tiles pane taller or shorter" />
       {preview && <TilePreview p={preview} palette={palette} />}

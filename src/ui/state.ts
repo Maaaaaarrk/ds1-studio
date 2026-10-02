@@ -17,6 +17,11 @@ export interface Visibility {
   upperWalls: boolean;
   wallCategories?: import('../game/wallCategories').WallCategories;
   specials: boolean;
+  /**
+   * Objects and NPCs (markers, sprites, paths) on the map. Off: hidden, and copying, cutting or clearing an area leaves
+   * them where they are. The Objects tool shows them whatever this is.
+   */
+  objectsLayer: boolean;
   objects: boolean;
   paths: boolean;
   groups: boolean;
@@ -45,6 +50,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   lowerWalls: true,
   upperWalls: true,
   specials: true,
+  objectsLayer: true,
   objects: true,
   paths: true,
   groups: false,
@@ -130,7 +136,7 @@ const GROUPS = ['upperWalls', 'lowerWalls', 'roofs', 'shadows', 'specials'] as c
 
 /** `v` with every layer shown (the other view settings kept). */
 export function allLayersShown(v: Visibility): Visibility {
-  return { ...v, floors: v.floors.map(() => true), walls: v.walls.map(() => true), upperWalls: true, lowerWalls: true, roofs: true, shadows: true, specials: true };
+  return { ...v, floors: v.floors.map(() => true), walls: v.walls.map(() => true), upperWalls: true, lowerWalls: true, roofs: true, shadows: true, specials: true, objectsLayer: true };
 }
 
 /** `v` showing only `slot` (a wall group shows across every wall layer; a wall layer shows all its groups). */

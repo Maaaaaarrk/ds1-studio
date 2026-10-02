@@ -261,6 +261,13 @@ export function App() {
   });
   /** Every visibility change keeps one view mode at a time (see ViewMode). */
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
+  /** What the map draws: the Objects switch in the layer bar hides objects (except with the Objects tool). */
+  const mapVisibility = useMemo(
+    () => (visibility.objectsLayer || tool === 'object' ? visibility : { ...visibility, objects: false, sprites: false, paths: false }),
+    [visibility, tool],
+  );
+  /** Objects go along with area copies, cuts and clears only while they're shown. */
+  const objectsTaken = visibility.objectsLayer || tool === 'object';
   const visibilityNow = useRef(visibility);
   visibilityNow.current = visibility;
   /** The layers shown before showing one alone (Shift+number or a middle click in the layer bar). */
@@ -1485,18 +1492,21 @@ export function App() {
           }))
           .filter((l) => l.cells.some((c) => !isEmptyCell(c))),
       };
+      // Objects switched off in the layer bar stay behind.
+      const hiddenObjects = objectsTaken ? 0 : (shown.objects?.length ?? 0);
+      if (hiddenObjects) shown.objects = undefined;
       setClipboard(shown);
       const objects = shown.objects?.length ?? 0;
       if (cut) clearArea(selection, true, `Cut ${size}`);
       const layerNames = shown.layers.map((l) => layerLabel(l.layer)).join(', ') || 'nothing visible';
       notify(
-        `${cut ? 'Cut' : 'Copied'} ${size} (${layerNames}${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${left ? ` · ${left} hidden tile${left === 1 ? '' : 's'} left out` : ''} · move over the map to preview, click to paste, Esc when done`,
+        `${cut ? 'Cut' : 'Copied'} ${size} (${layerNames}${objects ? ` + ${objects} object${objects === 1 ? '' : 's'}` : ''})${left ? ` · ${left} hidden tile${left === 1 ? '' : 's'} left out` : ''}${hiddenObjects ? ` · ${hiddenObjects} hidden object${hiddenObjects === 1 ? '' : 's'} left out` : ''} · move over the map to preview, click to paste, Esc when done`,
       );
       // Straight into pasting: the copied block follows the mouse to show where it would go.
       setClipPane(true);
       setPasting(true);
     },
-    [doc, selection, notify, onlyLayer, cellShown, tool, selectedObject, objectLabel, objectGroup], // eslint-disable-line react-hooks/exhaustive-deps
+    [doc, selection, notify, onlyLayer, cellShown, tool, selectedObject, objectLabel, objectGroup, objectsTaken], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /** Before pasting into a map that lacks the copied tiles' DT1s, offer to load them. */
   const [pasteOffer, setPasteOffer] = useState<{
@@ -1591,7 +1601,8 @@ export function App() {
     if (!doc) return;
     // Clearing everything takes what is on screen (see cellShown); the active layer is cleared as it is.
     const edits = clearEdits(doc, r, everything ? doc.layers() : [activeLayer]).filter((e) => !everything || cellShown(e.layer, e.x, e.y, doc.cell(e.layer, e.x, e.y)));
-    const inside = everything ? doc.ds1.objects.filter((o) => objectInRect(o, r)).length : 0;
+    // Objects switched off in the layer bar stay where they are.
+    const inside = everything && objectsTaken ? doc.ds1.objects.filter((o) => objectInRect(o, r)).length : 0;
     if (!inside) {
       if (doc.apply(edits, label)) bump();
       return;
@@ -1615,7 +1626,7 @@ export function App() {
       const edits = clearEdits(doc, selection, layers).filter(e => cellShown(e.layer, e.x, e.y, doc.cell(e.layer, e.x, e.y)));
       if (doc.apply(edits, `Clear ${onlyLayer ? layerLabel(onlyLayer) : 'visible tiles'} ${size}`)) bump();
     },
-    [doc, selection, activeLayer, onlyLayer, cellShown], // eslint-disable-line react-hooks/exhaustive-deps
+    [doc, selection, activeLayer, onlyLayer, cellShown, objectsTaken], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const fillSelection = useCallback(() => {
     if (!doc || !selection) return;
@@ -4154,7 +4165,7 @@ export function App() {
           <MapView
             map={map}
             scene={scene}
-            visibility={visibility}
+            visibility={mapVisibility}
             hover={hover}
             tool={tool}
             ghost={ghost}

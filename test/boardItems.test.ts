@@ -57,7 +57,8 @@ describe('showing one layer alone (#7)', () => {
   });
 
   it('show all turns every layer on and keeps the rest of the view', () => {
-    const a = allLayersShown({ ...soloLayer(v, 'shadows'), grid: true });
+    const a = allLayersShown({ ...soloLayer(v, 'shadows'), grid: true, objectsLayer: false });
+    expect(a.objectsLayer).toBe(true);
     expect(a.floors.every(Boolean) && a.walls.every(Boolean) && a.roofs && a.specials).toBe(true);
     expect(a.grid).toBe(true);
   });
