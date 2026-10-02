@@ -20,6 +20,7 @@ import type { Ds1 } from '../formats/ds1';
 import { canvasToWorld } from '../render/inputProjection';
 import { combinedCellAt, cycleWithWheel, tileEmphasis } from '../game/mapSelection';
 import { wallCategory } from '../game/wallCategories';
+import { stepAtOrBelow, stepZoom, WheelSteps } from './zoomSteps';
 
 export interface HoverInfo {
   cellX: number;
@@ -54,6 +55,8 @@ interface Props {
   /** Display name for an object marker. */
   objectLabel: (o: Ds1Object) => string;
   selectedObject: number | null;
+  /** Bumped while objects move (a drag): redraws them without rebuilding the tiles. */
+  objectsRevision?: number;
   /** More objects selected with it (double-click selects every one of a kind), highlighted too. */
   selectedObjects?: ReadonlySet<number> | null;
   /** A double click on the map, at this world point. */
@@ -97,7 +100,9 @@ interface Props {
   /** Shift+wheel over the map: step through the tiles under the cursor (+1 = further back). */
   onCycle: (dir: 1 | -1, world: [number, number]) => void;
   /** Input and label preferences: wheel-zoom and arrow-key speeds (1 = normal), what Shift+wheel does, object names. */
-  input?: { zoomSpeed: number; arrowSpeed: number; shiftWheel: 'layers' | 'zoom'; objectLabels: boolean };
+  input?: { zoomSpeed: number; smoothZoom?: boolean; arrowSpeed: number; shiftWheel: 'layers' | 'zoom'; objectLabels: boolean };
+  /** When `signal` changes: zoom a step in (1) or out (-1), or to 100% ('100'), around the middle of the view. */
+  zoomCommand?: { to: 1 | -1 | '100'; signal: number } | null;
   /** When `signal` changes, centre the view on this world point (zooming in if far out). */
   centerOn?: { x: number; y: number; signal: number } | null;
   /** Label of a special tile (e.g. where a warp leads); defaults to what the tile is. */
@@ -281,7 +286,8 @@ export function MapView(props: Props) {
     const c = glCanvas.current!;
     const { minX, minY, maxX, maxY } = latest.current.scene.bounds;
     const dpr = window.devicePixelRatio || 1;
-    const zoom = Math.min((c.clientWidth * dpr) / (maxX - minX + 160), (c.clientHeight * dpr) / (maxY - minY + 240), 2 * dpr);
+    const free = Math.min((c.clientWidth * dpr) / (maxX - minX + 160), (c.clientHeight * dpr) / (maxY - minY + 240), 2 * dpr);
+    const zoom = latest.current.input?.smoothZoom ? free : stepAtOrBelow(free);
     camera.current = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, zoom };
     latest.current.onZoom(zoom / dpr);
     dirty.current = true;
@@ -338,19 +344,33 @@ export function MapView(props: Props) {
     const c = props.centerOn;
     if (!c?.signal) return;
     const dpr = window.devicePixelRatio || 1;
-    const zoom = Math.max(camera.current.zoom, 0.6 * dpr);
+    const near = Math.max(camera.current.zoom, 0.6 * dpr);
+    const zoom = latest.current.input?.smoothZoom || near === camera.current.zoom ? near : stepZoom(near, 1);
     camera.current = { x: c.x, y: c.y, zoom };
     latest.current.onZoom(zoom / dpr);
     dirty.current = true;
   }, [props.centerOn?.signal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const z = props.zoomCommand;
+    if (!z?.signal) return;
+    const cam = camera.current;
+    const dpr = window.devicePixelRatio || 1;
+    const smooth = latest.current.input?.smoothZoom;
+    cam.zoom = z.to === '100' ? (smooth ? dpr : 1) : smooth ? Math.min(Math.max(cam.zoom * (z.to > 0 ? 1.25 : 0.8), 0.05), 8 * dpr) : stepZoom(cam.zoom, z.to);
+    latest.current.onZoom(cam.zoom / dpr);
+    dirty.current = true;
+  }, [props.zoomCommand?.signal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const g = props.gameView;
     if (!g?.signal) return;
     const c = glCanvas.current!;
     const dpr = window.devicePixelRatio || 1;
-    // Exactly 100% (one game pixel per screen pixel, as in game) when the screen fits; smaller only when it doesn't.
-    const zoom = Math.min(dpr, (c.clientWidth * dpr) / (g.width + 40), (c.clientHeight * dpr) / (g.height + 40));
+    // Exactly 100% (one game pixel per screen pixel, as in game) when the screen fits; smaller only when it doesn't
+    // (a step down that keeps pixels sharp, unless zooming smoothly).
+    const free = Math.min(latest.current.input?.smoothZoom ? dpr : 1, (c.clientWidth * dpr) / (g.width + 40), (c.clientHeight * dpr) / (g.height + 40));
+    const zoom = latest.current.input?.smoothZoom ? free : stepAtOrBelow(free);
     const cam = camera.current;
     camera.current = { x: g.center?.[0] ?? cam.x, y: g.center?.[1] ?? cam.y, zoom };
     latest.current.onZoom(zoom / dpr);
@@ -521,7 +541,7 @@ export function MapView(props: Props) {
     flushObjects(Infinity);
     built.current = { instances, slotIdx, slotItems, slotBase, animObjs, animFloors };
     uploadWithGhosts();
-  }, [scene, visibility, tool, sprites, animations, selectedObject, props.selectedObjects, popsInside, !!props.walkBrush]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scene, visibility, tool, sprites, animations, selectedObject, props.selectedObjects, popsInside, !!props.walkBrush, props.objectsRevision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A new animation frame: only the animated objects' and floors' instances change.
   useEffect(() => {
@@ -592,7 +612,7 @@ export function MapView(props: Props) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [selection, pasteRect, selectedObject, props.selectedObjects, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost, props.doomed, props.input?.objectLabels]);
+  }, [selection, pasteRect, selectedObject, props.selectedObjects, objectLabel, walk, props.resizeMode, props.marks, focus, automapImage, props.sprites, props.animations, hover, props.specialLabel, props.pops, props.walkMarks, props.walkBrush, props.light, props.playerLight, props.objectGhost, props.doomed, props.input?.objectLabels, props.objectsRevision]);
 
   // Input.
   useEffect(() => {
@@ -605,9 +625,12 @@ export function MapView(props: Props) {
     /** Where a right/middle button went down, to tell a click from a pan. */
     let panStart: { x: number; y: number } | null = null;
     let stroke: [number, number] | null = null;
+    /** The sub-tile under the cursor at the last object-drag move. */
+    let strokeSub: [number, number] | null = null;
     let pointer: number | null = null;
     let space = false;
     let shiftHeld = false;
+    const wheelSteps = new WheelSteps();
     const dpr = () => window.devicePixelRatio || 1;
     const toWorld = (ev: MouseEvent): [number, number] => {
       const r = el.getBoundingClientRect();
@@ -644,6 +667,7 @@ export function MapView(props: Props) {
       const toolDrag = ev.button === 0 && !space;
       if (toolDrag) {
         stroke = toCell(ev);
+        strokeSub = null;
         latest.current.onStroke('start', [stroke], toWorld(ev), { alt: ev.altKey, shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey });
       } else if (ev.button <= 2) {
         pan = { x: ev.clientX, y: ev.clientY };
@@ -681,6 +705,15 @@ export function MapView(props: Props) {
           if (stroke) latest.current.onStroke('move', [[cx, cy]], toWorld(ev));
         }
         if (stroke) stroke = [cx, cy];
+      } else if (stroke && latest.current.tool === 'object') {
+        // Objects stand on sub-tiles (5 per tile side): a drag follows the cursor sub-tile by sub-tile.
+        const [fx, fy] = worldToSubTile(...toWorld(ev));
+        const sub: [number, number] = [Math.round(fx), Math.round(fy)];
+        if (!strokeSub || strokeSub[0] !== sub[0] || strokeSub[1] !== sub[1]) {
+          strokeSub = sub;
+          latest.current.onStroke('move', [[cx, cy]], toWorld(ev));
+        }
+        stroke = [cx, cy];
       } else if (stroke && (cx !== stroke[0] || cy !== stroke[1])) {
         latest.current.onStroke('move', cellLine(stroke, [cx, cy]).slice(1), toWorld(ev));
         stroke = [cx, cy];
@@ -737,8 +770,16 @@ export function MapView(props: Props) {
       }
       // Windows turns Shift+wheel into a horizontal scroll.
       const dy = ev.deltaY || (ev.shiftKey ? ev.deltaX : 0);
-      const factor = Math.exp(-dy * (ev.ctrlKey ? 0.01 : 0.0015) * (s.input?.zoomSpeed ?? 1));
-      const zoom = Math.min(Math.max(cam.zoom * factor, 0.05), 8 * dpr());
+      let zoom: number;
+      if (s.input?.smoothZoom) {
+        const factor = Math.exp(-dy * (ev.ctrlKey ? 0.01 : 0.0015) * (s.input?.zoomSpeed ?? 1));
+        zoom = Math.min(Math.max(cam.zoom * factor, 0.05), 8 * dpr());
+      } else {
+        // In steps that keep pixels sharp (a touchpad pinch, Ctrl+wheel, adds up faster).
+        const n = wheelSteps.take(ev.deltaMode === 1 ? dy * 33 : dy, (s.input?.zoomSpeed ?? 1) * (ev.ctrlKey ? 4 : 1), ev.timeStamp);
+        if (!n) return;
+        zoom = stepZoom(cam.zoom, n);
+      }
       // Keep the world point under the cursor fixed.
       cam.x = wx - (wx - cam.x) * (cam.zoom / zoom);
       cam.y = wy - (wy - cam.y) * (cam.zoom / zoom);

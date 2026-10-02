@@ -25,6 +25,8 @@ export interface Prefs {
   objectLabels: boolean;
   /** Mouse-wheel zoom speed (1 = normal). */
   zoomSpeed: number;
+  /** Zoom freely (any amount) instead of in steps that keep pixels sharp (1/8×, 1/4×, 1/2×, 3/4×, 1×, 2×, 3×…). */
+  smoothZoom: boolean;
   /** What Shift+wheel does: step through layers (Alt+wheel zooms) or zoom (Alt+wheel steps layers). */
   shiftWheel: 'layers' | 'zoom';
   /** How many maps Recent keeps. */
@@ -55,6 +57,7 @@ export const DEFAULT_PREFS: Prefs = {
   showMinimap: true,
   objectLabels: true,
   zoomSpeed: 1,
+  smoothZoom: false,
   shiftWheel: 'layers',
   recentCount: 12,
   checkAfterSave: false,

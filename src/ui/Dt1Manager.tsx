@@ -1,5 +1,5 @@
 import { viewPalette } from '../game/openMap';
-import { ownTilesPath } from '../game/ownTiles';
+import { keysOf, ownTilesPath } from '../game/ownTiles';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { tileKey } from '../game/dt1Review';
 import type { Dt1, Dt1Tile } from '../formats/dt1';
@@ -258,12 +258,19 @@ function remapPalette(palette: Palette, remap: Uint8Array): Palette {
 
 /** The picked tiles' key, per library. */
 const pickKey = (p: TilePick) => `${normalizePath(p.dt1)}#${p.index}`;
+/** How many tiles a DT1 file holds. */
+const dt1Count = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(268, true);
 const DEFAULT_CUSTOM_FOLDER = 'PD2assets/custom';
 const FOLDER_OK = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/;
 
 interface LibraryProps extends Omit<Props, 'usage'> {
-  /** Writes a custom DT1 built from picked tiles and adds it to the map (null: no writable mod folder). */
-  onCreateCustom: ((req: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean }) => Promise<void>) | null;
+  /** Placed tiles per DT1 path (normalized), to warn before removing a library in use. */
+  usage?: Map<string, number>;
+  /**
+   * Writes a custom DT1 built from picked tiles and adds it to the map (null: no writable mod folder). `existing`
+   * given: the tiles are added after those of that DT1 (at `path`) instead.
+   */
+  onCreateCustom: ((req: { path: string; plan: CustomDt1Plan; bytes: Uint8Array; actSafe: boolean; existing?: Uint8Array | null }) => Promise<void>) | null;
   /** Brings DT1 files, or folders of them, from the computer into the mod (null: no writable mod folder). */
   onImportFiles: ((mode: 'files' | 'folders') => void) | null;
   /** DT1s just imported: the first is shown, those the map does not load yet come chosen. */
@@ -275,7 +282,7 @@ interface LibraryProps extends Omit<Props, 'usage'> {
  * through (hover to enlarge). Either whole libraries are chosen and added to the open map (like the Tile libraries
  * dialog), or single tiles from any of them are ticked and built into a new custom DT1 (see game/customDt1.ts).
  */
-export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFiles, reveal, onClose }: LibraryProps) {
+export function Dt1LibraryDialog({ map, gd, usage, onApply, onCreateCustom, onImportFiles, reveal, onClose }: LibraryProps) {
   const current = useMemo(() => map.lib.loaded.filter((l) => !isBuiltinPath(l.path)).map((l) => l.path), [map]);
   const inMap = useMemo(() => new Set(current.map(normalizePath)), [current]);
   const all = useMemo(() => gd.fs.list((p) => p.endsWith('.dt1') && p.startsWith('data/global/tiles/')), [gd]);
@@ -285,6 +292,10 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
   const [chosen, setChosen] = useState<string[]>([]);
   const [picks, setPicks] = useState<TilePick[]>([]);
   const [toAct0, setToAct0] = useState(true);
+  /** "Edit a custom DT1": the DT1 the picked tiles are added to (null: they make a new one). */
+  const [addTo, setAddTo] = useState<string | null>(null);
+  /** A library of the map waiting for "Remove from the map?" (Delete). */
+  const [removing, setRemoving] = useState<string | null>(null);
   // Colours: the library's own act (from its folder), the map's act, or Act 0 (magenta = colours that change by act).
   // A map shown in the Act 0 colours (a new map) opens the library in them too.
   const [palMode, setPalMode] = useState<'own' | 'map' | 'act0'>(map.paletteAct === ACT0_PALETTE ? 'act0' : 'own');
@@ -322,12 +333,32 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // The import window opened from here closes itself first.
-      if (e.key === 'Escape' && document.querySelectorAll('[role=dialog]').length <= 1) onClose();
+      if (e.key === 'Escape' && document.querySelectorAll('[role=dialog]').length <= 1) {
+        if (removingRef.current) setRemoving(null);
+        else onClose();
+      }
+      const t = e.target as HTMLElement;
+      const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
+      if (e.key === 'Delete' && !typing && removableRef.current) {
+        e.preventDefault();
+        setRemoving(removableRef.current);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const removingRef = useRef(removing);
+  removingRef.current = removing;
+  /** The selected library, when it is one of the map's (Delete offers to remove it). */
+  const removableRef = useRef<string | null>(null);
+  removableRef.current = selected && inMap.has(normalizePath(selected)) && mode === 'libraries' ? selected : null;
+  const removeLibrary = (p: string) => {
+    setRemoving(null);
+    onApply(current.filter((c) => normalizePath(c) !== normalizePath(p)));
+  };
+  /** A DT1 of the mod (not the game's archives): "Edit a custom DT1" can add tiles to it. */
+  const editable = (p: string) => !!p && !/\.mpq$/i.test(gd.fs.locate(p) ?? '.mpq');
   const isChosen = (p: string) => chosen.some((c) => normalizePath(c) === normalizePath(p));
   const toggle = (p: string) => setChosen((c) => (isChosen(p) ? c.filter((x) => normalizePath(x) !== normalizePath(p)) : [...c, p]));
   const selInMap = selected && inMap.has(normalizePath(selected));
@@ -349,8 +380,32 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
             <button className={`chip${!custom ? ' active' : ''}`} onClick={() => setMode('libraries')} title="Add whole tile libraries to the map">
               Add whole libraries
             </button>
-            <button className={`chip${custom ? ' active' : ''}`} onClick={() => setMode('custom')} title="Tick single tiles from any libraries and build a new DT1 from them">
-              Build a custom DT1{picks.length ? ` · ${picks.length}` : ''}
+            <button
+              className={`chip${custom && !addTo ? ' active' : ''}`}
+              onClick={() => {
+                setMode('custom');
+                setAddTo(null);
+              }}
+              title="Tick single tiles from any libraries and build a new DT1 from them"
+            >
+              Build a custom DT1{picks.length && !addTo ? ` · ${picks.length}` : ''}
+            </button>
+            <button
+              className={`chip${custom && addTo ? ' active' : ''}`}
+              disabled={!addTo && !editable(selected)}
+              onClick={() => {
+                setMode('custom');
+                if (!addTo) setAddTo(selected);
+              }}
+              title={
+                addTo
+                  ? `Adding the picked tiles to ${short(addTo)}`
+                  : editable(selected)
+                    ? `Add more tiles to ${short(selected)}: tick them in any libraries, then add them (its own tiles stay as they are)`
+                    : 'Select a DT1 of your mod on the left (a custom DT1 you built, for example), then click here to add more tiles to it'
+              }
+            >
+              Edit a custom DT1{addTo ? ` · ${short(addTo).split('/').pop()}${picks.length ? ` +${picks.length}` : ''}` : ''}
             </button>
           </div>
         </div>
@@ -407,11 +462,42 @@ export function Dt1LibraryDialog({ map, gd, onApply, onCreateCustom, onImportFil
                 <option value="act0">Act 0: show colours that change between acts</option>
               </select>
             </label>
-            {selInMap && !custom && <p className="muted small">This map already loads this library.</p>}
+            {selInMap && !custom && !removing && (
+              <p className="muted small">
+                This map already loads this library.{' '}
+                <button className="link small" onClick={() => setRemoving(selected)} title="Take this library out of the map (Delete)">
+                  Remove it from the map…
+                </button>
+              </p>
+            )}
+            {removing && (
+              <div className="dt1l-remove" role="alert">
+                <b>Remove {short(removing)} from the map?</b>{' '}
+                {(() => {
+                  const n = usage?.get(normalizePath(removing)) ?? 0;
+                  return n ? (
+                    <span className="warn">
+                      {n} placed tile{n === 1 ? ' comes' : 's come'} from it: {n === 1 ? 'it' : 'they'} will show as missing (or as another library&apos;s tile with the same number).
+                    </span>
+                  ) : (
+                    <span className="muted">No placed tile comes from it.</span>
+                  );
+                })()}{' '}
+                The DT1 file itself stays; its level type and Dt1Mask are updated as when adding.
+                <div className="modal-actions">
+                  <button className="btn" onClick={() => setRemoving(null)}>
+                    Keep it
+                  </button>
+                  <button className="btn danger" autoFocus onClick={() => removeLibrary(removing)}>
+                    Remove from the map
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         {custom ? (
-          <CustomDt1Panel map={map} gd={gd} picks={picks} setPicks={setPicks} palette={pal?.palette ?? map.palette} onShow={setSelected} onCreate={onCreateCustom} onClose={onClose} />
+          <CustomDt1Panel map={map} gd={gd} picks={picks} setPicks={setPicks} palette={pal?.palette ?? map.palette} onShow={setSelected} onCreate={onCreateCustom} onClose={onClose} addTo={addTo} onStopAdding={() => setAddTo(null)} />
         ) : (
           <>
             <div className="dt1l-chosen">
@@ -466,7 +552,12 @@ function CustomDt1Panel({
   onShow,
   onCreate,
   onClose,
+  addTo = null,
+  onStopAdding,
 }: {
+  /** "Edit a custom DT1": the picked tiles are added to this DT1 (null: they make a new one). */
+  addTo?: string | null;
+  onStopAdding?: () => void;
   map: OpenMap;
   gd: GameData;
   picks: TilePick[];
@@ -490,11 +581,22 @@ function CustomDt1Panel({
   const [safe, setSafe] = useState<{ usable: boolean[]; remaps: Uint8Array[] } | null>(null);
   const bytes = useRef(new Map<string, Uint8Array>());
   // What the map's level already loads: a new tile with one of these numbers would mix with it in game.
+  // Adding to a DT1: its own tiles' numbers are taken too (it may not be in the map yet).
+  const [addToBytes, setAddToBytes] = useState<Uint8Array | null>(null);
+  useEffect(() => {
+    let live = true;
+    setAddToBytes(null);
+    if (addTo) void gd.fs.read(addTo).then((b) => live && setAddToBytes(b));
+    return () => {
+      live = false;
+    };
+  }, [addTo, gd]);
   const taken = useMemo(() => {
     const keys = new Set<string>();
     for (const l of map.lib.loaded) for (const t of map.lib.tilesOf(l.path)) keys.add(`${t.orientation}|${t.mainIndex}|${t.subIndex}`);
+    for (const k of keysOf(addToBytes)) keys.add(k);
     return keys;
-  }, [map]);
+  }, [map, addToBytes]);
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -553,12 +655,22 @@ function CustomDt1Panel({
   const exists = !nameProblem && !folderProblem && !!gd.fs.locate(path);
   const partners = plan?.tiles.filter((t) => t.partner).length ?? 0;
   const otherActs = [...new Set(picks.map((p) => libraryAct(p.dt1)).filter((a): a is number => a !== null && a !== map.ds1.act))].sort();
-  const problem = folderProblem ?? nameProblem ?? (exists ? `${path.replace(/^data\/global\/tiles\//, '')} already exists: choose another name.` : null);
+  const problem = addTo
+    ? addToBytes
+      ? null
+      : `Reading ${short(addTo)}…`
+    : (folderProblem ?? nameProblem ?? (exists ? `${path.replace(/^data\/global\/tiles\//, '')} already exists: choose another name.` : null));
   const create = async () => {
     if (!onCreate || !plan) return;
     setBusy(true);
     setError(null);
     try {
+      if (addTo) {
+        if (!addToBytes) throw new Error(`${addTo} could not be read.`);
+        await onCreate({ path: addTo, plan, bytes: buildCustomDt1(plan, remapFor), actSafe: !!remapFor, existing: addToBytes });
+        setPicks(() => []);
+        return;
+      }
       await onCreate({ path, plan, bytes: buildCustomDt1(plan, remapFor), actSafe: !!remapFor });
     } catch (e) {
       setError((e as Error).message);
@@ -621,6 +733,16 @@ function CustomDt1Panel({
         </div>
       </div>
       <div className="dt1c-form">
+        {addTo ? (
+          <p className="small">
+            Adding the picked tiles to <code>{short(addTo)}</code>
+            {addToBytes ? ` (${dt1Count(addToBytes)} tiles now; they stay as they are, the new ones go after them)` : ''}.{' '}
+            <button className="link small" onClick={onStopAdding}>
+              Make a new DT1 instead
+            </button>
+          </p>
+        ) : (
+          <>
         <label className="form-row">
           <span>Name</span>
           <input className="mono" value={name} maxLength={40} placeholder="e.g. GuildMix" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
@@ -633,6 +755,8 @@ function CustomDt1Panel({
           <span>Folder</span>
           <input className="mono" value={folder} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
         </label>
+          </>
+        )}
         <label className="small dt1c-safe">
           <input type="checkbox" checked={actSafe} onChange={(e) => setActSafe(e.target.checked)} /> Make it act-safe (Act 0 colours)
           <HelpTip text="A DT1 stores palette numbers, not colours, and most numbers mean a different colour in each act: a tile drawn for Act 3 can look wrong in an Act 1 map. This snaps every colour of the picked tiles to the nearest one that looks the same in every act (Gimli's Act 0 palette), judged by how it looks in the act its library was drawn for. The picked tiles then show as they will look in game." />
@@ -650,7 +774,7 @@ function CustomDt1Panel({
           {plan ? (
             <>
               <div>
-                <b>{plan.records.length}</b> tiles into <code>{path.replace(/^data\/global\/tiles\//, '')}</code>
+                <b>{plan.records.length}</b> tiles into <code>{short(addTo ?? path)}</code>
                 {partners ? ` (${partners} added so pieces stay whole: the other half of a corner wall, or animation frames)` : ''}. Pixels, walkability
                 (sub-tile flags), sound and roof height are copied as they are.
               </div>
@@ -675,7 +799,7 @@ function CustomDt1Panel({
           ) : (
             <span className="muted">Tick tiles to see what the new DT1 will hold.</span>
           )}
-          {problem && name && <div className="error-text">{problem}</div>}
+          {problem && (name || addTo) && <div className="error-text">{problem}</div>}
           {error && <div className="error-text">{error}</div>}
           {!onCreate && <div className="error-text">No writable mod folder: the DT1 can&apos;t be saved.</div>}
         </div>
@@ -684,7 +808,7 @@ function CustomDt1Panel({
             Cancel
           </button>
           <button className="btn primary" disabled={busy || !onCreate || !plan?.records.length || !!problem} onClick={() => void create()}>
-            {busy ? 'Creating…' : 'Create DT1 and add it to the map'}
+            {busy ? (addTo ? 'Adding…' : 'Creating…') : addTo ? `Add ${plan?.records.length || ''} tiles to ${short(addTo).split('/').pop()}` : 'Create DT1 and add it to the map'}
           </button>
         </div>
       </div>

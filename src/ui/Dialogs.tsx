@@ -322,6 +322,7 @@ export function PreferencesDialog({ prefs, onChange, notify, onClose }: { prefs:
 
       <div className="pref-section">Mouse and keyboard</div>
       {speed('zoomSpeed', 'Mouse-wheel zoom speed', '')}
+      {check('smoothZoom', 'Zoom smoothly', '(off by default). Off: the wheel zooms in steps (1/8×, 1/4×, 1/2×, 3/4×, 100%, 2×, 3×…) that keep the tiles’ pixels sharp. On: any amount in between, as before.')}
       {speed('arrowSpeed', 'Arrow-key scrolling speed', '(Shift still scrolls faster).')}
       <label className="pref-row">
         <span>

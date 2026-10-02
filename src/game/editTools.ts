@@ -1,5 +1,5 @@
-import { isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
-import { inSelection, type CellSelection } from './clipboard';
+import { EMPTY_CELL, isEmptyCell, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
+import { inSelection, MAX_FLOOR_LAYERS, MAX_WALL_LAYERS, type CellSelection } from './clipboard';
 import { MapDocument, type Brush, type CellEdit, type LayerRef } from './MapDocument';
 
 /**
@@ -67,6 +67,50 @@ export function paintEdits(doc: MapDocument, layer: LayerRef, cells: [number, nu
   return cells
     .filter(([x, y]) => doc.inBounds(x, y))
     .map(([x, y]) => ({ layer, x, y, cell: MapDocument.painted(layer, doc.cell(layer, x, y), mix?.length ? brushFor(mix, random) : null) }));
+}
+
+/**
+ * Painting that stacks onto what is there (Alt with the brush): each cell goes on the first layer of the active
+ * layer's kind that is empty there (the active layer first, then the others front to back), adding a layer when the
+ * map has room for one (up to 4 walls / 2 floors). With every layer taken, it replaces the tile on the active layer.
+ * `placed` remembers the layer each cell got during this stroke, so going over a cell again repaints it there.
+ * Shadows have one layer: they paint as usual.
+ */
+export function stackPaintEdits(
+  doc: MapDocument,
+  layer: LayerRef,
+  cells: [number, number][],
+  mix: Brush[],
+  placed: Map<string, number>,
+  random: () => number = Math.random,
+): { edits: CellEdit[]; walls: number; floors: number; replaced: number } {
+  const ds1 = doc.ds1;
+  const counts = { wall: ds1.walls.length, floor: ds1.floors.length };
+  if (layer.kind === 'shadow') return { edits: paintEdits(doc, layer, cells, mix, random), walls: counts.wall, floors: counts.floor, replaced: 0 };
+  const kind = layer.kind;
+  const max = kind === 'wall' ? MAX_WALL_LAYERS : MAX_FLOOR_LAYERS;
+  const have = (n: number) => n < (kind === 'wall' ? ds1.walls.length : ds1.floors.length);
+  const cellAt = (n: number, x: number, y: number): AnyCell => (have(n) ? doc.cell({ kind, index: n }, x, y) : kind === 'wall' ? { ...EMPTY_CELL, orientation: 0, orientationHigh: 0 } : EMPTY_CELL);
+  const order = [layer.index, ...Array.from({ length: max }, (_, n) => n).filter((n) => n !== layer.index)];
+  const edits: CellEdit[] = [];
+  let replaced = 0;
+  for (const [x, y] of cells) {
+    if (!doc.inBounds(x, y)) continue;
+    const key = `${x},${y}`;
+    let n = placed.get(key);
+    if (n === undefined) {
+      n = order.find((i) => isEmptyCell(cellAt(i, x, y)));
+      if (n === undefined) {
+        n = layer.index;
+        replaced++;
+      }
+      placed.set(key, n);
+    }
+    const target: LayerRef = { kind, index: n };
+    counts[kind] = Math.max(counts[kind], n + 1);
+    edits.push({ layer: target, x, y, cell: MapDocument.painted(target, cellAt(n, x, y), brushFor(mix, random)) });
+  }
+  return { edits, walls: counts.wall, floors: counts.floor, replaced };
 }
 
 /** The cells of a rectangle, or of a selection (just its cells when irregular). */

@@ -2,7 +2,7 @@ export type Tool = 'select' | 'paint' | 'erase' | 'pick' | 'object';
 
 export const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
   { id: 'select', label: 'Select', key: 'v', hint: 'Click or drag to select combined cells. Only Shift+wheel selects individual tiles; scroll zooms. Shift+click/drag adds cells' },
-  { id: 'paint', label: 'Paint', key: 'b', hint: 'Paint the chosen tile on the active layer' },
+  { id: 'paint', label: 'Paint', key: 'b', hint: 'Paint the chosen tile on the active layer (Alt+drag: on the first free layer, stacking onto tiles already there)' },
   { id: 'erase', label: 'Erase', key: 'e', hint: 'Clear cells on the active layer' },
   { id: 'pick', label: 'Pick', key: 'i', hint: 'Copy a tile from the map into the brush' },
   { id: 'object', label: 'Objects', key: 'o', hint: 'Select, move, add and delete objects/NPCs and edit NPC paths' },
@@ -119,3 +119,38 @@ export const ORIENTATION_NAMES: Record<number, string> = {
   18: 'Lower wall (north)',
   19: 'Lower wall (south)',
 };
+
+/**
+ * One map layer in the layer bar: a floor or wall layer by number, or one of the tile groups shown across the wall
+ * layers (upper walls, lower walls, roofs) and the shadow and special-tile layers.
+ */
+export type LayerSlot = { floor: number } | { wall: number } | 'upperWalls' | 'lowerWalls' | 'roofs' | 'shadows' | 'specials';
+
+const GROUPS = ['upperWalls', 'lowerWalls', 'roofs', 'shadows', 'specials'] as const;
+
+/** `v` with every layer shown (the other view settings kept). */
+export function allLayersShown(v: Visibility): Visibility {
+  return { ...v, floors: v.floors.map(() => true), walls: v.walls.map(() => true), upperWalls: true, lowerWalls: true, roofs: true, shadows: true, specials: true };
+}
+
+/** `v` showing only `slot` (a wall group shows across every wall layer; a wall layer shows all its groups). */
+export function soloLayer(v: Visibility, slot: LayerSlot): Visibility {
+  const out: Visibility = { ...v, floors: v.floors.map(() => false), walls: v.walls.map(() => false), upperWalls: false, lowerWalls: false, roofs: false, shadows: false, specials: false };
+  if (typeof slot === 'object') {
+    if ('floor' in slot) out.floors = v.floors.map((_, i) => i === slot.floor);
+    else {
+      out.walls = v.walls.map((_, i) => i === slot.wall);
+      out.upperWalls = out.lowerWalls = out.roofs = true;
+    }
+  } else {
+    out[slot] = true;
+    if (slot === 'upperWalls' || slot === 'lowerWalls' || slot === 'roofs') out.walls = v.walls.map(() => true);
+  }
+  return out;
+}
+
+/** Whether `v` shows `slot` alone (as soloLayer leaves it). */
+export function isSolo(v: Visibility, slot: LayerSlot): boolean {
+  const s = soloLayer(v, slot);
+  return s.floors.every((x, i) => x === (v.floors[i] ?? true)) && s.walls.every((x, i) => x === (v.walls[i] ?? true)) && GROUPS.every((k) => s[k] === v[k]);
+}

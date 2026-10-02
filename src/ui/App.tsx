@@ -88,7 +88,7 @@ import { MapLayerBar } from './MapLayerBar';
 import { readWallCategories } from '../game/wallCategories';
 import { isVisible, MapView, type GhostTile, type HoverInfo, type StrokeMods, type StrokePhase } from './MapView';
 import { CellPanel, GroupsPanel, HistoryPanel, LayersPanel, lightMultiplier, MapInfoPanel, MapObjectsPanel, SelectionPanel, type LevelLight } from './panels';
-import { DEFAULT_VISIBILITY, modeOf, nextView, oneMode, TOOLS, VIEW_NAMES, withMode, type Tool, type ViewMode, type Visibility } from './state';
+import { allLayersShown, DEFAULT_VISIBILITY, isSolo, modeOf, nextView, oneMode, soloLayer, TOOLS, VIEW_NAMES, withMode, type LayerSlot, type Tool, type ViewMode, type Visibility } from './state';
 import { AutomapLegend, LightPanel, ModeFrame, RoofPanel } from './ModePanels';
 import { DEFAULT_AUTOMAP_STYLE, kindClassifier, normalizeAutomapStyle, type AutomapStyle } from '../game/automapStyle';
 import { ClipboardPanel } from './ClipboardPanel';
@@ -157,7 +157,7 @@ import { readAutomapRows, type AutomapSource } from '../game/automapImport';
 import { AutomapImportDialog } from './AutomapImport';
 import { AREA_BANDS, areaColour, walkableArea } from '../game/walkArea';
 import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
-import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, type TileKey } from '../game/editTools';
+import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, stackPaintEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
 import { deleteRecovery, getRecovery, listRecoveries, saveRecovery, type Recovery } from '../app/recovery';
 import { renderMapImage } from '../render/exportImage';
@@ -235,6 +235,9 @@ function selectionLabel(s: CellSelection): string {
   return s.cells ? `${selectionCount(s)} of ${w}×${h}` : `${w}×${h}`;
 }
 
+/** 100%, 300%, 50%, 12.5%… */
+const formatZoom = (z: number) => `${+(z * 100).toFixed(z < 0.1 ? 2 : 1)}%`;
+
 export function App() {
   const [data, setData] = useState<DataState>({ status: 'connecting' });
   const [map, setMap] = useState<OpenMap | null>(null);
@@ -258,6 +261,27 @@ export function App() {
   });
   /** Every visibility change keeps one view mode at a time (see ViewMode). */
   const setVisibility = useCallback((f: Visibility | ((v: Visibility) => Visibility)) => setVisibilityRaw((prev) => oneMode(prev, typeof f === 'function' ? f(prev) : f)), []);
+  const visibilityNow = useRef(visibility);
+  visibilityNow.current = visibility;
+  /** The layers shown before showing one alone (Shift+number or a middle click in the layer bar). */
+  const beforeSolo = useRef<Visibility | null>(null);
+  /** Shows only `slot`; again (while it is the only one shown) brings back the layers shown before. */
+  const toggleSolo = useCallback((slot: LayerSlot) => {
+    const v = visibilityNow.current;
+    const back = beforeSolo.current;
+    if (isSolo(v, slot) && back) {
+      beforeSolo.current = null;
+      setVisibility((now) => ({ ...now, floors: back.floors, walls: back.walls, upperWalls: back.upperWalls, lowerWalls: back.lowerWalls, roofs: back.roofs, shadows: back.shadows, specials: back.specials }));
+      return;
+    }
+    // Going from one layer alone to another keeps the layers from before the first.
+    if (!back) beforeSolo.current = v;
+    setVisibility((now) => soloLayer(now, slot));
+  }, [setVisibility]);
+  const showAllLayers = useCallback(() => {
+    beforeSolo.current = null;
+    setVisibility(allLayersShown);
+  }, [setVisibility]);
   useEffect(() => { try { localStorage.setItem('ds1studio.wallCategories', JSON.stringify(visibility.wallCategories ?? {})); } catch { /* preferences may be unavailable */ } }, [visibility.wallCategories]);
   const viewMode: ViewMode = tool === 'object' ? 'objects' : modeOf(visibility);
   // Changing view (Tiles, Objects, Walkability…) drops what was selected: tiles, a tile picked from a stack, objects.
@@ -299,6 +323,10 @@ export function App() {
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [zoom, setZoom] = useState(1);
   const [fitSignal, setFitSignal] = useState(0);
+  /** During an Alt+brush stroke: the layer each cell went on. */
+  const stackPlaced = useRef<Map<string, number> | null>(null);
+  const [zoomCommand, setZoomCommand] = useState<{ to: 1 | -1 | '100'; signal: number } | null>(null);
+  const zoomBy = useCallback((to: 1 | -1 | '100') => setZoomCommand((z) => ({ to, signal: (z?.signal ?? 0) + 1 })), []);
   const [gameView, setGameView] = useState<{ on: boolean; signal: number; center?: [number, number] | null }>({ on: false, signal: 0 });
   /** The game screen size Game view shows (remembered on this computer). */
   const [gameSize, setGameSizeState] = useState<[number, number]>(() => {
@@ -430,7 +458,7 @@ export function App() {
   /** Desktop app: the folder dialog is open over a loaded workspace. */
   const [changingFolders, setChangingFolders] = useState(false);
   /** Current object drag: what is being moved, and the sub-tile offset from the grab point. */
-  const objectDrag = useRef<{ obj: number; point: number | null } | null>(null);
+  const objectDrag = useRef<{ obj: number; point: number | null; dx: number; dy: number } | null>(null);
   /** Walkability mode (the overlay on): the brush, the sub-tiles a stroke is painting, and its result. */
   const [walkBrush, setWalkBrush] = useState<WalkBrush>({ mode: 'block', bits: 0x01, size: 1, target: 'map' });
   const [walkMarks, setWalkMarks] = useState<{ keys: ReadonlySet<number>; mode: 'block' | 'clear' | 'replace' } | null>(null);
@@ -498,6 +526,7 @@ export function App() {
   const [rightW, setRightW] = usePersistentSize('right', 330, 260, 760);
 
   const bump = () => setRevision((r) => r + 1);
+  const [objectsRevision, setObjectsRevision] = useState(0);
   const shiftHeld = useRef(false);
   useEffect(() => {
     const track = (e: KeyboardEvent | PointerEvent) => (shiftHeld.current = e.shiftKey);
@@ -942,8 +971,8 @@ export function App() {
     [pasting, clipboard, hover, paintRect],
   );
   const mapInput = useMemo(
-    () => ({ zoomSpeed: prefs.zoomSpeed, arrowSpeed: prefs.arrowSpeed, shiftWheel: prefs.shiftWheel, objectLabels: prefs.objectLabels }),
-    [prefs.zoomSpeed, prefs.arrowSpeed, prefs.shiftWheel, prefs.objectLabels],
+    () => ({ zoomSpeed: prefs.zoomSpeed, smoothZoom: prefs.smoothZoom, arrowSpeed: prefs.arrowSpeed, shiftWheel: prefs.shiftWheel, objectLabels: prefs.objectLabels }),
+    [prefs.zoomSpeed, prefs.smoothZoom, prefs.arrowSpeed, prefs.shiftWheel, prefs.objectLabels],
   );
   /** While pasting: the cells whose existing tiles the paste would replace (shown red before clicking). */
   const pasteDoomed = useMemo(() => {
@@ -1160,7 +1189,7 @@ export function App() {
           const point = sel ? sel.path.findIndex((p) => near(p.x, p.y)) : -1;
           if (sel && point >= 0) {
             doc.beginObjectEdit();
-            objectDrag.current = { obj: selectedObject!, point };
+            objectDrag.current = { obj: selectedObject!, point, dx: sel.path[point].x - sx, dy: sel.path[point].y - sy };
             return;
           }
           if (sel && shiftHeld.current) {
@@ -1175,20 +1204,25 @@ export function App() {
           setObjectGroup(null);
           if (hit >= 0) {
             doc.beginObjectEdit();
-            objectDrag.current = { obj: hit, point: null };
+            // Keep where it was grabbed: the object moves with the cursor instead of jumping its centre to it.
+            objectDrag.current = { obj: hit, point: null, dx: objs[hit].x - sx, dy: objs[hit].y - sy };
           }
           return;
         }
         const drag = objectDrag.current;
         if (drag && phase === 'move') {
+          const tx = Math.max(0, sx + drag.dx);
+          const ty = Math.max(0, sy + drag.dy);
           const next = objs.map((o, i) => {
             if (i !== drag.obj) return o;
-            if (drag.point === null) return o.x === sx && o.y === sy ? o : { ...o, x: sx, y: sy };
-            return { ...o, path: o.path.map((p, n) => (n === drag.point ? { ...p, x: sx, y: sy } : p)) };
+            if (drag.point === null) return o.x === tx && o.y === ty ? o : { ...o, x: tx, y: ty };
+            const p = o.path[drag.point];
+            return p.x === tx && p.y === ty ? o : { ...o, path: o.path.map((q, n) => (n === drag.point ? { ...q, x: tx, y: ty } : q)) };
           });
           if (next[drag.obj] !== objs[drag.obj]) {
             doc.liveObjects(next);
-            bump();
+            // Only the objects moved: redraw them, and rebuild the rest once the drag ends.
+            setObjectsRevision((r) => r + 1);
           }
         }
         if (phase === 'end') {
@@ -1288,6 +1322,25 @@ export function App() {
       const tiles = tool === 'paint' && brush ? [brush, ...mix].map((b) => ({ ...b, orientation: brushOrientation(activeLayer, b) })) : null;
       const verb = tool === 'paint' ? 'Paint' : 'Erase';
       const where = ` on ${layerLabel(activeLayer)}`;
+      // Alt with the brush: each cell goes on the first free layer of its kind (as Alt does when pasting).
+      if (phase === 'start') stackPlaced.current = tiles && mods?.alt && activeLayer.kind !== 'shadow' ? new Map() : null;
+      /** Stacked painting; true when it changed the map. Adding a layer is its own undo step. */
+      const stackPaint = (at: [number, number][], label: string) => {
+        const st = stackPaintEdits(doc, activeLayer, at, tiles!, stackPlaced.current!);
+        if (st.replaced && phase !== 'move') notify(`${st.replaced} cell${st.replaced === 1 ? ' had' : 's had'} no free layer: replaced on ${layerLabel(activeLayer)}`);
+        if (st.walls <= doc.ds1.walls.length && st.floors <= doc.ds1.floors.length) return doc.apply(st.edits, label);
+        doc.mutate((d) => {
+          const cellCount = d.width * d.height;
+          while (d.walls.length < st.walls) d.walls.push(Array.from({ length: cellCount }, () => ({ ...EMPTY_CELL, orientation: 0, orientationHigh: 0 })));
+          while (d.floors.length < st.floors) d.floors.push(Array.from({ length: cellCount }, () => EMPTY_CELL));
+          for (const e of st.edits) {
+            const layers = e.layer.kind === 'floor' ? d.floors : e.layer.kind === 'wall' ? d.walls : d.shadows;
+            (layers[e.layer.index] as typeof e.cell[])[e.y * d.width + e.x] = e.cell;
+          }
+        }, `${label} (added a layer)`);
+        notify(`Stacked onto the tiles there: the map now has ${st.walls} wall / ${st.floors} floor layers`);
+        return true;
+      };
       if (paintMode === 'rect') {
         const cell = cells[cells.length - 1];
         if (phase === 'start' && cell) paintAnchor.current = cell;
@@ -1296,7 +1349,7 @@ export function App() {
           const r = paintAnchor.current && hover ? clampRect(rectFrom(paintAnchor.current, [hover.cellX, hover.cellY]), doc.ds1.width, doc.ds1.height) : paintRect;
           paintAnchor.current = null;
           setPaintRect(null);
-          if (r && doc.apply(paintEdits(doc, activeLayer, rectCells(r), tiles), `${verb} rectangle${where}`)) bump();
+          if (r && (stackPlaced.current ? stackPaint(rectCells(r), `${verb} rectangle (stacked)`) : doc.apply(paintEdits(doc, activeLayer, rectCells(r), tiles), `${verb} rectangle${where}`))) bump();
         }
         return;
       }
@@ -1313,8 +1366,17 @@ export function App() {
         return;
       }
       if (phase === 'start') doc.beginStroke(`${verb}${where}`);
-      const changed = doc.apply(paintEdits(doc, activeLayer, cells, tiles));
-      if (phase === 'end') doc.endStroke();
+      let changed: boolean;
+      if (stackPlaced.current) {
+        const layers = doc.ds1.walls.length + doc.ds1.floors.length;
+        changed = stackPaint(cells, `${verb} (stacked)`);
+        // A layer was added (its own undo step): the rest of the stroke goes on.
+        if (doc.ds1.walls.length + doc.ds1.floors.length !== layers && phase !== 'end') doc.beginStroke(`${verb} (stacked)`);
+      } else changed = doc.apply(paintEdits(doc, activeLayer, cells, tiles));
+      if (phase === 'end') {
+        doc.endStroke();
+        stackPlaced.current = null;
+      }
       if (changed || phase === 'end') bump();
     },
     [doc, tool, brush, mix, paintMode, paintRect, hover, selection, activeLayer, pickAt, notify, pasting, clipboard, placing, selectedObject, scene, visibility, hittable, focusTile, walkBrush, objectPasting, objectClip, objectLabel],
@@ -2178,7 +2240,7 @@ export function App() {
       notify(
         existing === undefined
           ? `Created ${path.split('/').pop()} (${plan.records.length} tiles${renumbered}${actSafe ? ', act-safe colours' : ''}) and added it to the map${automapNote}. Find it in the Tiles panel.`
-          : `Added ${plan.records.length} tiles${renumbered} to ${path.replace(/^data\/global\/tiles\//i, '')} (the level type's own tile file)${automapNote}.`,
+          : `Added ${plan.records.length} tiles${renumbered} to ${path.replace(/^data\/global\/tiles\//i, '')}${normalizePath(path) === normalizePath(ownTilesPath(gd, map.path, map.resolution.lvlType)) ? " (the level type's own tile file)" : ''}${automapNote}.`,
       );
     },
     [gd, map, writeFiles, applyDt1s, notify],
@@ -3347,6 +3409,29 @@ export function App() {
     [viewMode, setVisibility, notify],
   );
 
+  /** F1–F6: straight to a view. */
+  const goView = useCallback(
+    (to: ViewMode) => {
+      setTool(to === 'objects' ? 'object' : 'select');
+      setModeAlert(VIEW_NAMES[to] + ' mode');
+      setVisibility((v) => withMode(v, to));
+    },
+    [setVisibility],
+  );
+  /** Ctrl+number: the layer the tools work on (when the map has it). */
+  const workOn = useCallback(
+    (layer: LayerRef) => {
+      if (!doc) return;
+      if (!doc.layers().some((l) => l.kind === layer.kind && l.index === layer.index)) {
+        notify(`This map has no ${layerLabel(layer)} layer.`);
+        return;
+      }
+      setActiveLayer(layer);
+      notify(`Working on ${layerLabel(layer)}`);
+    },
+    [doc, notify],
+  );
+
   const toggleGameView = useCallback(() => {
     setGameView((g) => {
       if (g.on) return { ...g, on: false };
@@ -3471,8 +3556,35 @@ export function App() {
       'layer.roofs': vis((v) => ({ ...v, roofs: !v.roofs })),
       'layer.lowerWalls': vis((v) => ({ ...v, lowerWalls: !v.lowerWalls })),
       'layer.specials': vis((v) => ({ ...v, specials: !v.specials })),
+      'solo.floor1': () => toggleSolo({ floor: 0 }),
+      'solo.floor2': () => toggleSolo({ floor: 1 }),
+      'solo.wall1': () => toggleSolo({ wall: 0 }),
+      'solo.wall2': () => toggleSolo({ wall: 1 }),
+      'solo.wall3': () => toggleSolo({ wall: 2 }),
+      'solo.wall4': () => toggleSolo({ wall: 3 }),
+      'solo.shadows': () => toggleSolo('shadows'),
+      'solo.roofs': () => toggleSolo('roofs'),
+      'solo.lowerWalls': () => toggleSolo('lowerWalls'),
+      'solo.specials': () => toggleSolo('specials'),
+      'layer.showAll': showAllLayers,
+      'active.floor1': () => workOn({ kind: 'floor', index: 0 }),
+      'active.floor2': () => workOn({ kind: 'floor', index: 1 }),
+      'active.wall1': () => workOn({ kind: 'wall', index: 0 }),
+      'active.wall2': () => workOn({ kind: 'wall', index: 1 }),
+      'active.wall3': () => workOn({ kind: 'wall', index: 2 }),
+      'active.wall4': () => workOn({ kind: 'wall', index: 3 }),
+      'active.shadows': () => workOn({ kind: 'shadow', index: 0 }),
+      'mode.tiles': () => goView('tiles'),
+      'mode.objects': () => goView('objects'),
+      'mode.walk': () => goView('walk'),
+      'mode.automap': () => goView('automap'),
+      'mode.light': () => goView('light'),
+      'mode.roofs': () => goView('roofs'),
+      'view.zoom100': () => zoomBy('100'),
+      'view.zoomIn': () => zoomBy(1),
+      'view.zoomOut': () => zoomBy(-1),
     };
-  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView, toggleMode, leaveMap, selectedObject, selection, map]);
+  }, [toggleObjects, undo, redo, save, copy, startPaste, doc, tool, deleteSelectedObject, clearSelection, stack, toggleGameView, pasting, placing, brush, copyView, toggleJustTheMap, clipPane, objectPasting, cycleView, toggleMode, leaveMap, selectedObject, selection, map, toggleSolo, showAllLayers, workOn, goView, zoomBy]);
   const keyState = useRef({ actions, actionFor: keys.actionFor, dialogOpen: false });
   keyState.current = { actions, actionFor: keys.actionFor, dialogOpen: dialog !== null || commandsOpen || !!mapMenu || clearingAutomap || presetBuilder || !!presetSave || !!pasteOffer || presetImportBusy || !!unsavedAsk || prefsOpen };
   useEffect(() => {
@@ -3994,7 +4106,7 @@ export function App() {
       </aside>
 
       <main className="stage">
-        {map && <MapLayerBar ds1={map.ds1} lib={map.lib} visibility={visibility} onChange={setVisibility} />}
+        {map && <MapLayerBar ds1={map.ds1} layerCount={map.ds1.floors.length * 8 + map.ds1.walls.length} lib={map.lib} visibility={visibility} onChange={setVisibility} onSolo={toggleSolo} />}
         <div className="stage-map">
         {modeAlert && <div className="mode-alert" role="status" aria-live="polite">{modeAlert}</div>}
         {map && scene && visibility.walkable && <WalkLegend floating />}
@@ -4051,6 +4163,7 @@ export function App() {
             objectLabel={objectLabel}
             objectGhost={objectPasting && tool === 'object' ? objectClip : null}
             selectedObject={selectedObject}
+            objectsRevision={objectsRevision}
             selectedObjects={objectGroup}
             onDoubleClick={selectSameObjects}
             sprites={sprites}
@@ -4067,6 +4180,7 @@ export function App() {
             onZoom={setZoom}
             onStroke={onStroke}
             fitSignal={fitSignal}
+            zoomCommand={zoomCommand}
             snapshotRef={snapshotRef}
             onContextMenu={(at, cell, world) => setMapMenu({ at, cell, world })}
             gameView={{ ...gameView, width: gameSize[0], height: gameSize[1] }}
@@ -4892,6 +5006,7 @@ export function App() {
         <Dt1LibraryDialog
           map={map}
           gd={data.gd}
+          usage={dt1Usage}
           onApply={(p, o) => void addLibraries(p, o?.toAct0 ?? [])}
           onCreateCustom={canWrite ? createCustomDt1 : null}
           onImportFiles={canWrite ? (mode) => void pickImport('dt1', mode) : null}
@@ -5232,7 +5347,9 @@ export function App() {
               {TOOLS.find((t) => t.id === tool)!.label} · {layerLabel(activeLayer)}
             </span>
             <span>{hover ? `Cell ${hover.cellX}, ${hover.cellY}` : '—'}</span>
-            <span>{Math.round(zoom * 100)}%</span>
+            <button className="link status-zoom" onClick={() => zoomBy('100')} title={`Screen pixels per game pixel. Click (or ${kb['view.zoom100'] || 'a key set in Shortcuts'}) for 100%, where tiles look as sharp as in game.`}>
+              {formatZoom(zoom * (window.devicePixelRatio || 1))}
+            </button>
             <span>
               {map.ds1.width}×{map.ds1.height} · v{map.ds1.version} · Act {map.ds1.act + 1}
               {map.paletteAct !== map.ds1.act ? ` · ${PALETTE_NAMES[map.paletteAct]} palette` : ''}

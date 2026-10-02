@@ -26,6 +26,7 @@ import { selectTileIndices } from '../game/tileSelection';
 import { ORIENTATION_NAMES } from './state';
 import { Thumb } from './TilePalette';
 import { isBuiltinPath } from '../game/specialTiles';
+import { sharedTakenKeys } from '../game/ownTiles';
 
 const short = (p: string) => p.replace(/^data\/global\/tiles\//i, '');
 
@@ -152,6 +153,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
   const [working, setWorking] = useState<Uint8Array | null>(null);
   const [cloneSame, setCloneSame] = useState(false);
   const [opNote, setOpNote] = useState<string | null>(null);
+  /** Waiting for "Delete the selected tiles?" (the Delete key or the button). */
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -349,6 +352,8 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     }
     return [...out].sort((a, b) => a - b);
   };
+  /** Tile numbers of the DT1s loaded with this one (the map's other libraries, its level types' DT1s). */
+  const othersTaken = () => sharedTakenKeys(gd, path, map?.lib.loaded.map((l) => l.path) ?? []);
   const runOp = (fn: () => Promise<void>) => {
     setError(null);
     fn().catch((e) => setError((e as Error).message));
@@ -357,6 +362,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
     runOp(async () => {
       const records = dt1Records(await bake());
       const targets = withPartners(records);
+      const taken = cloneSame ? new Set<string>() : await othersTaken();
       const added: Dt1Record[] = [];
       const subFor = new Map<string, number>();
       for (const i of targets) {
@@ -365,7 +371,7 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
         if (!cloneSame) {
           // Corner halves share one new number.
           const k = `${Math.min(info.orientation, cornerPartner(info.orientation) ?? info.orientation)}|${info.main}|${info.sub}`;
-          sub = subFor.get(k) ?? freeSub([...records, ...added], info.orientation, info.main);
+          sub = subFor.get(k) ?? freeSub([...records, ...added], info.orientation, info.main, taken);
           if (sub < 0) throw new Error(`No free sub index left for main index ${info.main}.`);
           subFor.set(k, sub);
         }
@@ -379,8 +385,34 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       const records = dt1Records(await bake());
       const targets = withPartners(records);
       const next = records.map((r, i) => (targets.includes(i) ? mirrorRecord(r) : r));
-      const turned = targets.filter((i) => recordInfo(next[i]).orientation !== recordInfo(records[i]).orientation).length;
-      useWorking(buildDt1(next), targets, `Mirrored ${targets.length} tile${targets.length === 1 ? '' : 's'}${turned ? `; ${turned} wall${turned === 1 ? '' : 's'} now face${turned === 1 ? 's' : ''} the other way (orientation changed: maps using the old number no longer find ${turned === 1 ? 'it' : 'them'})` : ''}. Clone first to keep the originals. Save to keep it.`);
+      const turnedIdx = targets.filter((i) => recordInfo(next[i]).orientation !== recordInfo(records[i]).orientation);
+      // A wall that now faces the other way has a new number: when a tile of this DT1 or of a DT1 loaded with it
+      // already has that number, the game would draw that one instead, so it gets a free sub index.
+      const taken = turnedIdx.length ? await othersTaken() : new Set<string>();
+      const key = (r: Dt1Record) => {
+        const i = recordInfo(r);
+        return `${i.orientation}|${i.main}|${i.sub}`;
+      };
+      const subFor = new Map<string, number>();
+      let renumbered = 0;
+      for (const i of turnedIdx) {
+        const info = recordInfo(next[i]);
+        const k = `${Math.min(info.orientation, cornerPartner(info.orientation) ?? info.orientation)}|${info.main}|${info.sub}`;
+        // The other half of a corner goes with it.
+        const clash = subFor.has(k) || taken.has(key(next[i])) || next.some((r, j) => j !== i && key(r) === key(next[i]));
+        if (!clash) continue;
+        const sub = subFor.get(k) ?? freeSub(next.filter((_, j) => j !== i), info.orientation, info.main, taken);
+        if (sub < 0) throw new Error(`No free sub index left for main index ${info.main}.`);
+        subFor.set(k, sub);
+        next[i] = changedRecord(next[i], { sub });
+        renumbered++;
+      }
+      const turned = turnedIdx.length;
+      useWorking(
+        buildDt1(next),
+        targets,
+        `Mirrored ${targets.length} tile${targets.length === 1 ? '' : 's'}${turned ? `; ${turned} wall${turned === 1 ? '' : 's'} now face${turned === 1 ? 's' : ''} the other way (orientation changed: maps using the old number no longer find ${turned === 1 ? 'it' : 'them'})` : ''}${renumbered ? `; ${renumbered} of them got a new sub index because the mirrored number was already used here or in a DT1 loaded with this one` : ''}. Clone first to keep the originals. Save to keep it.`,
+      );
     });
   const exportPng = async () => {
     const i = [...picked][0];
@@ -417,10 +449,63 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
       }
     });
 
+  /** Cells of the open map drawn with tiles of these numbers from this DT1 (they lose their picture if deleted). */
+  const usesInMap = (indices: number[]) => {
+    if (!map || !dt1) return 0;
+    const keys = new Set(indices.map((i) => dt1.tiles[i]).filter(Boolean).map((t) => `${t.orientation}|${t.mainIndex}|${t.subIndex}`));
+    // A number this DT1 still has after the delete (another variant) keeps its cells drawn.
+    dt1.tiles.forEach((t, i) => {
+      if (!indices.includes(i)) keys.delete(`${t.orientation}|${t.mainIndex}|${t.subIndex}`);
+    });
+    if (!keys.size || !map.lib.loaded.some((l) => normalizePath(l.path) === normalizePath(path))) return 0;
+    const { ds1 } = map;
+    let n = 0;
+    for (const layer of ds1.floors) for (const c of layer) if (!isEmptyCell(c) && keys.has(`0|${c.mainIndex}|${c.subIndex}`)) n++;
+    for (const layer of ds1.walls) for (const c of layer) if (!isEmptyCell(c) && keys.has(`${(c as WallCell).orientation}|${c.mainIndex}|${c.subIndex}`)) n++;
+    for (const layer of ds1.shadows) for (const c of layer) if (!isEmptyCell(c) && keys.has(`13|${c.mainIndex}|${c.subIndex}`)) n++;
+    return n;
+  };
+  const deleteTiles = () =>
+    runOp(async () => {
+      setDeleting(false);
+      const records = dt1Records(await bake());
+      const gone = new Set(withPartners(records));
+      if (gone.size >= records.length) throw new Error('A DT1 needs at least one tile: delete the file instead, or keep one.');
+      useWorking(buildDt1(records.filter((_, i) => !gone.has(i))), [], `Deleted ${gone.size} tile${gone.size === 1 ? '' : 's'}${gone.size > picked.size ? ' (with the other half of their corner walls)' : ''}. Save to keep it; closing without saving brings ${gone.size === 1 ? 'it' : 'them'} back.`);
+    });
+  /** Orders the tiles by orientation, main and sub index (tiles sharing a number keep their order: it matters in game). */
+  const sortTiles = () =>
+    runOp(async () => {
+      const records = dt1Records(await bake());
+      const order = records.map((r, i) => ({ r, i, k: recordInfo(r) })).sort((a, b) => a.k.orientation - b.k.orientation || a.k.main - b.k.main || a.k.sub - b.k.sub || a.i - b.i);
+      if (order.every((o, n) => o.i === n)) return setOpNote('The tiles are already in order (orientation, main, sub index).');
+      const where = new Map(order.map((o, n) => [o.i, n]));
+      useWorking(buildDt1(order.map((o) => o.r)), [...picked].map((i) => where.get(i)!).filter((i) => i !== undefined), 'Sorted the tiles by orientation, then main and sub index (tiles sharing a number keep their order). Maps find tiles by number, so nothing changes in them. Save to keep it.');
+    });
+
+  // Delete: asks to delete the selected tiles (clicking a tile leaves the focus outside the dialog, so on the window).
+  const canDelete = useRef(false);
+  canDelete.current = picked.size > 0 && painting === null && !busy;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key !== 'Delete' || !canDelete.current || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
+      e.preventDefault();
+      setDeleting(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const set = <K extends keyof Adjust>(k: K, v: Adjust[K]) => setAdjust((a) => ({ ...a, [k]: v }));
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div className="modal dt1-editor" role="dialog" aria-label="DT1 editor" onKeyDown={(e) => e.stopPropagation()}>
+      <div
+        className="modal dt1-editor"
+        role="dialog"
+        aria-label="DT1 editor"
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         <div className="modal-title">DT1 editor{map ? '' : ' · no map open'}</div>
         {busy && <div className="modal-busy-shield" role="status">Saving tile changes…</div>}
         <div className="dte-top">
@@ -469,6 +554,12 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
           <button className="btn small" disabled={picked.size !== 1 || busy} onClick={importPng} title="Replace the selected tile's picture with a PNG of the same size (an exported one, edited). Colours are matched to the palette.">
             Import PNG…
           </button>
+          <button className="btn small danger" disabled={!picked.size || busy} onClick={() => setDeleting(true)} title="Remove the selected tiles from this DT1 (Delete). Asks first.">
+            Delete…
+          </button>
+          <button className="btn small" disabled={!dt1 || busy} onClick={sortTiles} title="Put the tiles in order: by orientation, then main index, then sub index">
+            Sort by number
+          </button>
           {edits.size > 0 && (
             <span className="small accent-text">
               {edits.size} tile{edits.size === 1 ? '' : 's'} painted{' '}
@@ -499,6 +590,24 @@ export function Dt1Editor({ map, gd, presets, selection, canSave, onSave, onClos
             ))}
           </select>
         </div>
+        {deleting && picked.size > 0 && painting === null && (
+          <div className="dte-confirm" role="alert">
+            <b>
+              Delete {picked.size} tile{picked.size === 1 ? '' : 's'} from {short(path).split('/').pop()}?
+            </b>{' '}
+            {(() => {
+              const n = usesInMap([...picked]);
+              return n ? <span className="warn-text">{n} cell{n === 1 ? '' : 's'} of the open map use{n === 1 ? 's' : ''} {picked.size === 1 ? 'it' : 'them'}: they will show as missing.</span> : null;
+            })()}{' '}
+            <span className="muted">Nothing is written until you save.</span>
+            <button className="btn small" onClick={() => setDeleting(false)}>
+              Keep
+            </button>
+            <button className="btn small danger" autoFocus onClick={deleteTiles}>
+              Delete
+            </button>
+          </div>
+        )}
         {(opNote || error) && painting === null && (
           <p className={`small dte-note${error ? ' error-text' : ''}`}>
             {error ?? opNote}

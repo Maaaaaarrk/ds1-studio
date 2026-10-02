@@ -805,6 +805,9 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .dt1v-size input { width: 90px; }
 .dt1l-colours { display: flex; align-items: center; gap: 6px; }
 .dt1l-colours select { width: auto; }
+.dt1l-remove { margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--error) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--error) 8%, transparent); font-size: 12px; }
+.dt1l-remove .modal-actions { margin-top: 8px; }
+footer .status-zoom { color: inherit; font: inherit; padding: 0; }
 .dt1l-chosen { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .dt1l-chosen .chip { display: inline-flex; align-items: center; gap: 4px; }
 .dtt-badge.chosen { background: color-mix(in srgb, var(--ok) 25%, transparent); color: var(--ok); }
@@ -1117,3 +1120,4 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 7px; font: 600 11px/1
 .browser-pin { margin-left: 6px; font-size: 10px; opacity: 0.7; }
 .dte-note { margin: 4px 0 6px; }
 .og-act { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.dte-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--error) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--error) 8%, transparent); font-size: 12px; }

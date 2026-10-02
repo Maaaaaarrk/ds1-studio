@@ -64,6 +64,27 @@ export async function typeTakenKeys(gd: GameData, type: LvlTypeInfo | null | und
   return taken;
 }
 
+/**
+ * Tile numbers used by the DT1s loaded together with `dt1Path`: the open map's other libraries (`mapLibs`) and those
+ * of every level type that lists it. A tile given one of these numbers could be drawn from the other DT1 instead
+ * (the first-loaded wins), so new numbers for its tiles avoid them.
+ */
+export async function sharedTakenKeys(gd: GameData, dt1Path: string, mapLibs: string[] = []): Promise<Set<string>> {
+  const self = normalizePath(dt1Path);
+  const paths = new Set(mapLibs.map(normalizePath));
+  for (const t of gd.lvlTypes) {
+    const files = t.files.filter(Boolean).map((f) => normalizePath(TILES + f));
+    if (files.includes(self)) for (const f of files) paths.add(f);
+  }
+  paths.delete(self);
+  const taken = new Set<string>();
+  for (const p of paths) {
+    const d = await gd.dt1(p).catch(() => null);
+    for (const t of d?.tiles ?? []) taken.add(tileIdentity(t.orientation, t.mainIndex, t.subIndex));
+  }
+  return taken;
+}
+
 /** The own-tiles file with `records` added after what it already holds; also the index of the first new tile. */
 export function appendTiles(existing: Uint8Array | null, records: Dt1Record[]): { bytes: Uint8Array; first: number } {
   const before = existing ? dt1Records(existing) : [];

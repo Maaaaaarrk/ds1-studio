@@ -114,9 +114,12 @@ export function mirrorRecord(r: Dt1Record): Dt1Record {
 /** The north-corner wall's other half (orientations 3 and 4 share their main/sub and are placed together). */
 export const cornerPartner = (o: number) => (o === 3 ? 4 : o === 4 ? 3 : null);
 
-/** The lowest sub index free for (orientation, main) among `records` (for a corner: free for both halves). */
-export function freeSub(records: Dt1Record[], orientation: number, main: number): number {
-  const keys = new Set(records.map((r) => recordInfo(r)).map((i) => `${i.orientation}|${i.main}|${i.sub}`));
+/**
+ * The lowest sub index free for (orientation, main) among `records` and the `taken` numbers ("orientation|main|sub",
+ * e.g. those of the other DT1s loaded with it); for a corner: free for both halves.
+ */
+export function freeSub(records: Dt1Record[], orientation: number, main: number, taken: ReadonlySet<string> = new Set()): number {
+  const keys = new Set([...taken, ...records.map((r) => recordInfo(r)).map((i) => `${i.orientation}|${i.main}|${i.sub}`)]);
   const os = [orientation, ...(cornerPartner(orientation) !== null ? [cornerPartner(orientation)!] : [])];
   for (let s = 0; s < 256; s++) if (os.every((o) => !keys.has(`${o}|${main}|${s}`))) return s;
   return -1;
