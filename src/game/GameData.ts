@@ -40,6 +40,7 @@ export class GameData {
   private dt1s = new Map<string, Promise<Dt1 | null>>();
   private presetsByFile = new Map<string, PresetInfo>();
   private levelTypeById = new Map<number, number>();
+  private levelPalById = new Map<number, number>();
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
   /** "act:type:id" -> name and sprite recipe, from the game's own tables (acts 1-based; see objectCatalog). */
@@ -98,7 +99,9 @@ export class GameData {
     }
     for (const row of levels?.rows ?? []) {
       const id = Number(row['Id']);
-      if (Number.isFinite(id)) gd.levelTypeById.set(id, Number(row['LevelType']));
+      if (!Number.isFinite(id)) continue;
+      gd.levelTypeById.set(id, Number(row['LevelType']));
+      gd.levelPalById.set(id, Number(row['Pal']) || 0);
     }
     for (const row of prest?.rows ?? []) {
       const info: PresetInfo = {
@@ -250,6 +253,15 @@ export class GameData {
     return this.objectTable;
   }
   private objectTable = false;
+
+  /**
+   * The act palette (0-4) the game draws a level with: its Levels.txt Pal (empty = 0, as the game reads it), which
+   * PD2 sets apart from the act for many levels. null when Levels.txt has no such level.
+   */
+  levelPal(levelId: number): number | null {
+    const p = this.levelPalById.get(levelId);
+    return p === undefined ? null : Math.min(4, Math.max(0, p));
+  }
 
   /** The levels (Levels.txt Id > 0) whose LevelType is this type. */
   levelsOfType(typeId: number): number[] {

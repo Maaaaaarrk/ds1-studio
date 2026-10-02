@@ -16,7 +16,7 @@ import { serializeTxtTable } from '../formats/txtTable';
 import { arrivalProblem, arrivalText } from './arrival';
 import { dt1Act, loadAct0Palette } from './act0Palette';
 import { neededDt1s } from './importMatch';
-import { guessDrawnAct } from './openMap';
+import { drawnPalettes, guessDrawnAct } from './openMap';
 import type { Palette } from '../formats/palette';
 import { blankObjectNames, nameStringsWrite, readStringTables } from './objectStrings';
 
@@ -318,10 +318,28 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
     // The rules the game's table loaders and level builder follow (row = record, first claiming row, sizes, act,
     // palette, overlaps, path lengths); see game/addToGame.ts.
     const [p2, l2, t2] = await Promise.all([loadTable(gd.fs, 'LvlPrest.txt'), loadTable(gd.fs, 'Levels.txt'), loadTable(gd.fs, 'LvlTypes.txt')]);
+    // The act this map's tiles were drawn for, from their art: what Pal should name. Libraries using only the colours
+    // every act shares look right under any Pal; when the rest disagree (or need the classic Act 5 palette, which no
+    // Pal names), the level type's act is the guess, as before.
+    const tilesAct = await (async (): Promise<number | null | undefined> => {
+      const a0 = await loadAct0Palette(gd.fs).catch(() => null);
+      if (!a0) return undefined;
+      const acts = new Set<number>();
+      for (const l of lib.loaded) {
+        if (!l.found || isBuiltinPath(l.path)) continue;
+        const dt1 = await gd.dt1(l.path).catch(() => null);
+        if (!dt1 || !dt1.tiles.some((t) => decodeTile(t)?.pixels.some((px) => px && !a0.usable[px]))) continue;
+        const act = dt1Act(l.path) ?? guessDrawnAct(dt1.tiles, await drawnPalettes(gd));
+        if (act === null || act > 4) return undefined;
+        acts.add(act);
+      }
+      return acts.size === 0 ? null : acts.size === 1 ? [...acts][0] : undefined;
+    })();
     const issues = p2 && l2 && t2
       ? verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1, {
           entryImageExists: (name) => !!gd.fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`)),
           kept,
+          tilesAct,
         })
       : [];
     // Every too-long path together, so one dialog renames them all.
@@ -373,7 +391,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
           const palAct = pal === 5 ? 4 : Math.min(4, Math.max(0, pal));
           const a0 = await loadAct0Palette(gd.fs).catch(() => null);
           let pals: Palette[] | null = null;
-          const actPalettes = async () => (pals ??= await Promise.all([0, 1, 2, 3, 4].map((a) => gd.palette(a))));
+          const actPalettes = async () => (pals ??= await drawnPalettes(gd));
           if (a0) {
             const unsafe: { path: string; share: number }[] = [];
             for (const l of lib.loaded) {

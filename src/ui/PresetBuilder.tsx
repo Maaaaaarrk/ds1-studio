@@ -4,7 +4,7 @@ import { act0Remap, dt1Act, loadAct0Palette } from '../game/act0Palette';
 import { decodeTile } from '../formats/dt1';
 import { dt1Records } from '../formats/dt1Write';
 import { buildCustomDt1 } from '../game/customDt1';
-import { guessDrawnAct } from '../game/openMap';
+import { drawnPalettes, guessDrawnAct } from '../game/openMap';
 import { isBuiltinPath } from '../game/specialTiles';
 import { isEmptyCell } from '../formats/ds1';
 import { newDs1 } from '../formats/ds1ops';
@@ -104,7 +104,7 @@ export function PresetBuilder({ source, gd, onSave, onClose, categories = [] }: 
         const dt1 = parseDt1(bytes);
         if (!act0For.current.has(choice)) {
           const a0 = await loadAct0Palette(gd.fs).catch(() => null);
-          const pals = await Promise.all([0, 1, 2, 3, 4].map(a => gd.palette(a)));
+          const pals = await drawnPalettes(gd);
           const act = dt1Act(choice) ?? guessDrawnAct(dt1.tiles, pals) ?? Math.min(4, source.ds1.act);
           act0For.current.set(choice, a0 ? act0Remap(pals[act], a0.usable) : null);
         }

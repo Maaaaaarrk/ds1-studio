@@ -100,15 +100,14 @@ export function act0Remap(home: Palette, usable: ArrayLike<boolean>): Uint8Array
 }
 
 /**
- * The act a tile library was drawn for, from its folder: ACT1-ACT4, expansion = Act 5, and Guild = Act 1 (Blizzard's
- * unused guild tiles are Act 1 art: Gimli's Act 0 pack converts them that way). null when the folder doesn't say:
- * then look at the art (openMap's guessDrawnAct), never just at the level's act, which bakes that act's wrong colours
- * into the Act 0 file.
+ * The act a tile library was drawn for, from its folder: ACT1-ACT4, expansion = Act 5. null when the folder doesn't
+ * say: then look at the art (openMap's guessDrawnAct with drawnPalettes), never just at the level's act, which bakes
+ * that act's wrong colours into the Act 0 file. Blizzard's unused Guild tiles are not Act 1 art (as once assumed here):
+ * they were drawn with d2data.mpq's classic Act 5 palette, which the art test recognises.
  */
 export function dt1Act(path: string): number | null {
-  const m = /^data\/global\/tiles\/(?:act(\d)|(expansion)|(guild))\//i.exec(path);
+  const m = /^data\/global\/tiles\/(?:act(\d)|(expansion))\//i.exec(path);
   if (!m) return null;
-  if (m[3]) return 0;
   return m[2] ? 4 : Math.min(4, Math.max(0, Number(m[1]) - 1));
 }
 

@@ -151,13 +151,18 @@ function speckScores(tiles: Dt1Tile[], palettes: Palette[]): { scores: number[];
 }
 
 /**
- * The game draws a level with the palette of the act it belongs to (the DS1 header's act is not used for that).
- * For maps LvlPrest places in a level, use that level type's act. Otherwise (custom maps) keep the header's act unless
+ * The game draws a level with the palette its Levels.txt Pal names (the DS1 header's act is not used for that).
+ * For maps LvlPrest places in a level, use that (else the level type's act). Otherwise (custom maps) keep the header's act unless
  * the map's tiles look clearly cleaner under another act's palette, i.e. they were drawn for that palette.
  */
 async function choosePaletteAct(gd: GameData, ds1: Ds1, r: Dt1Resolution, lib: TileLibrary): Promise<[number, PaletteSource]> {
   // Only trust the level type when LvlPrest names a level; presets shared by many levels (LevelId 0) get a guessed type.
-  if (r.source === 'lvlprest' && (r.preset?.levelId ?? 0) > 0 && r.lvlType?.act) return [r.lvlType.act - 1, 'level'];
+  const levelId = r.preset?.levelId ?? 0;
+  if (r.source === 'lvlprest' && levelId > 0) {
+    const pal = gd.levelPal(levelId);
+    if (pal !== null) return [pal, 'level'];
+    if (r.lvlType?.act) return [r.lvlType.act - 1, 'level'];
+  }
   // Sample the tiles this map actually uses.
   const used = new Set<Dt1Tile>();
   const sample = (orientation: number, main: number, sub: number) => {
@@ -181,14 +186,42 @@ async function choosePaletteAct(gd: GameData, ds1: Ds1, r: Dt1Resolution, lib: T
 /**
  * The act a tile library's art was drawn for, from the art itself (see speckScores): the act palette under which its
  * act-specific pixels blend in with their neighbours best. null when it has too few of them to tell. `palettes` are
- * the five act palettes, Act 1 first.
+ * the five act palettes, Act 1 first, optionally followed by the classic Act 5 one (drawnPalettes): then the answer
+ * can be OLD_ACT5_PALETTE.
  */
 export function guessDrawnAct(tiles: Dt1Tile[], palettes: Palette[]): number | null {
+  const r = drawnActScores(tiles, palettes);
+  return r && pickDrawnAct(r);
+}
+
+/**
+ * The palettes art can have been drawn for, as guessDrawnAct takes them: the five acts', then d2data.mpq's classic
+ * Act 5 palette (index OLD_ACT5_PALETTE), which Blizzard's unused guild tiles were drawn with.
+ */
+export function drawnPalettes(gd: GameData): Promise<Palette[]> {
+  return Promise.all([0, 1, 2, 3, 4, OLD_ACT5_PALETTE].map((a) => gd.palette(a)));
+}
+
+/** How badly the tiles' act-specific pixels clash under each palette (lower = drawn for it); null: too few to tell. */
+export function drawnActScores(tiles: Dt1Tile[], palettes: Palette[]): number[] | null {
   const step = Math.max(1, Math.floor(tiles.length / 48));
   const { scores, samples } = speckScores(tiles.filter((_, i) => i % step === 0), palettes);
-  if (samples < 100) return null;
-  return scores.indexOf(Math.min(...scores));
+  return samples < 100 ? null : scores;
 }
+
+/**
+ * The act a set of scores (drawnActScores) points to. A sixth score, for d2data.mpq's classic Act 5 palette
+ * (OLD_ACT5_PALETTE), wins only by a clear margin: that palette is close to Act 1's, so Act 1 art often scores a
+ * little better under it, while art really drawn for it (Blizzard's unused guild tiles) clashes far less there than
+ * under any palette the game uses.
+ */
+export function pickDrawnAct(scores: number[]): number {
+  const real = scores.slice(0, 5);
+  const best = real.indexOf(Math.min(...real));
+  return scores.length > 5 && scores[5] < real[best] * CLASSIC_MARGIN ? OLD_ACT5_PALETTE : best;
+}
+/** Measured: the 241 vanilla DT1s score at least 0.80 of their best real palette under the classic one; the 12 guild DT1s 0.44-0.76. */
+export const CLASSIC_MARGIN = 0.78;
 
 /** Redraws an open map with another act's palette. */
 export async function withPalette(gd: GameData, map: OpenMap, act: number): Promise<OpenMap> {

@@ -584,7 +584,16 @@ export function verifyInGame(
   mapRel: string,
   ds1: { width: number; height: number },
   /** Whether a loading-screen image exists (ENTRY_IMAGE_DIR + name + .dc6); without it only empty EntryFiles are flagged. */
-  opts: { entryImageExists?: (entryFile: string) => boolean; /** Questions already answered "keep it" (TableIssue.keep). */ kept?: (key: string) => boolean } = {},
+  opts: {
+    entryImageExists?: (entryFile: string) => boolean;
+    /** Questions already answered "keep it" (TableIssue.keep). */
+    kept?: (key: string) => boolean;
+    /**
+     * The act the level's tiles were drawn for, judged from their art (null: they only use colours every act shares,
+     * so any Pal is right). Given, it replaces the level type's Act column as the palette the level should use.
+     */
+    tilesAct?: number | null;
+  } = {},
 ): TableIssue[] {
   const { prest, levels, types } = tables;
   const out: TableIssue[] = [];
@@ -723,7 +732,7 @@ export function verifyInGame(
         columns: [{ table: 'Levels', col: 'Act' }],
         fix: cellFix('Levels.txt', levels, `Set Act to ${levelAct(levelId)} (Act ${levelAct(levelId) + 1})`, [{ row: lRow, col: 'Act', value: String(levelAct(levelId)) }]),
       });
-    const tilesAct = typeAct(types, num(getCell(levels, lRow, 'LevelType')));
+    const tilesAct = opts.tilesAct !== undefined ? opts.tilesAct : typeAct(types, num(getCell(levels, lRow, 'LevelType')));
     const pal = num(getCell(levels, lRow, 'Pal'));
     if (tilesAct !== null && pal !== tilesAct)
       out.push({

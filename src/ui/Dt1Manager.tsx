@@ -1,4 +1,4 @@
-import { viewPalette } from '../game/openMap';
+import { drawnPalettes, guessDrawnAct, viewPalette } from '../game/openMap';
 import { keysOf, ownTilesPath } from '../game/ownTiles';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { tileKey } from '../game/dt1Review';
@@ -578,7 +578,7 @@ function CustomDt1Panel({
   // Act 0 colours are the standard: a custom DT1 is act-safe unless you untick it.
   const [actSafe, setActSafe] = useState(true);
   /** Act 0 conversion: per act a library can be drawn for, the remap to act-safe colours. */
-  const [safe, setSafe] = useState<{ usable: boolean[]; remaps: Uint8Array[] } | null>(null);
+  const [safe, setSafe] = useState<{ usable: boolean[]; remaps: Uint8Array[]; palettes: Palette[] } | null>(null);
   const bytes = useRef(new Map<string, Uint8Array>());
   // What the map's level already loads: a new tile with one of these numbers would mix with it in game.
   // Adding to a DT1: its own tiles' numbers are taken too (it may not be in the map yet).
@@ -624,15 +624,20 @@ function CustomDt1Panel({
   useEffect(() => {
     if (!actSafe || safe) return;
     let live = true;
-    void Promise.all([loadAct0Palette(gd.fs), ...[0, 1, 2, 3, 4].map((a) => gd.palette(a))])
-      .then(([a0, ...acts]) => live && setSafe({ usable: a0.usable, remaps: acts.map((p) => act0Remap(p, a0.usable)) }))
+    void Promise.all([loadAct0Palette(gd.fs), drawnPalettes(gd)])
+      .then(([a0, acts]) => live && setSafe({ usable: a0.usable, remaps: acts.map((p) => act0Remap(p, a0.usable)), palettes: acts }))
       .catch((e) => live && setError(`Couldn't load the Act 0 palette: ${(e as Error).message}`));
     return () => {
       live = false;
     };
   }, [actSafe, safe, gd]);
-  // The act a library was drawn for: its folder's, else this map's (a mod's own folder is usually made for it).
-  const actOf = (dt1: string) => libraryAct(dt1) ?? map.ds1.act;
+  // The act a library was drawn for: its folder's, else the one its art fits (classic Act 5 included), else this map's.
+  const drawnFor = useMemo(() => {
+    const out = new Map<string, number | null>();
+    if (safe) for (const [path, d] of libs) out.set(path, libraryAct(path) ?? guessDrawnAct(d.tiles, safe.palettes));
+    return out;
+  }, [libs, safe]);
+  const actOf = (dt1: string) => drawnFor.get(dt1) ?? libraryAct(dt1) ?? map.ds1.act;
   const remapFor = actSafe && safe ? (dt1: string) => safe.remaps[actOf(dt1)] : undefined;
   // After conversion the colours are the same in every act: show them in this map's palette.
   const safePalettes = useMemo(() => safe?.remaps.map((r) => remapPalette(map.palette, r)) ?? null, [safe, map.palette]);

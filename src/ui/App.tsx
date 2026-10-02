@@ -78,7 +78,7 @@ import { buildMapPackage, collectMapStrings, collectMapTxtRows, planImport, read
 import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPresets, type Preset, type SuggestProgress } from '../game/presets';
 import { buildPresetPackage, planPresetImport, type PresetImportPlan } from '../game/presetPackage';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef, type FileHistoryChange } from '../game/MapDocument';
-import { guessDrawnAct, openMap, refreshPalette, rememberPalette, setViewPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
+import { drawnPalettes, guessDrawnAct, openMap, refreshPalette, rememberPalette, setViewPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
 import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
@@ -2670,7 +2670,7 @@ export function App() {
         let act = dt1Act(f.path);
         if (act === null) {
           try {
-            act = guessDrawnAct(parseDt1(f.bytes).tiles, await Promise.all([0, 1, 2, 3, 4].map((a) => gd.palette(a))));
+            act = guessDrawnAct(parseDt1(f.bytes).tiles, await drawnPalettes(gd));
           } catch {
             act = null;
           }

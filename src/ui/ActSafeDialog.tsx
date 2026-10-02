@@ -3,7 +3,7 @@ import { decodeTile, type Dt1, type TileImage } from '../formats/dt1';
 import { recolorDt1 } from '../formats/dt1Edit';
 import { ACT0_PALETTE, OLD_ACT5_PALETTE, PALETTE_NAMES, type Palette } from '../formats/palette';
 import { act0Remap, dt1Act, loadAct0Palette, type Act0Palette } from '../game/act0Palette';
-import { guessDrawnAct } from '../game/openMap';
+import { drawnPalettes, guessDrawnAct } from '../game/openMap';
 import type { GameData } from '../game/GameData';
 import type { OpenMap } from '../game/openMap';
 import { isBuiltinPath } from '../game/specialTiles';
@@ -65,7 +65,7 @@ export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onChooseVer
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [a0, ...pals] = await Promise.all([loadAct0Palette(gd.fs), ...[0, 1, 2, 3, 4].map((a) => gd.palette(a))]);
+      const [a0, pals] = await Promise.all([loadAct0Palette(gd.fs), drawnPalettes(gd)]);
       const paths = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
       const out: Row[] = [];
       for (const path of paths) {
@@ -231,7 +231,7 @@ export function ActSafeDialog({ map, gd, canSave, onApply, onRemove, onChooseVer
                     <label className="small">
                       Drawn for{' '}
                       <select value={act} onChange={(e) => setFrom((f) => ({ ...f, [r.path]: Number(e.target.value) }))}>
-                        {[0, 1, 2, 3, 4].map((a) => (
+                        {[0, 1, 2, 3, 4, OLD_ACT5_PALETTE].map((a) => (
                           <option key={a} value={a}>
                             {PALETTE_NAMES[a]}
                             {a === mapAct ? ' (this map)' : ''}
