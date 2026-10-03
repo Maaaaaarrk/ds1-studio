@@ -128,7 +128,7 @@ import type { SpriteFrame } from '../formats/dc6';
 import { AutomapPanel } from './AutomapPanel';
 import { AutomapEditor } from './AutomapEditor';
 import { ObjectGallery } from './ObjectGallery';
-import type { SpriteAnimation } from '../game/spriteAnim';
+import { clearSpriteAnimationCache, type SpriteAnimation } from '../game/spriteAnim';
 import { GameSizePicker } from './GameSizePicker';
 import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, GUIDE_URL, MANUAL_PDF_URL, openExternal, type UpdateInfo } from '../app/updates';
@@ -5245,6 +5245,8 @@ export function App() {
           canWrite={canWrite}
           onCreate={async (r) => {
             await writeFiles(r.files);
+            // An updated object is drawn again from its new files.
+            clearSpriteAnimationCache();
             await reloadTables();
             setDialog(null);
             notify(`Saved “${r.name}” as Act ${r.act0 + 1} object id ${r.id}: place it from the Objects gallery (Objects tool, Act ${r.act0 + 1}).`);

@@ -240,15 +240,14 @@ export function splitStrip(width: number, height: number, pixels: Uint8Array, co
 }
 
 /**
- * The object's graphics files: its COF (one TR layer, one direction) and the DC6 holding the frames. The picture's
- * bottom centre stands on the object's spot, raised by `feet` pixels (where its base is drawn above the picture's
- * bottom edge).
+ * The object's graphics files: its COF (one TR layer, one direction) and the DC6 holding the frames. The object's spot
+ * is `anchorX` pixels from the picture's left edge (its centre unless given) and `feet` pixels above its bottom edge.
  */
-export function customObjectFiles(token: string, frames: ObjectFrame[], feet = 0): { path: string; bytes: Uint8Array }[] {
+export function customObjectFiles(token: string, frames: ObjectFrame[], feet = 0, anchorX?: number): { path: string; bytes: Uint8Array }[] {
   const t = token.toLowerCase();
   const w = frames[0].width;
   const h = frames[0].height;
-  const left = -Math.floor(w / 2);
+  const left = -(anchorX ?? Math.floor(w / 2));
   const cof = writeCof({
     directions: 1,
     framesPerDir: frames.length,
@@ -287,4 +286,53 @@ export function guessFrames(width: number, height: number, alpha: (x: number, y:
   if (width > height && width % height === 0 && width / height <= 64 && fits(width / height)) return width / height;
   for (let n = 2; n <= 64; n++) if (fits(n)) return n;
   return 1;
+}
+
+/** An objects.txt data line as a column → value record (what objectSpec reads). */
+export function rowRecord(objects: TxtTableDoc, line: number): Record<string, string> {
+  return Object.fromEntries(objects.columns.map((c, i) => [c, objects.rows[line]?.[i] ?? '']));
+}
+
+/** The mode column suffix of the animation an object shows (objectSpec's NU / OP / ON). */
+const MODE_INDEX: Record<string, number> = { NU: 0, OP: 1, ON: 2 };
+
+/** What a picture to start from carries: frames on one canvas, the spot it stands on, and the row's settings. */
+export interface StartingPoint {
+  frames: ObjectFrame[];
+  /** The spot: pixels from the canvas's left edge, and above its bottom edge. */
+  anchorX: number;
+  feet: number;
+  fps: number;
+  light: number;
+  lightColour: [number, number, number];
+  flicker: boolean;
+  blocks: boolean;
+  size: number;
+  drawUnder: boolean;
+}
+
+/**
+ * An object's frames (as loadSpriteAnimation gives them: one canvas, its top-left `offsetX/offsetY` from the feet)
+ * and its objects.txt row's settings for the mode it is shown in, as a starting point for a custom object.
+ */
+export function startingPoint(
+  anim: { frames: { width: number; height: number; pixels: Uint8Array }[]; offsetX: number; offsetY: number; height: number; fps: number },
+  row: Record<string, string>,
+  mode: string,
+): StartingPoint {
+  const m = MODE_INDEX[mode] ?? 0;
+  const n = (c: string) => Number((row[c] ?? '').trim()) || 0;
+  const delta = n(`FrameDelta${m}`);
+  return {
+    frames: anim.frames.map((f) => ({ width: f.width, height: f.height, pixels: f.pixels })),
+    anchorX: -anim.offsetX,
+    feet: anim.offsetY + anim.height,
+    fps: Math.max(1, Math.min(25, Math.round(delta ? (delta / 256) * 25 : anim.fps))),
+    light: n(`Lit${m}`),
+    lightColour: [n('Red') || 255, n('Green') || 255, n('Blue') || 255],
+    flicker: n('Flicker') === 1,
+    blocks: n(`HasCollision${m}`) === 1,
+    size: Math.max(1, n('SizeX') || 1),
+    drawUnder: n('DrawUnder') === 1,
+  };
 }

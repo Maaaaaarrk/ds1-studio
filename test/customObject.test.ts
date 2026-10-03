@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parseCof, writeCof } from '../src/formats/cof';
 import { parseTxtTable, serializeTxtTable, getCell } from '../src/formats/txtTable';
-import { customObjectFiles, customObjectRow, freeToken, gameRows, guessFrames, objectSlots, presetRow, splitStrip, CUSTOM_MARK, type CustomObjectOptions } from '../src/game/customObject';
+import { customObjectFiles, customObjectRow, freeToken, gameRows, guessFrames, rowRecord, startingPoint, objectSlots, presetRow, splitStrip, CUSTOM_MARK, type CustomObjectOptions } from '../src/game/customObject';
 import { objectSpec } from '../src/game/objectCatalog';
 import { loadSpriteDetailed } from '../src/game/sprites';
+import { loadSpriteAnimation } from '../src/game/spriteAnim';
 import { LayeredFs, LooseSource, MpqSource } from '../src/vfs/vfs';
 import { NodeFileAccess } from '../tools/nodeAccess';
 import { D2_DIR, hasD2 } from '../tools/testdata';
@@ -11,12 +12,12 @@ import { D2_DIR, hasD2 } from '../tools/testdata';
 const enc = (s: string) => new TextEncoder().encode(s);
 /** A tiny objects.txt: a dummy row 0, a used row 1, the Expansion divider, a function row 2 and a plain row 3. */
 const OBJECTS = [
-  'Name\tdescription - not loaded\tId\tToken\tFrameCnt0\tMode0\tOperateFn\tTR\tSelectable0\tExtra',
-  'dummy\ttest\t0\t\t0\t0\t0\t0\t0\tkeep',
-  'Barrel\tBarrel\t1\tB1\t1\t1\t5\t1\t1\tkeep',
+  'Name\tdescription - not loaded\tId\tToken\tFrameCnt0\tFrameDelta0\tLit0\tMode0\tOperateFn\tTR\tSelectable0\tExtra',
+  'dummy\ttest\t0\t\t0\t0\t0\t0\t0\t0\t0\tkeep',
+  'Barrel\tBarrel\t1\tB1\t1\t256\t0\t1\t5\t1\t1\tkeep',
   'Expansion',
-  'Portal\tportal\t2\tPP\t1\t1\t0\t1\t1\tkeep',
-  'Unused\tunused thing\t3\tUU\t1\t1\t0\t1\t0\tkeep',
+  'Portal\tportal\t2\tPP\t1\t256\t0\t1\t0\t1\t1\tkeep',
+  'Unused\tunused thing\t3\tUU\t1\t256\t0\t1\t0\t1\t0\tkeep',
 ].join('\r\n') + '\r\n';
 const doc = () => parseTxtTable(enc(OBJECTS));
 const OPTS: CustomObjectOptions = { name: 'Lantern', token: 'zz', frames: 4, speed: 128, light: 6, lightColour: [255, 200, 120], flicker: true, blocks: true, size: 2, drawUnder: false, act0: 0 };
@@ -97,6 +98,29 @@ describe('custom objects', () => {
     expect([...first.sprite!.pixels]).toEqual([...frames[0].pixels]);
     const second = await loadSpriteDetailed(fs, spec, 0, 1);
     expect([...second.sprite!.pixels]).toEqual([...frames[1].pixels]);
+  });
+});
+
+describe('starting from an existing object', () => {
+  it('takes the settings of the mode the object is shown in', () => {
+    const row = { FrameDelta2: '128', Lit2: '9', Red: '255', Green: '120', Blue: '40', Flicker: '1', HasCollision2: '1', SizeX: '3', DrawUnder: '0', Lit0: '0' };
+    const p = startingPoint({ frames: [{ width: 20, height: 50, pixels: new Uint8Array(1000) }], offsetX: -10, offsetY: -40, height: 50, fps: 10 }, row, 'ON');
+    expect(p).toMatchObject({ anchorX: 10, feet: 10, fps: 13, light: 9, lightColour: [255, 120, 40], flicker: true, blocks: true, size: 3, drawUnder: false });
+  });
+
+  it('reads one of yours back exactly: frames, spot and settings', async () => {
+    const frames = splitStrip(12, 5, Uint8Array.from({ length: 60 }, (_, i) => (i % 6 ? 30 + (i % 4) : 0)), 2);
+    const files = customObjectFiles('zq', frames, 3, 2);
+    const fs = new LayeredFs([new LooseSource('mod', new Map(files.map((f) => [f.path, async () => f.bytes])))]);
+    const d = customObjectRow(doc(), 3, { ...OPTS, token: 'zq', frames: 2, speed: 128, light: 4, flicker: false, blocks: false });
+    const row = rowRecord(d, gameRows(d)[3]);
+    const spec = objectSpec(row)!;
+    const anim = (await loadSpriteAnimation(fs, spec, 0))!;
+    const p = startingPoint(anim, row, spec.mode);
+    expect(p).toMatchObject({ anchorX: 2, feet: 3, fps: 13, light: 4, flicker: false, blocks: false });
+    expect(p.frames.map((f) => [...f.pixels])).toEqual(frames.map((f) => [...f.pixels]));
+    // Saved again from that starting point, the graphics are the same files.
+    expect(customObjectFiles('zq', p.frames, p.feet, p.anchorX)).toEqual(files);
   });
 });
 

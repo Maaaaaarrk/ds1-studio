@@ -3,7 +3,10 @@ import type { Palette } from '../formats/palette';
 import { readPng, toPaletteIndices, type PngImage } from '../formats/png';
 import { getCell, serializeTxtTable, type TxtTableDoc } from '../formats/txtTable';
 import { loadAct0Palette } from '../game/act0Palette';
-import { customObjectFiles, customObjectRow, freeToken, fromGameArchive, gameRows, objectSlots, objGroupRows, guessFrames, scanRowUse, splitStrip, vanillaRowUse, type ObjectSlot } from '../game/customObject';
+import { customObjectFiles, customObjectRow, freeToken, fromGameArchive, gameRows, objectSlots, objGroupRows, guessFrames, presetRow, rowRecord, scanRowUse, splitStrip, startingPoint, vanillaRowUse, type ObjectSlot, type StartingPoint } from '../game/customObject';
+import { objectSpec } from '../game/objectCatalog';
+import { loadSpriteAnimation } from '../game/spriteAnim';
+import type { SpriteSpec } from '../game/sprites';
 import type { GameData } from '../game/GameData';
 import { loadTable } from '../game/levelTables';
 import { importBytes } from '../vfs/save';
@@ -47,6 +50,12 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
   const [name, setName] = useState('');
   const [token, setToken] = useState('');
   const [png, setPng] = useState<{ img: PngImage; file: string } | null>(null);
+  /** Frames taken from an object (yours, to edit, or any other to start from) instead of a PNG. */
+  const [start, setStart] = useState<{ point: StartingPoint; from: string } | null>(null);
+  /** Where the object stands, from the picture's left edge (null: its centre). */
+  const [anchorX, setAnchorX] = useState<number | null>(null);
+  const [startId, setStartId] = useState('');
+  const [loadingStart, setLoadingStart] = useState(false);
   const [frames, setFrames] = useState(1);
   const [fps, setFps] = useState(12);
   const [feet, setFeet] = useState(0);
@@ -109,20 +118,59 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
     if (slotId !== null && slots.some((s) => s.id === slotId && s.free)) return;
     setSlotId(slots.find((s) => s.free && !s.custom)?.id ?? slots.find((s) => s.free)?.id ?? null);
   }, [slots]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Takes an object's frames and settings as the starting point (its colours are kept as they are). */
+  const loadFrom = async (spec: SpriteSpec | null, row: Record<string, string>, from: string) => {
+    if (!spec) throw new Error(`${from} has no graphics to start from.`);
+    const anim = await loadSpriteAnimation(gd.fs, spec, spec.direction ?? 0);
+    if (!anim?.frames.length) throw new Error(`${from}'s graphics weren't found (data/global/objects/${spec.token}/).`);
+    const point = startingPoint(anim, row, spec.mode);
+    setPng(null);
+    setStart({ point, from });
+    setFrames(point.frames.length);
+    setFps(point.fps);
+    setFeet(point.feet);
+    setAnchorX(point.anchorX);
+    setLight(point.light);
+    setLightHex(`#${point.lightColour.map((c) => Math.min(255, c).toString(16).padStart(2, '0')).join('')}`);
+    setFlicker(point.flicker);
+    setBlocks(point.blocks);
+    setSize(point.size);
+    setDrawUnder(point.drawUnder);
+  };
+  const run = (f: () => Promise<void>) => {
+    setError(null);
+    setLoadingStart(true);
+    f()
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setLoadingStart(false));
+  };
+  // One of yours: everything comes back, its picture included, to change what you like and save it again.
   useEffect(() => {
     if (!slot?.custom || !objects) return;
     const line = gameRows(objects)[slot.row];
+    const row = rowRecord(objects, line);
     setName(slot.name);
     setToken(getCell(objects, line, 'Token').toLowerCase());
-    setFrames(Math.max(1, Number(getCell(objects, line, 'FrameCnt0')) || 1));
-    setLight(Number(getCell(objects, line, 'Lit0')) || 0);
-    setBlocks(getCell(objects, line, 'HasCollision0') === '1');
-    setSize(Math.max(1, Number(getCell(objects, line, 'SizeX')) || 1));
-    setDrawUnder(getCell(objects, line, 'DrawUnder') === '1');
+    run(() => loadFrom(objectSpec(row), row, slot.name));
   }, [slot?.row, slot?.custom]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setStartId(''), [act0]);
+  /** Objects of the act with graphics, to start from. */
+  const startable = useMemo(() => gd.objectList(act0).filter((o) => o.type === 2 && o.hasSprite), [gd, act0]);
+  const startFrom = (id: number) => {
+    if (!objects || !presets) return;
+    const entry = startable.find((o) => o.id === id);
+    const line = gameRows(objects)[presetRow(presets, act0, id)];
+    if (!entry || line === undefined) return;
+    const label = entry.name.replace(/\s*\([^)]*\)\s*$/, '');
+    run(async () => {
+      await loadFrom(gd.objectSpec(act0, 2, id), rowRecord(objects, line), label);
+      if (!slot?.custom) setName((n) => (n && n !== 'My object' ? n : `${label} (custom)`.slice(0, 40)));
+    });
+  };
 
   // The picture as palette indices, cut into its frames.
   const cut = useMemo(() => {
+    if (start) return { frames: start.point.frames, remapped: 0, problem: null as string | null };
     if (!png || !palette) return null;
     try {
       const { pixels, remapped } = toPaletteIndices(png.img, palette, shared ? usable : null);
@@ -130,7 +178,7 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
     } catch (e) {
       return { frames: [], remapped: 0, problem: (e as Error).message };
     }
-  }, [png, palette, usable, shared, frames]);
+  }, [png, start, palette, usable, shared, frames]);
 
   // Preview: the frames playing at the chosen speed, on a dark ground with the object's spot marked.
   useEffect(() => {
@@ -160,14 +208,14 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
       // Where the object stands (its spot in the map).
       const y = (f.height - feet) * scale;
       ctx.fillStyle = '#e8b04a';
-      ctx.fillRect((f.width / 2) * scale - 3, y - 1, 7, 3);
+      ctx.fillRect((anchorX ?? Math.floor(f.width / 2)) * scale - 3, y - 1, 7, 3);
       k++;
     };
     draw();
     if (cut.frames.length < 2) return;
     const t = setInterval(draw, 1000 / Math.max(1, fps));
     return () => clearInterval(t);
-  }, [cut, palette, fps, feet]);
+  }, [cut, palette, fps, feet, anchorX]);
 
   const pickPng = async () => {
     setError(null);
@@ -176,6 +224,8 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
     try {
       const img = readPng(bytes);
       setPng({ img, file: 'picture.png' });
+      setStart(null);
+      setAnchorX(null);
       // A strip: guess the frame count from the see-through gaps between frames.
       setFrames(guessFrames(img.width, img.height, (x, y) => img.rgba[(y * img.width + x) * 4 + 3] >= 128));
       if (!name) setName('My object');
@@ -209,7 +259,7 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
         drawUnder,
         act0,
       });
-      const files = [...customObjectFiles(token, cut.frames, feet), { path: gd.fs.exactPath('data/global/excel/objects.txt') ?? 'data/global/excel/objects.txt', bytes: serializeTxtTable(doc) }];
+      const files = [...customObjectFiles(token, cut.frames, feet, anchorX ?? undefined), { path: gd.fs.exactPath('data/global/excel/objects.txt') ?? 'data/global/excel/objects.txt', bytes: serializeTxtTable(doc) }];
       await onCreate({ files, act0, id: slot.id, name: name.trim() });
     } catch (e) {
       setError((e as Error).message);
@@ -291,14 +341,37 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
             </span>
           )}
           <HelpTip text="One image, or an animation as a strip: the frames side by side, all the same width. Transparent pixels stay see-through. Its colours are matched to the game's palette." />
+          <span className="muted small">or</span>
+          <select
+            value={startId}
+            disabled={!objects || loadingStart}
+            onChange={(e) => {
+              setStartId(e.target.value);
+              if (e.target.value !== '') startFrom(Number(e.target.value));
+            }}
+            title="Start from an object of this act that has graphics: its picture (all its frames, colours as they are) and its light, collision and size become the starting point"
+          >
+            <option value="">Start from an existing object…</option>
+            {startable.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.id} · {o.name}
+              </option>
+            ))}
+          </select>
         </span>
       </div>
-      {png && (
+      {loadingStart && <p className="small muted">Loading its graphics…</p>}
+      {start && (
+        <p className="small muted">
+          Picture from <b>{start.from}</b>: {start.point.frames.length} frame{start.point.frames.length === 1 ? '' : 's'}, {start.point.frames[0].width}×{start.point.frames[0].height}, colours as they are. Choose a PNG to use your own picture instead.
+        </p>
+      )}
+      {(png || start) && (
         <>
           <div className="form-row">
             <span>Frames</span>
             <span className="entry-row">
-              <input type="number" min={1} max={64} value={frames} onChange={(e) => setFrames(Math.max(1, Math.min(64, Number(e.target.value) || 1)))} style={{ width: 60 }} />
+              <input type="number" min={1} max={64} value={frames} disabled={!!start} title={start ? 'The frames of the object it starts from' : undefined} onChange={(e) => setFrames(Math.max(1, Math.min(64, Number(e.target.value) || 1)))} style={{ width: 60 }} />
               {frames > 1 && (
                 <label className="small">
                   at <input type="number" min={1} max={25} value={fps} onChange={(e) => setFps(Math.max(1, Math.min(25, Number(e.target.value) || 1)))} style={{ width: 50 }} /> frames a second
@@ -318,7 +391,7 @@ export function CustomObjectDialog({ gd, act0: initialAct, canWrite, onCreate, o
           <div className="custom-object-preview">
             {cut?.problem ? <span className="error-text small">{cut.problem}</span> : <canvas ref={canvas} />}
           </div>
-          <label className="small">
+          <label className="small" hidden={!!start}>
             <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> only colours that look the same in every act
             <HelpTip text="On: it looks the same placed in any act (some colours, dark greens especially, come out a little duller). Off: the closest colours of Act N's palette, exact in that act's levels but possibly off in others'." />
           </label>
