@@ -1121,3 +1121,5 @@ footer .status-zoom { color: inherit; font: inherit; padding: 0; }
 .dte-note { margin: 4px 0 6px; }
 .og-act { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .dte-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--error) 45%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--error) 8%, transparent); font-size: 12px; }
+.custom-object-preview { display: flex; justify-content: center; padding: 8px; margin: 6px 0; background: var(--panel-2, #15171a); border-radius: 6px; min-height: 60px; }
+.custom-object-preview canvas { image-rendering: pixelated; }

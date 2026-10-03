@@ -150,6 +150,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ObjectPanel } from './ObjectPanel';
 import { TypePackageDialog } from './TypePackageDialog';
 import { EntryTextDialog } from './EntryTextDialog';
+import { CustomObjectDialog } from './CustomObjectDialog';
 import { applyTheme, findTheme } from './themes';
 import { Thumb, TilePalette, type PaletteFocus } from './TilePalette';
 import { arrivalProblem, arrivalText } from '../game/arrival';
@@ -426,7 +427,7 @@ export function App() {
   const [selectedObject, setSelectedObject] = useState<number | null>(null);
   /** Every object of one kind, selected together by double-clicking one (Delete / Ctrl+C / Ctrl+X act on all). */
   const [objectGroup, setObjectGroup] = useState<Set<number> | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | 'entrytext' | 'typepkg' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'saveAs' | 'resize' | 'dt1s' | 'tables' | 'register' | 'cube' | 'check' | 'export' | 'import' | 'shortcuts' | 'dt1edit' | 'about' | 'update' | 'automap' | 'replace' | 'image' | 'actsafe' | 'pops' | 'crashes' | 'dt1lib' | 'cleanup' | 'restore' | 'floors' | 'water' | 'lvltype' | 'entrytext' | 'typepkg' | 'customobj' | null>(null);
   const [tableTarget, setTableTarget] = useState<TableTarget | null>(null);
   const [sidePanel, setSidePanel] = useState<'tiles' | 'presets'>('tiles');
   const [resizeMode, setResizeMode] = useState(false);
@@ -3891,6 +3892,7 @@ export function App() {
             { label: 'Add to game', icon: <Layers />, onClick: () => setDialog('register'), disabled: noMap || !canWrite, title: 'Create the LvlPrest/Levels/LvlTypes rows that make the game load this map' },
             { label: 'Level type…', icon: <Shapes />, onClick: () => setDialog('lvltype'), disabled: noMap || !canWrite, title: 'Give the map’s level another level type (LvlTypes), with the File slots, Dt1Mask and automap rows it needs' },
             { label: 'Entering text…', icon: <TypeIcon />, onClick: () => setDialog('entrytext'), disabled: !canWrite, title: 'Make the “Entering …” text image a level shows as players walk in (its EntryFile), drawn with the game’s font as txt2dc6 did' },
+            { label: 'Custom object…', icon: <Box />, onClick: () => setDialog('customobj'), disabled: !canWrite, title: 'Make a picture of yours (a PNG, still or animated) into an object you place like the game’s own: it takes over an objects.txt row nothing uses' },
             { label: 'Cube recipe', icon: <FlaskConical />, onClick: () => setDialog('cube'), disabled: noMap || !canWrite, title: 'Create a map item and a cube recipe for it' },
             { label: 'Automap editor', icon: <MapIcon />, onClick: openAutomapEditor, disabled: noMap, title: 'See and change what the in-game automap draws for every tile of this map' },
           ],
@@ -5233,6 +5235,20 @@ export function App() {
             notify(`Gathered ${plan.copies.length} tile libraries into one folder and pointed the level type at them (LvlTypes.txt; the old file kept as .bak). The originals are still there.`);
           }}
           onExport={(name, zip) => exportBytes(name, zip)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'customobj' && data.status === 'ready' && (
+        <CustomObjectDialog
+          gd={data.gd}
+          act0={map?.ds1.act ?? 0}
+          canWrite={canWrite}
+          onCreate={async (r) => {
+            await writeFiles(r.files);
+            await reloadTables();
+            setDialog(null);
+            notify(`Saved “${r.name}” as Act ${r.act0 + 1} object id ${r.id}: place it from the Objects gallery (Objects tool, Act ${r.act0 + 1}).`);
+          }}
           onClose={() => setDialog(null)}
         />
       )}

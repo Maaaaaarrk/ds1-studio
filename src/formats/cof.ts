@@ -67,3 +67,31 @@ export function drawOrder(cof: Cof, direction: number, frame: number): number[] 
   const base = (direction * cof.framesPerDir + frame) * n;
   return [...cof.priority.subarray(base, base + n)];
 }
+
+/**
+ * A COF file: the header as the game's own object COFs have it (version 0x14, then 00 00 13 00), the box, the
+ * animation rate, each layer (9 bytes), the frame keys and the draw order. parseCof reads it back.
+ */
+export function writeCof(c: Omit<Cof, 'frameKeys' | 'priority'> & { frameKeys?: Uint8Array; priority?: Uint8Array }): Uint8Array {
+  const n = c.layers.length;
+  const frames = c.directions * c.framesPerDir;
+  const out = new Uint8Array(28 + n * 9 + c.framesPerDir + frames * n);
+  const v = new DataView(out.buffer);
+  out.set([n, c.framesPerDir, c.directions, 0x14, 0, 0, 0x13, 0], 0);
+  v.setInt32(8, c.box.xMin, true);
+  v.setInt32(12, c.box.xMax, true);
+  v.setInt32(16, c.box.yMin, true);
+  v.setInt32(20, c.box.yMax, true);
+  v.setInt16(24, c.animationRate, true);
+  c.layers.forEach((l, i) => {
+    const at = 28 + i * 9;
+    out.set([l.component, l.shadow ? 1 : 0, l.selectable ? 1 : 0, l.transparent ? 1 : 0, l.drawEffect], at);
+    for (let k = 0; k < 4 && k < l.weaponClass.length; k++) out[at + 5 + k] = l.weaponClass.toLowerCase().charCodeAt(k);
+  });
+  const keys = 28 + n * 9;
+  if (c.frameKeys) out.set(c.frameKeys.subarray(0, c.framesPerDir), keys);
+  // Draw order: the layers in their own order on every frame unless given.
+  const order = c.priority ?? Uint8Array.from({ length: frames * n }, (_, i) => c.layers[i % n].component);
+  out.set(order, keys + c.framesPerDir);
+  return out;
+}

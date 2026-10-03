@@ -39,6 +39,11 @@ export class GameData {
   private palettes = new Map<number, Promise<Palette>>();
   private dt1s = new Map<string, Promise<Dt1 | null>>();
   private presetsByFile = new Map<string, PresetInfo>();
+  /**
+   * The game's table from DS1 object ids to objects.txt rows: per act (0-4), 150 ids each (-1/0 = no object). null
+   * when it wasn't found in the game's program files.
+   */
+  objectPresets: Int32Array[] | null = null;
   private levelTypeById = new Map<number, number>();
   private levelPalById = new Map<number, number>();
   readonly lvlTypes: LvlTypeInfo[] = [];
@@ -82,6 +87,7 @@ export class GameData {
       if (presets) break;
     }
     gd.objectTable = !!presets;
+    gd.objectPresets = presets;
     if (!presets) gd.warnings.push('The object table wasn’t found in D2Common.dll or Game.exe; objects are shown by number.');
     for (const e of buildCatalog(presets, { objects, monPreset, monStats, monStats2, superUniques })) {
       gd.objRows.set(`${e.act}:${e.type}:${e.id}`, { name: e.name, spec: e.spec, nameKey: e.nameKey, selectable: e.selectable, row: e.row });

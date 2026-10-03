@@ -292,7 +292,8 @@ export class McpSession {
   t_list_maps(a: Record<string, unknown>): ToolResult {
     const f = String(a.filter ?? '').toLowerCase();
     const limit = Number(a.limit) || 200;
-    const all = this.gd.fs.list((p) => p.endsWith('.ds1') && p.startsWith('data/global/tiles/')).filter((p) => !f || p.includes(f));
+    // The filter is checked on the normalized path: the listed ones keep the game's capitals (expansion/Map/…).
+    const all = this.gd.fs.list((p) => p.endsWith('.ds1') && p.startsWith('data/global/tiles/') && (!f || p.includes(f)));
     return text(`${all.length} map${all.length === 1 ? '' : 's'}${all.length > limit ? ` (first ${limit})` : ''}:\n${all.slice(0, limit).join('\n')}`);
   }
 

@@ -27,6 +27,18 @@ describe('MCP protocol', () => {
   });
 });
 
+describe('MCP list_maps', () => {
+  it("finds maps in folders with capitals (a mod's expansion/Map/…) whatever case the filter has", async () => {
+    const { LooseSource } = await import('../src/vfs/vfs');
+    const file = async () => new Uint8Array();
+    const fs = new LayeredFs([new LooseSource('mod', new Map([['data/global/tiles/expansion/Map/guild3.ds1', file], ['data/global/tiles/act1/town/townN1.ds1', file]]))]);
+    const s = new McpSession({ fs } as unknown as GameData, { saveTarget: null });
+    expect(textOf(await s.call('list_maps', { filter: 'expansion/map/guild' }))).toMatch(/1 map:\ndata\/global\/tiles\/expansion\/Map\/guild3\.ds1/);
+    expect(textOf(await s.call('list_maps', { filter: 'Expansion/Map' }))).toMatch(/1 map:/);
+    expect(textOf(await s.call('list_maps', {}))).toMatch(/2 maps:/);
+  });
+});
+
 describe.runIf(hasD2)('MCP session', () => {
   let s: McpSession;
   const saved = new Map<string, Uint8Array>();

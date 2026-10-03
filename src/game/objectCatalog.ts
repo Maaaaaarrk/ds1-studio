@@ -13,6 +13,9 @@ import { GAME_BINARY_FILES } from '../vfs/vfs';
  *   name and the sprite.
  */
 
+/** The description the Custom object tool gives the objects.txt rows it makes (see customObject.ts). */
+export const CUSTOM_OBJECT_MARK = 'DS1 Studio custom: ';
+
 export const PRESET_ACTS = 5;
 export const OBJECTS_PER_ACT = 150;
 
@@ -119,7 +122,9 @@ export function buildCatalog(presets: Int32Array[] | null, t: CatalogTables): Ca
       const r = objById.get(row);
       if (!r) return void out.push({ act: a + 1, type: 2, id, name: `Object row ${row} (not in objects.txt)`, spec: null });
       const desc = r['description - not loaded'] || r['Name'] || `Object ${row}`;
-      out.push({ act: a + 1, type: 2, id, name: `${prettyName(desc)} (${row})`, spec: objectSpec(r), nameKey: r['Name'] ?? '', selectable: (r['Selectable0'] ?? '').trim() === '1', row });
+      // A custom object goes by the name it was given there.
+      const custom = desc.startsWith(CUSTOM_OBJECT_MARK) ? desc.slice(CUSTOM_OBJECT_MARK.length) : null;
+      out.push({ act: a + 1, type: 2, id, name: custom ? `${custom} (custom, ${row})` : `${prettyName(desc)} (${row})`, spec: objectSpec(r), nameKey: r['Name'] ?? '', selectable: (r['Selectable0'] ?? '').trim() === '1', row });
     }),
   );
 
