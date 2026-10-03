@@ -135,6 +135,11 @@ export function WalkPanel({ ds1, lib, scene, revision, hover, onPaint, brush, on
         </div>
         <p className="small muted">{brush.mode === 'replace' ? 'Replace all eight bits on each painted sub-tile with this exact combination.' : brush.mode === 'clear' ? 'Remove only the checked flags. Unchecked flags stay as they are.' : 'Add the checked flags together. Existing flags stay as they are.'}</p>
         <div className="field-label">Combined flags · {collisionHex(brush.bits)}</div>
+        {!brush.bits && brush.mode !== 'replace' && (
+          <p className="small warn-text">
+            Nothing ticked: this brush changes nothing. Tick the flags to {brush.mode === 'block' ? 'add' : 'remove'}. To make cells walkable, choose Remove flags with Block walking ticked (or the Make walkable quick brush).
+          </p>
+        )}
         {[false, true].map(advanced => {
           const rows = WALK_FLAGS.filter(f => (f.bit >= 0x10) === advanced).map(f => (
             <label key={f.bit} className="collision-flag" title={f.help}>

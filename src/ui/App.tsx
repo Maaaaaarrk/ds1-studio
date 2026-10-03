@@ -134,7 +134,7 @@ import { AboutDialog, UpdateDialog } from './HelpDialogs';
 import { bugReportUrl, checkForUpdate, featureRequestUrl, GUIDE_URL, MANUAL_PDF_URL, openExternal, type UpdateInfo } from '../app/updates';
 import { Dt1Editor, type Dt1EditResult } from './Dt1Editor';
 import { WalkLegend, WalkPanel, type WalkBrush } from './WalkPanel';
-import { planTileFlags, planWalkEdit, type WalkPaint } from '../game/walkEdit';
+import { planTileFlags, planWalkEdit, unresolvedEdits, type WalkPaint } from '../game/walkEdit';
 import { appendTiles, keysOf, ownTilesPath, typeTakenKeys } from '../game/ownTiles';
 import { cellFix, ENTRY_IMAGE_DIR, levelSizeFix, MAX_TILE_PATH, rowOfRecord, tilePathProblem } from '../game/addToGame';
 import { ActSafeDialog } from './ActSafeDialog';
@@ -1902,7 +1902,7 @@ export function App() {
   /** The map's level type has no free slot for its libraries: the dialog offering ways to make room. */
   const [typeFull, setTypeFull] = useState<{ reason: string | null } | null>(null);
   const applyDt1s = useCallback(
-    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; floors?: number; edits?: CellEdit[]; file?: FileHistoryChange; label?: string } = {}) => {
+    async (paths: string[], opts: { keepOpen?: boolean; strict?: boolean; floors?: number; edits?: CellEdit[]; file?: FileHistoryChange; label?: string } = {}): Promise<OpenMap | undefined> => {
       if (!gd || !map || !doc) return;
       let note = '';
       if (map.resolution.preset) {
@@ -1935,6 +1935,7 @@ export function App() {
       setMap(refreshed);
       if (!opts.keepOpen) setDialog(null);
       notify('Tile libraries: ' + paths.length + note, !!note);
+      return refreshed;
     },
     [gd, map, doc, mutate, writeFiles, notify],
   );
@@ -2281,6 +2282,11 @@ export function App() {
   };
   applyWalkRef.current = async (paint: WalkPaint) => {
     if (!gd || !map || !doc || historyBusyRef.current) return;
+    // Nothing ticked: adding or removing no flags changes nothing (only "Set exactly" can set none).
+    if (!paint.bits && paint.mode !== 'replace') {
+      notify('Walkability: tick the flags to add or remove first (Block walking, …). To make cells walkable, choose Remove flags with Block walking ticked, or the Make walkable quick brush.', true);
+      return;
+    }
     if (walkBrush.target === 'tile') {
       // Like WinDS1: the tiles' own flags change (shown at once; written with Save tile flags).
       const plan = planTileFlags(doc.ds1, map.lib, paint);
@@ -2303,6 +2309,12 @@ export function App() {
       if (tooLong) throw new Error(`the level type's own tile file would be ${tooLong}`);
       const plan = await planWalkEdit({ ds1: doc.ds1, lib: map.lib, read: (p) => gd.fs.read(p), walkPath, walk: own.existing, paint, extraTaken: own.taken });
       if (currentContext.current.doc !== doc || doc.revision !== expectedRevision) throw new Error('The map changed during the stroke. Please try again.');
+      // Safeguard: every cell the stroke changes must use a tile the map's libraries or the new tile file have, before
+      // anything is written. Otherwise those cells would show as missing (and have no collision in game).
+      const planned = new Set([...keysOf(plan.dt1 ?? own.existing)]);
+      const was = (e: CellEdit) => (e.layer.kind === 'floor' ? doc.ds1.floors : e.layer.kind === 'wall' ? doc.ds1.walls : doc.ds1.shadows)[e.layer.index]?.[e.y * doc.ds1.width + e.x];
+      const beforeWrite = unresolvedEdits(plan.edits, (o, m, sub) => map.lib.variants(o, m, sub).length > 0 || planned.has(tileIdentity(o, m, sub)), was);
+      if (beforeWrite.length) throw new Error(`stopped before changing anything: ${beforeWrite.length} cell${beforeWrite.length === 1 ? '' : 's'} would use tiles that don't exist (first at ${beforeWrite[0].x},${beforeWrite[0].y}). Please report this.`);
       if (plan.dt1) {
         await writeFiles([{ path: walkPath, bytes: plan.dt1 }]);
         gd.forgetDt1(walkPath);
@@ -2310,10 +2322,20 @@ export function App() {
       const libs = map.lib.loaded.filter((l) => l.found && !isBuiltinPath(l.path)).map((l) => l.path);
       const listed = libs.some((p) => normalizePath(p) === normalizePath(walkPath));
       if (plan.edits.length) {
-        await applyDt1s(plan.dt1 && !listed ? [...libs, walkPath] : libs, {
+        const after = await applyDt1s(plan.dt1 && !listed ? [...libs, walkPath] : libs, {
           keepOpen: true, strict: true, floors: plan.floors, edits: plan.edits,
           label: `Paint collision on ${plan.changed} sub-tiles`,
         });
+        // Safeguard: read back as the map loads now (its tables and libraries), the changed cells must find their tiles.
+        // If not (the tile file didn't load, or the tables don't list it), the stroke is undone at once.
+        const lost = after ? unresolvedEdits(plan.edits, (o, m, sub) => after.lib.variants(o, m, sub).length > 0, was) : [];
+        if (lost.length) {
+          doc.undo();
+          bump();
+          throw new Error(
+            `undone: ${lost.length} cell${lost.length === 1 ? '' : 's'} would have lost ${lost.length === 1 ? 'its' : 'their'} tiles, because ${walkPath.replace(/^data\/global\/tiles\//i, '')} isn't loaded for this map (check that it is in your mod folder and that the level type lists it). Your map is as it was.`,
+          );
+        }
       }
       const msg = plan.changed ? `${plan.changed} sub-tile${plan.changed === 1 ? '' : 's'} updated. Other flag bits and tile artwork are preserved.` : 'No flags changed by this brush.';
       setWalkLast(`${msg}${plan.skipped.length ? ` Skipped ${plan.skipped.length} cell${plan.skipped.length === 1 ? '' : 's'}: ${plan.skipped.slice(0, 3).join('; ')}` : ''}`);
@@ -2535,7 +2557,12 @@ export function App() {
       for (const [path, changes] of byPath) {
         const bytes = await gd.fs.read(path);
         if (!bytes) throw new Error(`${path} could not be read`);
-        writes.push({ path, bytes: writeTileSettings(bytes, changes) });
+        const next = writeTileSettings(bytes, changes);
+        // Safeguard: the rewritten DT1 must read back with the same tiles (only their flags changed) before it's written.
+        const was = parseDt1(bytes).tiles, now = parseDt1(next).tiles;
+        const same = was.length === now.length && was.every((t, i) => t.orientation === now[i].orientation && t.mainIndex === now[i].mainIndex && t.subIndex === now[i].subIndex && t.blocks.length === now[i].blocks.length);
+        if (!same) throw new Error(`${path.split('/').pop()} came out wrong when its flags were written, so nothing was saved. Please report this.`);
+        writes.push({ path, bytes: next });
       }
       await writeFiles(writes);
       const n = flagEdits.current.size;

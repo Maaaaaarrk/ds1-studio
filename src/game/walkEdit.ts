@@ -3,7 +3,7 @@ import { Orientation, type Dt1Tile } from '../formats/dt1';
 import { blockerRecord, buildDt1, changedRecord, dt1Records, recordInfo, type Dt1Record } from '../formats/dt1Write';
 import { normalizePath } from '../vfs/vfs';
 import type { TileLibrary } from './GameData';
-import type { LayerRef } from './MapDocument';
+import type { CellEdit, LayerRef } from './MapDocument';
 import { isBuiltinPath } from './specialTiles';
 
 /**
@@ -359,4 +359,27 @@ function noFloorBesides(contributors: Contributor[], blocker: Contributor): bool
 /** A floor cell marked hidden (bit 31): the game loads it for collision but doesn't draw it. */
 function hidden<T extends TileCell>(c: T): T {
   return { ...c, prop4: c.prop4 | 0x80, hidden: true };
+}
+
+/**
+ * The edits that would leave a cell on a tile `has` can't find (shown as missing; the game would have no graphics or
+ * collision for it): every edited cell, blockers included, except empty ones, special tiles, and cells whose tile
+ * number the edit doesn't change (`before`: what the cell holds now), which aren't this edit's doing.
+ */
+export function unresolvedEdits(edits: CellEdit[], has: (orientation: number, main: number, sub: number) => boolean, before?: (e: CellEdit) => TileCell | WallCell): CellEdit[] {
+  const key = (e: CellEdit, c: TileCell | WallCell) => {
+    const o = e.layer.kind === 'floor' ? 0 : e.layer.kind === 'shadow' ? 13 : (c as WallCell).orientation;
+    return { o, main: c.mainIndex, sub: c.subIndex };
+  };
+  return edits.filter((e) => {
+    if (isEmptyCell(e.cell)) return false;
+    const k = key(e, e.cell);
+    if (k.o === 10 || k.o === 11) return false;
+    const was = before?.(e);
+    if (was && !isEmptyCell(was)) {
+      const w = key(e, was);
+      if (w.o === k.o && w.main === k.main && w.sub === k.sub) return false;
+    }
+    return !has(k.o, k.main, k.sub);
+  });
 }
