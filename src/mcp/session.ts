@@ -11,8 +11,8 @@ import { specialTileInfo } from '../game/specialTiles';
 import { noSpawnPlan, presetRooms, roomAt, roomRegions, spawns, UNWALKABLE, type PresetRoom, type RoomRegions } from '../game/spawnRegions';
 import { OBJECTS_PER_ACT } from '../game/objectCatalog';
 import type { Sprite } from '../game/sprites';
-import { buildScene, walkability, type Scene } from '../render/scene';
-import { spawnLevelOf, spawnOverlay, walkableOverlay, type MapOverlay } from '../game/mapOverlays';
+import { buildScene, type Scene } from '../render/scene';
+import { overlayFlags, spawnLevelOf, spawnOverlay, walkableOverlay, type MapOverlay } from '../game/mapOverlays';
 import { exportSize } from '../render/exportImage';
 import type { SaveTarget } from '../vfs/save';
 import { normalizePath } from '../vfs/vfs';
@@ -287,7 +287,7 @@ export const TOOLS: ToolDef[] = [
           type: 'string',
           enum: ['walkable', 'spawn'],
           description:
-            'Colour the map sub-tile by sub-tile, with a legend: "walkable" = where players can walk (green), monsters only (yellow, flag 0x08) or blocked (red; tile flag 0x01, the cell’s unwalkable bit); "spawn" = where random monsters can be placed (green) and why not elsewhere: blocked, node region, room with a level warp, or the level spawns none (LvlPrest Populate, Levels MonDen).',
+            'Colour the map sub-tile by sub-tile, with a legend: "walkable" = where players can walk (green), monsters only (yellow, flag 0x08) or blocked (red; tile flag 0x01, the cell’s unwalkable bit), plus void players can walk into (magenta: in game a cell without a floor blocks nothing unless a tile there does) and the open edge where they walk off (orange); "spawn" = where random monsters can be placed (green) and why not elsewhere: blocked, node region, room with a level warp, or the level spawns none (LvlPrest Populate, Levels MonDen).',
         },
       },
     },
@@ -797,7 +797,7 @@ export class McpSession {
       }
     const scene = this.scene();
     if (a.overlay !== undefined && a.overlay !== 'walkable' && a.overlay !== 'spawn') fail('overlay must be "walkable" or "spawn".');
-    const flags = a.overlay ? walkability(map.ds1, scene, map.lib) : null;
+    const flags = a.overlay ? overlayFlags(map.ds1, scene, map.lib, map.resolution.preset) : null;
     const overlay = !flags ? null : a.overlay === 'walkable' ? walkableOverlay(map.ds1, flags) : spawnOverlay(map.ds1, flags, spawnLevelOf(this.gd, map));
     const data = await this.host.render!(scene, map.ds1.objects, sprites, map, area, scale, a.objects !== false, a.special_tiles === true, overlay);
     const legend = overlay

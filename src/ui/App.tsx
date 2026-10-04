@@ -81,7 +81,7 @@ import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPre
 import { buildPresetPackage, planPresetImport, type PresetImportPlan } from '../game/presetPackage';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef, type FileHistoryChange } from '../game/MapDocument';
 import { drawnPalettes, guessDrawnAct, openMap, refreshPalette, rememberPalette, setViewPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, walkability, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
@@ -159,7 +159,7 @@ import { arrivalProblem, arrivalText } from '../game/arrival';
 import { readAutomapRows, type AutomapSource } from '../game/automapImport';
 import { AutomapImportDialog } from './AutomapImport';
 import { AREA_BANDS, areaColour, walkableArea } from '../game/walkArea';
-import { spawnLevelOf, spawnOverlay, walkableOverlay, type OverlayKind } from '../game/mapOverlays';
+import { overlayFlags, spawnLevelOf, spawnOverlay, walkableOverlay, type OverlayKind } from '../game/mapOverlays';
 import { OverviewLegend } from './OverviewLegend';
 import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, stackPaintEdits, type TileKey } from '../game/editTools';
@@ -1658,7 +1658,7 @@ export function App() {
   const overviewOf = useCallback(
     (kind: OverlayKind | null) => {
       if (!kind || !map || !scene || !gd) return null;
-      const flags = walkability(map.ds1, scene, map.lib);
+      const flags = overlayFlags(map.ds1, scene, map.lib, map.resolution.preset);
       return kind === 'walkable' ? walkableOverlay(map.ds1, flags) : spawnOverlay(map.ds1, flags, spawnLevelOf(gd, map));
     },
     [map, scene, gd],

@@ -27,6 +27,8 @@ export interface PresetInfo {
   logicals?: boolean;
   /** Populate=1: random monsters are placed. */
   populate?: boolean;
+  /** FillBlanks=1: cells without a first-layer floor get a hidden blank floor tile (style 30), with its flags. */
+  fillBlanks?: boolean;
 }
 
 /** A level's random-monster settings (Levels.txt), for the monster spawn overlay. */
@@ -144,6 +146,7 @@ export class GameData {
         popPad: Number(row['PopPad']) || 0,
         logicals: Number(row['Logicals']) === 1,
         populate: Number(row['Populate']) === 1,
+        fillBlanks: Number(row['FillBlanks']) === 1,
       };
       for (let i = 1; i <= 6; i++) {
         const f = row[`File${i}`];

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_CELL, withTile, type Ds1 } from '../src/formats/ds1';
 import { newDs1 } from '../src/formats/ds1ops';
-import { levelNoSpawn, spawnOverlay, SPAWN_CLASSES, walkableOverlay, WALK_CLASSES } from '../src/game/mapOverlays';
-import { SubTileFlag } from '../src/render/scene';
+import { levelNoSpawn, openVoid, spawnOverlay, SPAWN_CLASSES, walkableOverlay, WALK_CLASSES } from '../src/game/mapOverlays';
+import { blankFillFlags, buildScene, SubTileFlag, walkability } from '../src/render/scene';
+import { TileLibrary } from '../src/game/GameData';
 
 /**
  * A 17×9 map (two 8×8 game rooms and the last row and column) floored everywhere but cell 6,6, with a line of left
@@ -33,12 +34,61 @@ const at = (ov: ReturnType<typeof spawnOverlay>, d: Ds1, x: number, y: number) =
 };
 
 describe('walkable overview', () => {
-  it('colours walkable, player-blocked and blocked sub-tiles; cells without a floor stay clear', () => {
+  it('colours walkable, player-blocked and blocked sub-tiles; void walled in by blocked tiles stays clear', () => {
     const d = map();
     const ov = walkableOverlay(d, flags(d, { '1,1': SubTileFlag.BlockWalk, '2,2': SubTileFlag.BlockPlayerWalk, '3,3': SubTileFlag.BlockWalk | SubTileFlag.BlockPlayerWalk }));
     expect(ov.classes).toBe(WALK_CLASSES);
     expect([at(ov, d, 0, 0), at(ov, d, 1, 1), at(ov, d, 2, 2), at(ov, d, 3, 3), at(ov, d, 6, 6)]).toEqual(['walk', 'blocked', 'players', 'blocked', '']);
-    expect(ov.counts).toEqual([(17 * 9 - 4) * 25, 25, 50]);
+    expect(ov.counts).toEqual([(17 * 9 - 4) * 25, 25, 50, 0, 0]);
+  });
+});
+
+describe('void the game lets players walk into', () => {
+  /** The map with its void cell (6,6) free, as the game leaves a cell without a floor: no tile, no flags. */
+  const open = () => {
+    const d = map();
+    return { d, f: flags(d, {}).map((v, i) => (Math.floor(i / 25) === 6 * 17 + 6 ? 0 : v)) };
+  };
+
+  it('marks void reachable from walkable floor, and the floor edge next to it', () => {
+    const { d, f } = open();
+    const ov = walkableOverlay(d, f);
+    expect(at(ov, d, 6, 6)).toBe('void');
+    // The four floor neighbours' sub-tiles touching it are the open edge; a cell's middle isn't.
+    expect(ov.sub[(6 * 17 + 5) * 25 + 2 * 5 + 4]).toBe(5);
+    expect(at(ov, d, 5, 6)).toBe('walk');
+    expect(openVoid(d, f).edgeCells).toEqual([
+      { x: 6, y: 5 },
+      { x: 5, y: 6 },
+      { x: 7, y: 6 },
+      { x: 6, y: 7 },
+    ]);
+    expect(ov.notes[0]).toMatch(/4 floor cells border void/);
+  });
+
+  it('void walled off by blocked floor is not reachable', () => {
+    const { d, f } = open();
+    for (const [x, y] of [[6, 5], [5, 6], [7, 6], [6, 7]]) f.fill(SubTileFlag.BlockWalk, (y * 17 + x) * 25, (y * 17 + x) * 25 + 25);
+    const ov = walkableOverlay(d, f);
+    expect(at(ov, d, 6, 6)).toBe('');
+    expect(openVoid(d, f).edgeCells).toEqual([]);
+  });
+
+  it('monsters can be placed in reachable void of a spawning region', () => {
+    const { d, f } = open();
+    expect(at(spawnOverlay(d, f, { populate: true, logicals: true }), d, 6, 6)).toBe('void');
+  });
+
+  it('walkability in game mode: void blocks nothing unless the FillBlanks blank tile does', () => {
+    const d = map();
+    const lib = new TileLibrary();
+    const scene = buildScene(d, lib);
+    const i = (6 * 17 + 6) * 25 + 12;
+    expect(walkability(d, scene, lib)[i] & SubTileFlag.BlockWalk).toBe(SubTileFlag.BlockWalk);
+    expect(walkability(d, scene, lib, { blank: null })[i]).toBe(0);
+    expect(walkability(d, scene, lib, { blank: new Uint8Array(25).fill(SubTileFlag.BlockWalk) })[i]).toBe(SubTileFlag.BlockWalk);
+    // No blank tile in the level's DT1s: nothing.
+    expect([...blankFillFlags(lib, 0)].every((v) => v === 0)).toBe(true);
   });
 });
 

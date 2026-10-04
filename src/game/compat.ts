@@ -6,6 +6,8 @@ import { MpqSource, normalizePath } from '../vfs/vfs';
 import { GameData, TileLibrary } from './GameData';
 import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
+import { overlayFlags, openVoid } from './mapOverlays';
+import { presetRooms, roomAt } from './spawnRegions';
 import { clashingDt1s, duplicateDt1s, mixedVersions } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
 import { ENTRY_IMAGE_DIR, levelAct, TOWNS, verifyInGame } from './addToGame';
@@ -558,6 +560,28 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
           ? undefined
           : [{ kind: 'open-table', label: 'Open LvlPrest.txt (or use Map → Roof hiding → Set Pops)', table: 'LvlPrest.txt', key: prestRow?.['Name'] }],
     });
+
+  // --- Open edges: void the game lets players walk into ------------------------------------------------------------
+  const open = openVoid(ds1, overlayFlags(ds1, scene, lib, map.resolution.preset));
+  if (open.edgeCells.length) {
+    const rooms = presetRooms(ds1.width, ds1.height);
+    const byRoom = new Map<string, { x: number; y: number }[]>();
+    for (const c of open.edgeCells) {
+      const r = roomAt(rooms, c.x, c.y);
+      const key = r ? `room ${r.x0},${r.y0}-${r.x0 + r.w - 1},${r.y0 + r.h - 1}` : 'last row/column';
+      byRoom.set(key, [...(byRoom.get(key) ?? []), c]);
+    }
+    const list = (cells: { x: number; y: number }[]) => cells.slice(0, 12).map((c) => `${c.x},${c.y}`).join(' ') + (cells.length > 12 ? ` … (+${cells.length - 12})` : '');
+    out.push({
+      severity: 'warning',
+      area: 'Map',
+      title: `Walkable edge borders void (players can walk off): ${open.edgeCells.length} cells in ${byRoom.size} room${byRoom.size === 1 ? '' : 's'}`,
+      detail:
+        'In game a cell without a floor blocks nothing unless a tile there does (with LvlPrest FillBlanks, the hidden blank floor 30 the game puts there), so players walk off the art into the void. Put blocking tiles or walls along these edges, or a blocking blank tile in the level’s DT1s. ' +
+        [...byRoom].map(([room, cells]) => `${room}: ${cells.length} (${list(cells)})`).join('; '),
+      cells: open.edgeCells,
+    });
+  }
 
   // --- Objects -----------------------------------------------------------------------------------------------------
   const walk = walkability(ds1, scene, lib);
