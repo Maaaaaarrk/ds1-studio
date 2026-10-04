@@ -23,6 +23,10 @@ export interface PresetInfo {
   /** How many roof/wall hide areas ("pops") the game reads from the map, and their trigger padding in sub-tiles. */
   pops: number;
   popPad: number;
+  /** Logicals=1: rooms are split into wall-bounded regions, and seeds can mark them as no-spawn (see spawnRegions). */
+  logicals?: boolean;
+  /** Populate=1: random monsters are placed. */
+  populate?: boolean;
 }
 
 export type Dt1Source = 'lvlprest' | 'guessed' | 'embedded' | 'manual';
@@ -120,6 +124,8 @@ export class GameData {
         dt1Mask: Number(row['Dt1Mask']) >>> 0,
         pops: Number(row['Pops']) || 0,
         popPad: Number(row['PopPad']) || 0,
+        logicals: Number(row['Logicals']) === 1,
+        populate: Number(row['Populate']) === 1,
       };
       for (let i = 1; i <= 6; i++) {
         const f = row[`File${i}`];
@@ -194,6 +200,11 @@ export class GameData {
       n -= per;
     }
     return this.objRows.get(`${act}:${type}:${n}`) ?? null;
+  }
+
+  /** The objects.txt row (record number) a DS1 object resolves to, or null (NPCs, unknown ids). */
+  objectRowNumber(act0: number, type: number, id: number): number | null {
+    return type === 2 ? (this.objRow(act0, type, id)?.row ?? null) : null;
   }
 
   /** The string-table key of the name an object shows in game on hover (objects.txt Name), if it shows one. */

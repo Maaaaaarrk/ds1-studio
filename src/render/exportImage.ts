@@ -19,6 +19,8 @@ export interface ExportOptions {
   objects: boolean;
   /** Which scene items to draw (the map view's layer visibility). */
   visible: (it: DrawItem) => boolean;
+  /** Draw the special tiles (orientation 10/11: warps, entries…) that have graphics, after everything else. */
+  specials?: boolean;
   /** PNG (default) or JPEG (much smaller, for previews). */
   format?: 'png' | 'jpeg';
 }
@@ -107,7 +109,7 @@ export async function renderMapImage(scene: Scene, objects: Ds1Object[], sprites
   for (const it of scene.items) {
     if (it.kind === 'wall') flush(it.cellX + it.cellY - 1);
     else if (it.kind === 'roof' || it.kind === 'special') flush(Infinity);
-    if (!opt.visible(it) || it.kind === 'special' || !inArea(it.cellX, it.cellY)) continue;
+    if (!opt.visible(it) || (it.kind === 'special' && !opt.specials) || !inArea(it.cellX, it.cellY)) continue;
     const image = tileImage(it.tile);
     const img = toCanvas(it.tile, image, palette, it.kind === 'shadow');
     if (img && image) ctx.drawImage(img, it.x + image.offsetX, it.y + image.offsetY);

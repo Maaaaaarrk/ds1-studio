@@ -144,6 +144,11 @@ the exact setup command for Claude Code and the JSON for Claude Desktop.
   initialize / tools/list / tools/call / ping; `src/mcp/session.ts` defines the tools and runs them on the same editing
   code as the editor (MapDocument with undo, clipboard, edit tools, compatibility check, CPU renderer → JPEG).
 - It uses the folders chosen in the app (the saved config), reads only inside them and writes only through the save
-  target (the mod folder, keeping `.bak`). Maps are written only by `save_map`.
+  target (the mod folder, keeping `.bak`). Maps are written only by `save_map`. The loose mod folders are listed again
+  before the tools that look up files (`list_maps`, `open_map`, `new_map`, `check_map`), so files written meanwhile by
+  scripts or the editor are seen.
+- `regions` and `no_spawn_area` follow how the game picks where random monsters go in a preset
+  (`src/game/spawnRegions.ts`): 8×8 rooms split into regions by the first wall layer, a region whose seed has a hidden
+  first-layer floor is a node and gets no monsters (LvlPrest Logicals=1).
 - `test/mcp.test.ts` drives the protocol and the tools in Node. End to end: `cargo build --release --features
   tauri/custom-protocol` (as the installers do), then speak JSON-RPC to `ds1-studio.exe --mcp`.
