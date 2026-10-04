@@ -19,6 +19,8 @@ import { neededDt1s } from './importMatch';
 import { drawnPalettes, guessDrawnAct } from './openMap';
 import type { Palette } from '../formats/palette';
 import { blankObjectNames, nameStringsWrite, readStringTables } from './objectStrings';
+import { directIdsOnGameRows, looseOnlyRows, modArchiveTable, objectRows, unpairedPads } from './objectChecks';
+import { partlyNoSpawnRooms } from './spawnRegions';
 
 export type Severity = 'error' | 'warning' | 'info' | 'ok';
 
@@ -634,6 +636,48 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
   const stacked = stackedSpots.length;
   if (!offMap.length && !blocked.length && !stacked) out.push({ severity: 'ok', area: 'Objects', title: `${ds1.objects.length} objects placed on valid ground` });
 
+  // objects.txt rows the map's objects resolve to.
+  const objTable = objectRows(await table(gd, 'objects.txt'));
+  const rowOf = (o: { type: number; id: number }) => gd.objectRowNumber(ds1.act, o.type, o.id);
+  const at = (indices: number[]) => indices.map((i) => ({ x: Math.floor(ds1.objects[i].x / 5), y: Math.floor(ds1.objects[i].y / 5) }));
+  // Ids of 150+ on portal / quest rows are the likely "next act" mistakes; other clickable rows are listed, quieter.
+  const direct = directIdsOnGameRows(ds1.objects, objTable);
+  for (const group of [direct.filter((d) => d.role !== 'operable'), direct.filter((d) => d.role === 'operable')]) {
+    if (!group.length) continue;
+    const serious = group[0].role !== 'operable';
+    out.push({
+      severity: serious ? 'warning' : 'info',
+      area: 'Objects',
+      title: `${group.length} object${group.length === 1 ? '' : 's'} with an id of 150 or more ${group.length === 1 ? 'is' : 'are'} ${serious ? [...new Set(group.map((d) => d.role))].join(' / ') : 'operable'} object${group.length === 1 ? '' : 's'}: ${[...new Set(group.map((d) => `${ds1.objects[d.index].id} = ${d.name}`))].join(', ')}`,
+      detail: `The game reads an object id of 150 or more as the objects.txt row id − 150 itself, in any act (not as the next act’s object), and these rows are ones the game runs code for${serious ? ': a stray Town portal or Cairn Stone can break warps or crash the game' : ' (players can click them)'}. Check each is the object you meant; a later act’s object is placed as 150 + its objects.txt row, an earlier act’s with a negative id.`,
+      cells: at(group.map((d) => d.index)),
+    });
+  }
+  const modObjects = await modArchiveTable(gd.fs, 'objects.txt');
+  if (modObjects && !modObjects.inUse) {
+    const loose = looseOnlyRows(ds1.objects, rowOf, objTable, objectRows(modObjects.table));
+    if (loose.length) {
+      const rows = [...new Map(loose.map((l) => [l.row, l])).values()];
+      out.push({
+        severity: 'warning',
+        area: 'Objects',
+        title: `${loose.length} object${loose.length === 1 ? ' uses an objects.txt row' : 's use objects.txt rows'} only the loose objects.txt has`,
+        detail: `${rows.map((l) => `row ${l.row} "${l.loose}" (${l.archived ? `"${l.archived}" in ${modObjects.label}` : `not in ${modObjects.label}`})`).join('; ')}. Seen in PD2: the game used the objects.txt inside ${modObjects.label} and ignored the loose one, so objects on such rows showed junk graphics or crashed the game. Use rows ${modObjects.label}'s table has, or test in game.`,
+        cells: at(loose.map((l) => l.index)),
+        columns: [{ table: 'objects', col: 'Token' }],
+      });
+    }
+  }
+  const pads = unpairedPads(ds1.objects, rowOf, objTable);
+  if (pads.length)
+    out.push({
+      severity: 'warning',
+      area: 'Objects',
+      title: `${pads.length} teleport pad${pads.length === 1 ? ' has' : 's have'} no partner nearby`,
+      detail: 'A teleportation pad (objects.txt OperateFn 27) takes players to another pad of the same row in its own 8×8 room or a touching one (40 sub-tiles). Place its partner within that range.',
+      cells: at(pads),
+    });
+
   // Names shown on hover: an objects.txt Name whose string is missing or only spaces shows as an empty box in game.
   const nameKeys = ds1.objects.filter((o) => o.type === 2).map((o) => gd.objectNameKey(ds1.act, o.type, o.id)).filter((k): k is string => !!k);
   if (nameKeys.length) {
@@ -649,6 +693,23 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
         fixes: write ? [{ kind: 'table-write', label: `Add ${blanks.map((b) => `"${b.suggested}"`).join(', ')} to patchstring.tbl`, writes: [write] }] : undefined,
       });
     }
+  }
+
+  // --- Monster spawning: rooms made no-spawn (region seeds with a hidden floor 1) that still have spawning regions ----
+  const partly = partlyNoSpawnRooms(ds1);
+  if (partly.length) {
+    const logicals = prestRow ? Number(prestRow['Logicals']) === 1 : null;
+    out.push({
+      severity: 'warning',
+      area: 'Map',
+      title: `${partly.length} room${partly.length === 1 ? ' is' : 's are'} only partly no-spawn: monsters can still spawn in ${partly.reduce((n, p) => n + p.open.length, 0)} region${partly.reduce((n, p) => n + p.open.length, 0) === 1 ? '' : 's'}`,
+      detail: `${partly
+        .slice(0, 12)
+        .map((p) => `room ${p.rr.room.x0},${p.rr.room.y0}: seeds ${p.open.map((r) => `${r.seed.x},${r.seed.y}`).join(' ')}`)
+        .join('; ')}${partly.length > 12 ? '; …' : ''}. Each 8×8 room is split into regions by the first wall layer; a region gets no random monsters only when its first cell (seed) has a hidden floor1 tile. Some regions of these rooms have one, these don't (the MCP no_spawn_area tool marks every seed of a room).${logicals === false ? ' Also, the map’s LvlPrest row has Logicals 0, so the game doesn’t use regions at all: set Logicals to 1.' : ''}`,
+      cells: partly.flatMap((p) => p.open.map((r) => r.seed)),
+      columns: logicals === false ? [{ table: 'LvlPrest', col: 'Logicals' }] : undefined,
+    });
   }
 
   // --- Automap ------------------------------------------------------------------------------------------------------
