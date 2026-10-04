@@ -519,7 +519,7 @@ export class McpSession {
 
   t_add_object(a: Record<string, unknown>): ToolResult {
     const { map, doc } = this.need();
-    const o: Ds1Object = { type: int(a.type, 'type', 1, 2), id: int(a.id, 'id', 0, 9999), x: int(a.x, 'x', 0, map.ds1.width * 5 - 1), y: int(a.y, 'y', 0, map.ds1.height * 5 - 1), flags: 0, path: [] };
+    const o: Ds1Object = { type: int(a.type, 'type', 1, 2), id: int(a.id, 'id', -600, 9999), x: int(a.x, 'x', 0, map.ds1.width * 5 - 1), y: int(a.y, 'y', 0, map.ds1.height * 5 - 1), flags: 0, path: [] };
     doc.setObjects([...map.ds1.objects, o], `Add ${this.gd.objectName(map.ds1.act, o.type, o.id)}`);
     return text(`Added #${map.ds1.objects.length - 1} ${this.gd.objectName(map.ds1.act, o.type, o.id)} at sub-tile ${o.x},${o.y}.`);
   }
