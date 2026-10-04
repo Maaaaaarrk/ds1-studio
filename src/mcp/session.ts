@@ -11,7 +11,8 @@ import { specialTileInfo } from '../game/specialTiles';
 import { noSpawnPlan, presetRooms, roomAt, roomRegions, spawns, UNWALKABLE, type PresetRoom, type RoomRegions } from '../game/spawnRegions';
 import { OBJECTS_PER_ACT } from '../game/objectCatalog';
 import type { Sprite } from '../game/sprites';
-import { buildScene, type Scene } from '../render/scene';
+import { buildScene, walkability, type Scene } from '../render/scene';
+import { spawnLevelOf, spawnOverlay, walkableOverlay, type MapOverlay } from '../game/mapOverlays';
 import { exportSize } from '../render/exportImage';
 import type { SaveTarget } from '../vfs/save';
 import { normalizePath } from '../vfs/vfs';
@@ -41,7 +42,7 @@ export interface SessionHost {
   /** Lists the mod folders again (files added or removed since the server started). */
   refresh?: () => Promise<void>;
   /** PNG of part of the map (base64), or null when rendering isn't available. */
-  render?: (scene: Scene, objects: Ds1Object[], sprites: Map<string, Sprite>, map: OpenMap, area: CellRect | null, scale: number, withObjects: boolean, specials: boolean) => Promise<string>;
+  render?: (scene: Scene, objects: Ds1Object[], sprites: Map<string, Sprite>, map: OpenMap, area: CellRect | null, scale: number, withObjects: boolean, specials: boolean, overlay?: MapOverlay | null) => Promise<string>;
 }
 
 class ToolError extends Error {}
@@ -282,6 +283,12 @@ export const TOOLS: ToolDef[] = [
         scale: { type: 'number', description: '1 = game pixels, 0.5 = half…' },
         objects: { type: 'boolean', description: 'Draw object sprites (default true).' },
         special_tiles: { type: 'boolean', description: 'Also draw special tiles (orientation 10/11) that have graphics, such as a warp’s arch (default false; drawn last, over the rest).' },
+        overlay: {
+          type: 'string',
+          enum: ['walkable', 'spawn'],
+          description:
+            'Colour the map sub-tile by sub-tile, with a legend: "walkable" = where players can walk (green), monsters only (yellow, flag 0x08) or blocked (red; tile flag 0x01, the cell’s unwalkable bit); "spawn" = where random monsters can be placed (green) and why not elsewhere: blocked, node region, room with a level warp, or the level spawns none (LvlPrest Populate, Levels MonDen).',
+        },
       },
     },
   },
@@ -788,8 +795,15 @@ export class McpSession {
         const s = await this.gd.objectSprite(map.ds1.act, o.type, o.id);
         if (s) sprites.set(k, s);
       }
-    const data = await this.host.render!(this.scene(), map.ds1.objects, sprites, map, area, scale, a.objects !== false, a.special_tiles === true);
-    return { content: [{ type: 'image', data, mimeType: 'image/jpeg' }, { type: 'text', text: `Rendered ${area ? `${r.x0},${r.y0}-${r.x1},${r.y1}` : 'the whole map'} at ${Math.round(scale * 100)}%.` }] };
+    const scene = this.scene();
+    if (a.overlay !== undefined && a.overlay !== 'walkable' && a.overlay !== 'spawn') fail('overlay must be "walkable" or "spawn".');
+    const flags = a.overlay ? walkability(map.ds1, scene, map.lib) : null;
+    const overlay = !flags ? null : a.overlay === 'walkable' ? walkableOverlay(map.ds1, flags) : spawnOverlay(map.ds1, flags, spawnLevelOf(this.gd, map));
+    const data = await this.host.render!(scene, map.ds1.objects, sprites, map, area, scale, a.objects !== false, a.special_tiles === true, overlay);
+    const legend = overlay
+      ? ` ${overlay.title}: ${overlay.classes.map((c, i) => (overlay.counts[i] ? `${c.label} ${Math.round(overlay.counts[i] / 25)} tiles²` : '')).filter(Boolean).join(', ')}. ${overlay.notes.join(' ')}`
+      : '';
+    return { content: [{ type: 'image', data, mimeType: 'image/jpeg' }, { type: 'text', text: `Rendered ${area ? `${r.x0},${r.y0}-${r.x1},${r.y1}` : 'the whole map'} at ${Math.round(scale * 100)}%.${legend}` }] };
   }
 
   async t_save_map(a: Record<string, unknown>): Promise<ToolResult> {

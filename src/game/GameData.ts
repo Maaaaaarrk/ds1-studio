@@ -29,6 +29,16 @@ export interface PresetInfo {
   populate?: boolean;
 }
 
+/** A level's random-monster settings (Levels.txt), for the monster spawn overlay. */
+export interface LevelSpawnInfo {
+  id: number;
+  name: string;
+  /** MonDen for Normal, Nightmare and Hell: 0 = no random monsters on that difficulty. */
+  monDen: [number, number, number];
+  /** Monster types listed (mon1-25, then nmon1-25 for Nightmare and Hell). */
+  monsters: [number, number];
+}
+
 export type Dt1Source = 'lvlprest' | 'guessed' | 'embedded' | 'manual';
 
 export interface Dt1Resolution {
@@ -50,6 +60,7 @@ export class GameData {
   objectPresets: Int32Array[] | null = null;
   private levelTypeById = new Map<number, number>();
   private levelPalById = new Map<number, number>();
+  private levelSpawnById = new Map<number, LevelSpawnInfo>();
   readonly lvlTypes: LvlTypeInfo[] = [];
   readonly warnings: string[] = [];
   /** "act:type:id" -> name and sprite recipe, from the game's own tables (acts 1-based; see objectCatalog). */
@@ -115,6 +126,13 @@ export class GameData {
       if (!Number.isFinite(id)) continue;
       gd.levelTypeById.set(id, Number(row['LevelType']));
       gd.levelPalById.set(id, Number(row['Pal']) || 0);
+      const listed = (prefix: string) => Array.from({ length: 25 }, (_, i) => row[`${prefix}${i + 1}`]).filter((m) => m && m !== '0').length;
+      gd.levelSpawnById.set(id, {
+        id,
+        name: row['Name'] ?? '',
+        monDen: [Number(row['MonDen']) || 0, Number(row['MonDen(N)']) || 0, Number(row['MonDen(H)']) || 0],
+        monsters: [listed('mon'), listed('nmon')],
+      });
     }
     for (const row of prest?.rows ?? []) {
       const info: PresetInfo = {
@@ -286,6 +304,11 @@ export class GameData {
   levelPal(levelId: number): number | null {
     const p = this.levelPalById.get(levelId);
     return p === undefined ? null : Math.min(4, Math.max(0, p));
+  }
+
+  /** A level's random-monster settings (Levels.txt MonDen and monster lists), or null when it has no row. */
+  levelSpawn(levelId: number): LevelSpawnInfo | null {
+    return this.levelSpawnById.get(levelId) ?? null;
   }
 
   /** The levels (Levels.txt Id > 0) whose LevelType is this type. */

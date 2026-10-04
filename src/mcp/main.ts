@@ -20,8 +20,8 @@ const toBase64 = (blob: Blob) =>
     r.readAsDataURL(blob);
   });
 
-const render: SessionHost['render'] = async (scene, objects, sprites, map, area, scale, withObjects, specials) =>
-  toBase64(await renderMapImage(scene, objects, sprites, map.palette, map.ds1.width, map.ds1.height, { area, scale, objects: withObjects, specials, visible: () => true, format: 'jpeg' }));
+const render: SessionHost['render'] = async (scene, objects, sprites, map, area, scale, withObjects, specials, overlay) =>
+  toBase64(await renderMapImage(scene, objects, sprites, map.palette, map.ds1.width, map.ds1.height, { area, scale, objects: withObjects, specials, overlay, visible: () => true, format: 'jpeg' }));
 
 export async function startMcp(): Promise<void> {
   // The game data loads on the first tool call (with the folders chosen in the app), so the handshake is instant.

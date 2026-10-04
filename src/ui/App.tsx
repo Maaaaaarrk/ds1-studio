@@ -63,6 +63,8 @@ import {
   EyeOff,
   Settings,
   Type as TypeIcon,
+  Route,
+  Skull,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ds1FileToDt1Path, EMPTY_CELL, isEmptyCell, parseDs1, withTile, writeDs1, WRITE_VERSION, type Ds1, type Ds1Object, type TileCell, type WallCell } from '../formats/ds1';
@@ -79,7 +81,7 @@ import { loadPresets, presetPath, presetToClipboard, serializePreset, suggestPre
 import { buildPresetPackage, planPresetImport, type PresetImportPlan } from '../game/presetPackage';
 import { layerKey, layerLabel, MapDocument, type Brush, type CellEdit, type LayerRef, type FileHistoryChange } from '../game/MapDocument';
 import { drawnPalettes, guessDrawnAct, openMap, refreshPalette, rememberPalette, setViewPalette, withPalette, type MapOverride, type OpenMap } from '../game/openMap';
-import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, worldToSubTile, type DrawItem } from '../render/scene';
+import { buildScene, cellToWorld, hitTest, sameItem, subTileToWorld, tilesAt, walkability, worldToSubTile, type DrawItem } from '../render/scene';
 import { canPickFolders, loadFromDevServer, sourcesFromDirectory } from '../vfs/loaders';
 import { devServerSaveTarget, directorySaveTarget, downloadFile, exportBytes, importMany, importNamed, type SaveTarget } from '../vfs/save';
 import { LayeredFs, normalizePath, type FileSource } from '../vfs/vfs';
@@ -157,6 +159,8 @@ import { arrivalProblem, arrivalText } from '../game/arrival';
 import { readAutomapRows, type AutomapSource } from '../game/automapImport';
 import { AutomapImportDialog } from './AutomapImport';
 import { AREA_BANDS, areaColour, walkableArea } from '../game/walkArea';
+import { spawnLevelOf, spawnOverlay, walkableOverlay, type OverlayKind } from '../game/mapOverlays';
+import { OverviewLegend } from './OverviewLegend';
 import { isBuiltinPath, PLACEABLE_SPECIALS, SPECIAL_TILES_DT1, specialTileInfo } from '../game/specialTiles';
 import { floodRegion, keyOf, objectInRect, paintEdits, rectCells, rerollEdits, stackPaintEdits, type TileKey } from '../game/editTools';
 import { addRecentMap, pinnedTiles, recentMaps, recentTiles, reopenLast, setReopenLast, togglePinned, noteTileUse, type RecentMap } from '../app/prefs';
@@ -1650,12 +1654,22 @@ export function App() {
     const c = selection && isSingleCell(selection) ? keyOf(activeLayer, doc.cell(activeLayer, selection.x0, selection.y0)) : null;
     return c ?? (brush ? { ...brush, orientation: brushOrientation(activeLayer, brush) } : null);
   }, [doc, dialog, selection, activeLayer, brush]);
+  /** A colour-coded overview of the map (walkable sub-tiles or monster spawns), for the view and image export. */
+  const overviewOf = useCallback(
+    (kind: OverlayKind | null) => {
+      if (!kind || !map || !scene || !gd) return null;
+      const flags = walkability(map.ds1, scene, map.lib);
+      return kind === 'walkable' ? walkableOverlay(map.ds1, flags) : spawnOverlay(map.ds1, flags, spawnLevelOf(gd, map));
+    },
+    [map, scene, gd],
+  );
+  const overview = useMemo(() => overviewOf(visibility.overview), [overviewOf, visibility.overview]);
   const exportImage = useCallback(
-    async (o: { area: CellRect | null; scale: number; objects: boolean }) => {
+    async ({ overview: kind, ...o }: { area: CellRect | null; scale: number; objects: boolean; overview: OverlayKind | null }) => {
       if (!doc || !map || !scene) return;
       setExportingImage(true);
       try {
-        const blob = await renderMapImage(scene, doc.ds1.objects, sprites, map.palette, doc.ds1.width, doc.ds1.height, { ...o, visible: (it) => isVisible(it, visibility) });
+        const blob = await renderMapImage(scene, doc.ds1.objects, sprites, map.palette, doc.ds1.width, doc.ds1.height, { ...o, overlay: overviewOf(kind), visible: (it) => isVisible(it, visibility) });
         const where = await exportBytes(`${doc.path.split('/').pop()!.replace(/\.ds1$/i, '')}.png`, new Uint8Array(await blob.arrayBuffer()));
         if (where) notify(`Exported ${where}`);
         setDialog(null);
@@ -1665,7 +1679,7 @@ export function App() {
         setExportingImage(false);
       }
     },
-    [doc, map, scene, sprites, visibility, notify],
+    [doc, map, scene, sprites, visibility, notify, overviewOf],
   );
   const setObjects = useCallback(
     (next: Ds1Object[]) => {
@@ -3832,6 +3846,8 @@ export function App() {
           label: 'Show',
           items: [
             { label: 'Walkable area', icon: <Footprints />, onClick: () => setPrefs({ showWalkArea: !prefs.showWalkArea }), active: prefs.showWalkArea, disabled: noMap, size: 'sm', title: 'The walkable area box in the corner of the map (tiles² a player can stand on)' },
+            { label: 'Walkable', icon: <Route />, onClick: () => setVisibility((v) => ({ ...v, overview: v.overview === 'walkable' ? null : 'walkable' })), active: visibility.overview === 'walkable', disabled: noMap, size: 'sm', title: 'Colour where players can walk (green), where only monsters can (yellow) and what is blocked (red), sub-tile by sub-tile' },
+            { label: 'Spawns', icon: <Skull />, onClick: () => setVisibility((v) => ({ ...v, overview: v.overview === 'spawn' ? null : 'spawn' })), active: visibility.overview === 'spawn', disabled: noMap, size: 'sm', title: 'Colour where random monsters can spawn (green), and why not elsewhere: blocked, node regions, rooms with a level warp, or a level that spawns none' },
             { label: 'Grid', icon: <Grid3x3 />, onClick: () => setVisibility((v) => ({ ...v, grid: !v.grid })), active: visibility.grid, disabled: noMap, size: 'sm', shortcut: kb['view.grid'] },
             { label: 'Rooms 8×8', icon: <LayoutGrid />, onClick: () => setVisibility((v) => ({ ...v, rooms: !v.rooms })), active: visibility.rooms, disabled: noMap, size: 'sm', shortcut: kb['view.rooms'], title: 'Show the 8×8-tile rooms the game builds the level from' },
             { label: 'Minimap', icon: <MapPinned />, onClick: () => setVisibility((v) => ({ ...v, minimap: !v.minimap })), active: visibility.minimap, disabled: noMap, size: 'sm', shortcut: kb['view.minimap'], title: 'Overview of the whole map in the corner: click it to move there' },
@@ -4150,6 +4166,7 @@ export function App() {
         <div className="stage-map">
         {modeAlert && <div className="mode-alert" role="status" aria-live="polite">{modeAlert}</div>}
         {map && scene && visibility.walkable && <WalkLegend floating />}
+        {overview && <OverviewLegend overlay={overview} />}
         {map && scene && walkArea !== null && prefs.showWalkArea && (() => {
           const { rgb, band } = areaColour(walkArea);
           const c = `rgb(${rgb.join(',')})`;
@@ -4236,6 +4253,7 @@ export function App() {
             walkBrush={visibility.walkable ? { size: walkBrush.size, mode: walkBrush.mode } : null}
             light={visibility.light ? lightMultiplier(lightDraft ?? levelLight) : null}
             playerLight={playerLight}
+            overview={overview}
           />
         ) : (
           <div className="empty-stage">
@@ -4756,7 +4774,7 @@ export function App() {
         />
       )}
       {dialog === 'image' && doc && (
-        <ExportImageDialog width={doc.ds1.width} height={doc.ds1.height} selection={selection && !isSingleCell(selection) ? selection : null} busy={exportingImage} onExport={(o) => void exportImage(o)} onClose={() => setDialog(null)} />
+        <ExportImageDialog width={doc.ds1.width} height={doc.ds1.height} selection={selection && !isSingleCell(selection) ? selection : null} busy={exportingImage} overview={visibility.overview} onExport={(o) => void exportImage(o)} onClose={() => setDialog(null)} />
       )}
       {recoveryOffer && map && recoveryOffer.path.toLowerCase() === map.path.toLowerCase() && (
         <Modal title="Unsaved changes were kept" onClose={() => setRecoveryOffer(null)}>

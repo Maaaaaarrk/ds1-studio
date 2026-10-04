@@ -150,5 +150,9 @@ the exact setup command for Claude Code and the JSON for Claude Desktop.
 - `regions` and `no_spawn_area` follow how the game picks where random monsters go in a preset
   (`src/game/spawnRegions.ts`): 8×8 rooms split into regions by the first wall layer, a region whose seed has a hidden
   first-layer floor is a node and gets no monsters (LvlPrest Logicals=1).
+- `render_map` `overlay: "walkable" | "spawn"` and the editor's View → Show → Walkable / Spawns (and Export picture's
+  Colour choice) share `src/game/mapOverlays.ts` (which sub-tile gets which colour: `walkability` for the flags, the
+  spawn regions, LvlPrest Populate/Logicals and Levels.txt MonDen and monster lists) and `src/render/overlay.ts` (the
+  canvas paths and the legend drawn into pictures).
 - `test/mcp.test.ts` drives the protocol and the tools in Node. End to end: `cargo build --release --features
   tauri/custom-protocol` (as the installers do), then speak JSON-RPC to `ds1-studio.exe --mcp`.
