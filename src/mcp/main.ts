@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { GameData } from '../game/GameData';
 import { renderMapImage } from '../render/exportImage';
-import { getConfig, loadFromTauri, tauriSaveTarget } from '../vfs/tauri';
+import { getConfig, loadFromTauri, refreshLooseFolders, tauriSaveTarget } from '../vfs/tauri';
 import { handleLine } from './protocol';
 import { McpSession, type SessionHost } from './session';
 
@@ -31,7 +31,11 @@ export async function startMcp(): Promise<void> {
       const config = await getConfig();
       if (!config.gameDir) throw new Error('DS1 Studio has no Diablo II folder yet: open DS1 Studio once and choose your folders.');
       const gd = await GameData.load(await loadFromTauri(config));
-      return new McpSession(gd, { saveTarget: tauriSaveTarget(config), render });
+      // Files added, changed or removed in the mod folders while the server runs (by scripts, the editor…).
+      const refresh = async () => {
+        for (const p of await refreshLooseFolders(gd.fs)) if (/\.dt1$/i.test(p)) gd.forgetDt1(p);
+      };
+      return new McpSession(gd, { saveTarget: tauriSaveTarget(config), render, refresh });
     })().catch((e) => {
       loading = null;
       throw e;

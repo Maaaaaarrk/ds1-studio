@@ -36,11 +36,20 @@ export interface ToolDef {
 /** Things only the host (the hidden app window) can do. */
 export interface SessionHost {
   saveTarget: SaveTarget | null;
+  /** Lists the mod folders again (files added or removed since the server started). */
+  refresh?: () => Promise<void>;
   /** PNG of part of the map (base64), or null when rendering isn't available. */
   render?: (scene: Scene, objects: Ds1Object[], sprites: Map<string, Sprite>, map: OpenMap, area: CellRect | null, scale: number, withObjects: boolean) => Promise<string>;
 }
 
 class ToolError extends Error {}
+
+/** The message of anything thrown: native calls reject with a plain string, not an Error. */
+export const errorText = (e: unknown): string => (e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e) ?? String(e));
+
+/** Tools that look up files: the mod folders are listed again before them. */
+const LISTS_FILES = new Set(['list_maps', 'open_map', 'new_map', 'check_map']);
+
 const fail = (msg: string): never => {
   throw new ToolError(msg);
 };
@@ -246,9 +255,10 @@ export class McpSession {
     try {
       const fn = (this as unknown as Record<string, (a: Record<string, unknown>) => Promise<ToolResult> | ToolResult>)[`t_${name}`];
       if (!fn || !TOOLS.some((t) => t.name === name)) return fail(`Unknown tool "${name}".`);
+      if (LISTS_FILES.has(name)) await this.host.refresh?.();
       return await fn.call(this, args);
     } catch (e) {
-      return { content: [{ type: 'text', text: e instanceof ToolError ? e.message : `Error: ${(e as Error).message}` }], isError: true };
+      return { content: [{ type: 'text', text: e instanceof ToolError ? e.message : `Error: ${errorText(e)}` }], isError: true };
     }
   }
 

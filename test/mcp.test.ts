@@ -39,6 +39,29 @@ describe('MCP list_maps', () => {
   });
 });
 
+describe('MCP file list and errors', () => {
+  it('lists the mod folders again before looking up files, and reports native errors by their message', async () => {
+    const { LooseSource } = await import('../src/vfs/vfs');
+    const files = new Map<string, () => Promise<Uint8Array>>([['data/global/tiles/act1/a.ds1', () => Promise.reject('The system cannot find the file specified. (os error 2)')]]);
+    const src = new LooseSource('mod', files);
+    const fs = new LayeredFs([src]);
+    let refreshed = 0;
+    const s = new McpSession({ fs } as unknown as GameData, {
+      saveTarget: null,
+      refresh: async () => {
+        refreshed++;
+        src.replaceFiles(new Map([...files, ['data/global/tiles/act1/b.ds1', async () => new Uint8Array()]]));
+      },
+    });
+    expect(textOf(await s.call('list_maps', {}))).toMatch(/2 maps:[\s\S]*b\.ds1/);
+    expect(refreshed).toBe(1);
+    const r = await s.call('open_map', { path: 'data/global/tiles/act1/a.ds1' });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe('Error: The system cannot find the file specified. (os error 2)');
+    expect(refreshed).toBe(2);
+  });
+});
+
 describe.runIf(hasD2)('MCP session', () => {
   let s: McpSession;
   const saved = new Map<string, Uint8Array>();
