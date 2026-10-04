@@ -2,13 +2,13 @@ import { automapLevelFor, GAME_AUTOMAP_LEVELS, parseAutomap, unknownAutomapLevel
 import { decodeTile, Orientation } from '../formats/dt1';
 import { parseTxt, type TxtTable } from '../formats/txt';
 import { SubTileFlag, walkability, type Scene } from '../render/scene';
-import { normalizePath } from '../vfs/vfs';
+import { MpqSource, normalizePath } from '../vfs/vfs';
 import { GameData, TileLibrary } from './GameData';
 import type { OpenMap } from './openMap';
 import { isBuiltinPath } from './specialTiles';
 import { clashingDt1s, duplicateDt1s, mixedVersions } from './duplicateDt1s';
 import { findPops, popProblems } from './pops';
-import { ENTRY_IMAGE_DIR, TOWNS, verifyInGame } from './addToGame';
+import { ENTRY_IMAGE_DIR, levelAct, TOWNS, verifyInGame } from './addToGame';
 import { ACT_TOWNS, exitProblems } from './exits';
 import { loadTable } from './levelTables';
 import { invalidAutomapRows } from './automapSafety';
@@ -129,6 +129,9 @@ async function table(gd: GameData, name: string): Promise<TxtTable | null> {
 export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap?: { pieces: AutomapPiece[] }, kept?: (key: string) => boolean): Promise<CheckResult[]> {
   const out: CheckResult[] = [];
   const { ds1, lib } = map;
+  // The act a library's folder names: only trusted for the game's and the mod's archived files. A loose file in an
+  // act folder may have been made or recoloured for another palette (PD2's new Act 5 levels), so its art decides.
+  const folderAct = (path: string) => (gd.fs.sources.find((s) => s.has(path)) instanceof MpqSource ? dt1Act(path) : null);
 
   // --- Tiles -------------------------------------------------------------------------------------------------------
   const notFound = lib.loaded.filter((l) => !l.found && !isBuiltinPath(l.path));
@@ -331,17 +334,22 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
         if (!l.found || isBuiltinPath(l.path)) continue;
         const dt1 = await gd.dt1(l.path).catch(() => null);
         if (!dt1 || !dt1.tiles.some((t) => decodeTile(t)?.pixels.some((px) => px && !a0.usable[px]))) continue;
-        const act = dt1Act(l.path) ?? guessDrawnAct(dt1.tiles, await drawnPalettes(gd));
+        const act = folderAct(l.path) ?? guessDrawnAct(dt1.tiles, await drawnPalettes(gd));
         if (act === null || act > 4) return undefined;
         acts.add(act);
       }
       return acts.size === 0 ? null : acts.size === 1 ? [...acts][0] : undefined;
     })();
+    // Levels the mod's own MPQ doesn't list (added in a loose Levels.txt): PD2 draws new Act 5 ones in the Act 5 palette.
+    const modLevels = await modArchiveTable(gd.fs, 'Levels.txt');
+    const modLevelIds = modLevels && !modLevels.inUse ? new Set(modLevels.table.rows.map((r) => Number(r['Id']))) : null;
+    const isNewLevel = (id: number) => !!modLevelIds && !modLevelIds.has(id);
     const issues = p2 && l2 && t2
       ? verifyInGame({ prest: p2, levels: l2, types: t2 }, map.path.replace(/^data\/global\/tiles\//i, ''), ds1, {
           entryImageExists: (name) => !!gd.fs.locate(normalizePath(`${ENTRY_IMAGE_DIR}${name}.dc6`)),
           kept,
           tilesAct,
+          isNewLevel,
         })
       : [];
     // Every too-long path together, so one dialog renames them all.
@@ -390,7 +398,8 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
         // (red, purple, cyan patches). Act 0 libraries use only the colours every act shares.
         {
           const pal = Number(level['Pal']);
-          const palAct = pal === 5 ? 4 : Math.min(4, Math.max(0, pal));
+          // A new level in the Act 5 slot: PD2 was seen drawing it with the Act 5 palette whatever its Pal.
+          const palAct = levelAct(levelId) === 4 && isNewLevel(levelId) ? 4 : pal === 5 ? 4 : Math.min(4, Math.max(0, pal));
           const a0 = await loadAct0Palette(gd.fs).catch(() => null);
           let pals: Palette[] | null = null;
           const actPalettes = async () => (pals ??= await drawnPalettes(gd));
@@ -401,7 +410,7 @@ export async function checkMap(gd: GameData, map: OpenMap, scene: Scene, automap
               const dt1 = await gd.dt1(l.path).catch(() => null);
               if (!dt1) continue;
               // Drawn for this level's act (by its folder, else by its art): its colours are right here.
-              if ((dt1Act(l.path) ?? guessDrawnAct(dt1.tiles, await actPalettes())) === palAct) continue;
+              if ((folderAct(l.path) ?? guessDrawnAct(dt1.tiles, await actPalettes())) === palAct) continue;
               let bad = 0, all = 0;
               for (const t of dt1.tiles) {
                 const img = decodeTile(t);
